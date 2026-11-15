@@ -17,7 +17,7 @@ let onWait = null
 export const setWaitHandler = (fn) => { onWait = fn }
 
 export function sfFetch(url, opts = {}) {
-  const gap = SLOW.test(url) ? 600 : 120
+  const gap = SLOW.test(url) ? 1000 : 120
   const run = async () => {
     // Nach einem 429 sperrt Scryfall kurz → lange Pausen statt schneller Wiederholungen
     const pauses = [5000, 30000, 60000, 60000]
