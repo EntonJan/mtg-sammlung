@@ -7,6 +7,7 @@ import DeckStats from './DeckStats'
 import DeckHand from './DeckHand'
 import CollectionView from './CollectionView'
 import DeckFetch from './DeckFetch'
+import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
 import { catsOf, tagKey } from '../categories'
 
@@ -29,8 +30,11 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onRename
     .sort((a, b) => a.card.cmc - b.card.cmc || a.card.name.localeCompare(b.card.name)), [deck.entries, cards])
 
   const cmdKeys = new Set(deck.commanders)
+  const poolKeys = new Set(deck.pool || [])
   const commanders = rows.filter((r) => cmdKeys.has(r.key))
-  const rest = rows.filter((r) => !cmdKeys.has(r.key))
+  const rest = rows.filter((r) => !cmdKeys.has(r.key) && !poolKeys.has(r.key))
+  const poolRest = rows.filter((r) => poolKeys.has(r.key) && !cmdKeys.has(r.key))
+  const togglePool = (key) => onUpdate({ pool: poolKeys.has(key) ? [...poolKeys].filter((k) => k !== key) : [...poolKeys, key] })
 
   const groups = useMemo(() => {
     const m = {}
@@ -50,7 +54,8 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onRename
 
   const count = rows.reduce((s, r) => s + r.qty, 0)
   const value = rows.reduce((s, r) => s + (r.price ?? 0) * r.qty, 0)
-  const identity = [...new Set(commanders.flatMap((r) => r.card.ci))]
+  // Farbidentität: aktive Commander + alle Pool-Commander (das Deck muss zu jeder Kombination passen)
+  const identity = [...new Set([...commanders, ...poolRest].flatMap((r) => r.card.ci))]
 
   // Commander-Hinweise: Singleton und Farbidentität
   const warnings = []
@@ -110,6 +115,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onRename
       {tab === 'cats' && <DeckCategories deck={deck} rows={rows} onUpdate={onUpdate} />}
 
       {tab === 'list' && <>
+      <CommanderPool deck={deck} rows={rows} onUpdate={onUpdate} onOpen={onOpen} />
       <DeckFetch deck={deck} entries={entries} decks={decks} cards={cards} onMove={onMove} />
       {rows.length > 0 && (
         <div className="seg seg-small">
@@ -126,11 +132,14 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onRename
       )}
 
       <div className="deck-cols">
+        {poolRest.length > 0 && (
+          <Group gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} />
+        )}
         {commanders.length > 0 && (
-          <Group label="Commander" rows={commanders} deck={deck} cmd onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
+          <Group label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
         )}
         {groups.map((g) => (
-          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
+          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
         ))}
       </div>
       </>}
@@ -155,7 +164,8 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onRename
   )
 }
 
-function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate }) {
+function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool }) {
+  const pool = new Set(deck.pool || [])
   const deckId = deck.id
   const tags = deck.tags || {}
   const n = rows.reduce((s, r) => s + r.qty, 0)
@@ -177,6 +187,10 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
             {(cmd || /Legendary/.test(r.card.type) || /can be your commander/.test(r.card.text || '')) && (
               <button className={`mini ${cmd ? 'on' : ''}`} title={cmd ? 'Kein Commander mehr' : 'Als Commander festlegen'}
                 onClick={() => onToggleCommander(r.key)}>★</button>
+            )}
+            {(cmd || /Legendary/.test(r.card.type) || /can be your commander/.test(r.card.text || '')) && (
+              <button className={`mini ${pool.has(r.key) ? 'on' : ''}`} title={pool.has(r.key) ? 'Aus Commander-Pool entfernen' : 'In den Commander-Pool (Würfeln)'}
+                onClick={() => togglePool(r.key)}>🎲</button>
             )}
             <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
             <button className="mini" title="1 Exemplar zurück in die Sammlung"

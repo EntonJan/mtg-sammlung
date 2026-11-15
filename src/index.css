@@ -386,3 +386,16 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .fetch-item { padding: 6px; border-bottom: 1px solid var(--line); }
 .fetch-item:last-child { border-bottom: none; }
 .fetch-sources { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Commander-Pool */
+.pool { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; }
+.pool-groups { display: flex; gap: 18px; flex-wrap: wrap; }
+.pool-group { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+.pool-card { font-size: 14px; padding: 3px 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.pool-card:hover { background: var(--panel2); }
+.pool-card.active { border-color: var(--accent); }
+.pool-card.rolled { background: #3a3220; }
+.pool-result { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.pool-imgs { display: flex; gap: 10px; flex-wrap: wrap; }
+.pool-imgs img { width: 180px; aspect-ratio: 488 / 680; border-radius: 4.75% / 3.5%; background: var(--panel2); }
+.pool-imgs img.spin { filter: blur(1px) brightness(.8); }

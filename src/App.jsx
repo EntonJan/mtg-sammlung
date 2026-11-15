@@ -174,7 +174,7 @@ function Main({ user }) {
       const d = nd[from]
       const entriesNext = bump(d.entries, id, finish, -qty)
       const k = entryKey(id, finish)
-      nd[from] = { ...d, entries: entriesNext, commanders: entriesNext[k] ? d.commanders : d.commanders.filter((c) => c !== k) }
+      nd[from] = { ...d, entries: entriesNext, commanders: entriesNext[k] ? d.commanders : d.commanders.filter((c) => c !== k), pool: entriesNext[k] ? d.pool : (d.pool || []).filter((c) => c !== k) }
       changedDecks.push(from)
     }
     if (to === 'collection') ne = bump(ne, id, finish, qty)
