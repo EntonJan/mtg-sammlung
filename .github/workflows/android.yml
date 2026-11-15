@@ -1,0 +1,52 @@
+name: Android-App bauen
+
+# Baut bei jedem Push auf main eine APK und hängt sie an das Release „android-latest“.
+# Download: https://github.com/EntonJan/mtg-sammlung/releases/latest
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - run: npm ci
+      - name: Web-App für Android bauen und in das Android-Projekt kopieren
+        run: npm run build:app
+      - name: APK bauen
+        working-directory: android
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk ../mtg-sammlung.apk
+      - name: Release aktualisieren
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: Android-App (aktuell)
+          body: |
+            Aktuelle Android-Version von MTG Sammlung (Build ${{ github.run_number }}).
+            **mtg-sammlung.apk** auf dem Handy herunterladen und öffnen. Beim ersten Mal „Installation aus unbekannten Quellen“ für den Browser erlauben.
+            Anmeldung in der App mit E-Mail + App-Passwort (im Browser unter ⚙ festlegen).
+          make_latest: true
+          files: mtg-sammlung.apk
