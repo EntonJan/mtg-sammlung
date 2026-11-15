@@ -1,5 +1,7 @@
 apply plugin: 'com.android.application'
 
+def buildNumber = Integer.parseInt(System.getenv('BUILD_NUMBER') ?: '1')
+
 android {
     namespace "de.entonjan.mtgsammlung"
     compileSdk rootProject.ext.compileSdkVersion
@@ -8,8 +10,8 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Versionsnummer aus der GitHub-Action (Build-Nummer), lokal 1
-        versionCode (System.getenv("BUILD_NUMBER") ?: "1").toInteger()
-        versionName "1.0.${System.getenv("BUILD_NUMBER") ?: "0"}"
+        versionCode buildNumber
+        versionName "1.0." + buildNumber
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
