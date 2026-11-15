@@ -9,16 +9,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // Alle Scryfall-Anfragen laufen nacheinander durch EINE Warteschlange mit Mindestabstand.
 // Zu viele Anfragen beantwortet Scryfall mit 429 – ohne CORS-Header, weshalb der Browser
 // nur „Failed to fetch“ meldet. Darum: drosseln und bei Netzwerkfehlern/429 mit Pause erneut versuchen.
-const GAP = 150
+// Scryfall-Limits: allgemein ~10/s, aber /cards/collection, /cards/search u. a. nur ~2/s.
+const SLOW = /\/cards\/(collection|search|named|random|autocomplete)/
 let queue = Promise.resolve()
 let lastCall = 0
+let onWait = null
+export const setWaitHandler = (fn) => { onWait = fn }
 
 export function sfFetch(url, opts = {}) {
+  const gap = SLOW.test(url) ? 600 : 120
   const run = async () => {
-    let wait = 1000
-    for (let attempt = 0; attempt < 6; attempt++) {
+    // Nach einem 429 sperrt Scryfall kurz → lange Pausen statt schneller Wiederholungen
+    const pauses = [5000, 30000, 60000, 60000]
+    for (let attempt = 0; attempt <= pauses.length; attempt++) {
       const delta = Date.now() - lastCall
-      if (delta < GAP) await sleep(GAP - delta)
+      if (delta < gap) await sleep(gap - delta)
       lastCall = Date.now()
       try {
         const res = await fetch(url, { ...opts, headers: { Accept: 'application/json', ...(opts.headers || {}) } })
@@ -26,10 +31,12 @@ export function sfFetch(url, opts = {}) {
       } catch {
         // Netzwerk-/CORS-Fehler (meist verstecktes 429) → später erneut versuchen
       }
-      await sleep(wait)
-      wait *= 2
+      if (attempt < pauses.length) {
+        onWait?.(pauses[attempt] / 1000)
+        await sleep(pauses[attempt])
+      }
     }
-    throw new Error('Scryfall ist gerade nicht erreichbar. Bitte in einer Minute erneut versuchen.')
+    throw new Error('Scryfall blockt gerade zu viele Anfragen. Bitte in ein paar Minuten erneut importieren – bereits geladene Karten bleiben gespeichert.')
   }
   const p = queue.then(run, run)
   queue = p.catch(() => {})

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, googleProvider } from './firebase'
 import { entryKey, loadCollection, loadDecks, newDeckId, saveAll } from './store'
-import { addToCache, ensureCards, loadCardCache, refreshStalePrices } from './scryfall'
+import { addToCache, ensureCards, loadCardCache, refreshStalePrices, setWaitHandler } from './scryfall'
 import { unitPrice } from './util'
 import CollectionView from './components/CollectionView'
 import AddCards from './components/AddCards'
@@ -65,6 +65,11 @@ function Main({ user }) {
     clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(''), 2200)
   }
+
+  useEffect(() => {
+    setWaitHandler((sec) => setStatus(`Scryfall bremst – warte ${sec} Sekunden und mache dann weiter …`))
+    return () => setWaitHandler(null)
+  }, [])
 
   // Start: Sammlung + Decks aus Firestore, Kartendaten aus Cache/Scryfall
   useEffect(() => {
