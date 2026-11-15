@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, googleProvider } from './firebase'
-import { entryKey, loadCollection, loadDecks, newDeckId, saveAll, saveHistoryPoint } from './store'
+import { entryKey, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
 import { addToCache, ensureCards, loadCardCache, refreshStalePrices, resolveDeckLines, savePriceSnapshot, setWaitHandler, today } from './scryfall'
-import { groupOf, subtypesOf, unitPrice } from './util'
+import { groupOf, subtypesOf, unitPrice, wishAlarm } from './util'
 import CollectionView from './components/CollectionView'
 import AddCards from './components/AddCards'
 import ImportView from './components/ImportView'
@@ -13,6 +13,7 @@ import DeckView from './components/DeckView'
 import MatchView from './components/MatchView'
 import ValueView from './components/ValueView'
 import BinderView from './components/BinderView'
+import WishlistView from './components/WishlistView'
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -57,6 +58,7 @@ function Main({ user }) {
   const [open, setOpen] = useState(null)
   const [toast, setToast] = useState('')
   const [sideOpen, setSideOpen] = useState(false)
+  const [wishlist, setWishlistState] = useState([])
 
   // Aktueller Stand in Refs, damit schnelle Aktionen hintereinander nichts überschreiben
   const S = useRef({ entries: {}, decks: {}, chunks: 0, collectionDirty: false, dirtyDecks: new Set() })
@@ -79,15 +81,16 @@ function Main({ user }) {
     let alive = true
     ;(async () => {
       try {
-        const [{ entries: ents, chunks }, dks, cache] = await Promise.all([
-          loadCollection(user.uid), loadDecks(user.uid), loadCardCache(),
+        const [{ entries: ents, chunks }, dks, cache, wish] = await Promise.all([
+          loadCollection(user.uid), loadDecks(user.uid), loadCardCache(), loadMeta(user.uid, 'wishlist').catch(() => null),
         ])
         if (!alive) return
+        setWishlistState(wish?.items || [])
         Object.assign(S.current, { entries: ents, decks: dks, chunks })
         setEntries(ents)
         setDecks(dks)
         setCards({ ...cache })
-        const ids = [...Object.values(ents), ...Object.values(dks).flatMap((d) => Object.values(d.entries))].map((e) => e.id)
+        const ids = [...Object.values(ents), ...Object.values(dks).flatMap((d) => Object.values(d.entries)), ...(wish?.items || [])].map((e) => e.id)
         const full = await ensureCards(ids, (d, t) => alive && setStatus(`Lade Kartendaten … ${d}/${t}`))
         if (!alive) return
         setCards({ ...full })
@@ -314,6 +317,20 @@ function Main({ user }) {
     }
   }, [commit, flush])
 
+  const setWishlist = useCallback((items, newCards = []) => {
+    newCards.forEach(rememberCard)
+    setWishlistState(items)
+    saveMeta(user.uid, 'wishlist', { items }).catch((e) => { console.error(e); setSaveState('error') })
+  }, [user.uid, rememberCard])
+  const wishAlarms = useMemo(() => wishlist.filter((w) => wishAlarm(w, cards)).length, [wishlist, cards])
+  const ownedOracles = useMemo(() => {
+    const o = new Set()
+    const add = (e) => cards[e.id] && o.add(cards[e.id].oracleId)
+    Object.values(entries || {}).forEach(add)
+    Object.values(decks).forEach((d) => Object.values(d.entries).forEach(add))
+    return o
+  }, [entries, decks, cards])
+
   const freeCount = useMemo(() => Object.values(entries || {}).reduce((s, e) => s + e.qty, 0), [entries])
   // Anzahl freier Karten je Kategorie und je Untertyp (für die Sidebar)
   const { catCounts, subCounts } = useMemo(() => {
@@ -348,6 +365,9 @@ function Main({ user }) {
         <h1>MTG Sammlung</h1>
         <nav>
           <button className={view.kind === 'add' ? 'on' : ''} onClick={() => setView({ kind: 'add' })}>Hinzufügen</button>
+          <button className={view.kind === 'wish' ? 'on' : ''} onClick={() => setView({ kind: 'wish' })}>
+            Wunschliste{wishAlarms > 0 && <span className="badge">🔔 {wishAlarms}</span>}
+          </button>
           <button className={view.kind === 'value' ? 'on' : ''} onClick={() => setView({ kind: 'value' })}>Wert</button>
           <button className={view.kind === 'match' ? 'on' : ''} onClick={() => setView({ kind: 'match' })}>Was fehlt mir?</button>
           <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
@@ -399,10 +419,12 @@ function Main({ user }) {
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
+          ) : view.kind === 'wish' ? (
+            <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} />
           ) : view.kind === 'value' ? (
             <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
           ) : view.kind === 'match' ? (
-            <MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} />
+            <MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} wishlist={wishlist} setWishlist={setWishlist} />
           ) : view.kind === 'import' ? (
             <ImportView entries={entries} decks={decks} onImport={importEntries} onImportDeck={importDeck} />
           ) : (

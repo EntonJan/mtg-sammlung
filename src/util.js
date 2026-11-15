@@ -64,3 +64,9 @@ export function subtypesOf(type = '') {
   const i = front.indexOf('—')
   return i < 0 ? [] : front.slice(i + 1).trim().split(/\s+/).filter(Boolean)
 }
+
+// Wunschliste: aktueller Preis ≤ Zielpreis?
+export const wishAlarm = (w, cards) => {
+  const p = unitPrice(cards[w.id], w.finish)
+  return w.target != null && w.target !== '' && p != null && p <= Number(w.target)
+}

@@ -4,13 +4,14 @@ import { resolveDeckLines } from '../scryfall'
 import { euro } from '../util'
 
 // „Was fehlt mir?“ – fremde Deckliste gegen Sammlung und Decks abgleichen
-export default function MatchView({ entries, decks, cards, onCreateDeck }) {
+export default function MatchView({ entries, decks, cards, onCreateDeck, wishlist, setWishlist }) {
   const [text, setText] = useState('')
   const [deckName, setDeckName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [wished, setWished] = useState(null)
 
   const lines = useMemo(() => parseDecklist(text), [text])
 
@@ -121,6 +122,11 @@ export default function MatchView({ entries, decks, cards, onCreateDeck }) {
               Deck aus {sum.have} vorhandenen Karten anlegen
             </button>
             <button className="btn" disabled={!sum.missing} onClick={copy}>{copied ? 'Kopiert ✓' : 'Fehlende Karten kopieren'}</button>
+            <button className="btn" disabled={!sum.missing} onClick={() => {
+              const add = result.rows.filter((r) => r.missingQty > 0 && !wishlist.some((w) => w.id === r.card.id))
+              setWishlist([...wishlist, ...add.map((r) => ({ id: r.card.id, finish: 'normal', target: r.card.eur != null ? Math.floor(r.card.eur * 0.8 * 2) / 2 : '', added: new Date().toLocaleDateString('sv-SE') }))], add.map((r) => r.card))
+              setWished(add.length)
+            }}>{wished != null ? `${wished} auf Wunschliste ✓` : 'Fehlende auf Wunschliste'}</button>
           </div>
 
           <table className="match-table">

@@ -262,8 +262,8 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
   .owned-row { flex-wrap: wrap; }
   header { gap: 8px; padding: 8px 12px; }
   header h1 { font-size: 16px; }
-  nav { order: 3; width: 100%; }
-  nav button { flex: 1; }
+  nav { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  nav button { flex: 0 0 auto; white-space: nowrap; }
   .toolbar { padding: 10px 12px; }
   .filters { margin: 0 12px; }
   .scroller { padding: 0 8px 12px; }
@@ -411,3 +411,12 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .binder-table tr { cursor: grab; }
 .binder-table .qty { width: 40px; }
 .binders { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+/* Wunschliste */
+.wish { max-width: 1000px; }
+.badge { margin-left: 6px; font-size: 11px; background: var(--good); color: #102010; padding: 1px 6px; border-radius: 8px; }
+.wish-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.wish-result { display: flex; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.wish-result img { width: 60px; border-radius: 4px; cursor: pointer; align-self: flex-start; }
+.wish-result > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wish-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
