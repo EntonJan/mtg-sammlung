@@ -8,7 +8,7 @@
 //
 // „Schrank-Prinzip“: collection = freie Karten. Karten in Decks sind NICHT mehr in collection.
 // Besitz gesamt = collection + alle Decks.
-import { collection, doc, getDoc, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, setDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { db } from './firebase'
 
 const CHUNK = 2500
@@ -94,3 +94,23 @@ export function newDeckId() {
   return doc(collection(db, '_')).id
 }
 
+
+// Wertverlauf: ein Punkt pro Tag in users/{uid}/meta/history
+export async function loadHistory(uid) {
+  const snap = await getDoc(doc(db, 'users', uid, 'meta', 'history'))
+  return snap.exists() ? snap.data().days || {} : {}
+}
+
+export async function saveHistoryPoint(uid, day, point) {
+  await setDoc(doc(db, 'users', uid, 'meta', 'history'), { days: { [day]: point } }, { merge: true })
+}
+
+// Allgemeine Nutzerdaten (Wunschliste, Tauschordner …) in users/{uid}/meta/{name}
+export async function loadMeta(uid, name) {
+  const snap = await getDoc(doc(db, 'users', uid, 'meta', name))
+  return snap.exists() ? snap.data() : null
+}
+
+export async function saveMeta(uid, name, data) {
+  await setDoc(doc(db, 'users', uid, 'meta', name), { ...data, updatedAt: serverTimestamp() })
+}

@@ -215,3 +215,24 @@ export async function resolveDeckLines(lines, onProgress) {
   await persistCache()
   return { ok: lines.filter((l) => l.card), missing: lines.filter((l) => !l.card) }
 }
+
+// Lokale Preis-Schnappschüsse (ein Satz pro Tag, max. 35 Tage) für „größte Preissprünge“
+const SNAP_KEY = 'price-snaps-v1'
+export const today = () => new Date().toLocaleDateString('sv-SE') // YYYY-MM-DD
+
+export async function savePriceSnapshot() {
+  const cache = await loadCardCache()
+  const snaps = (await get(SNAP_KEY)) || {}
+  const day = today()
+  const snap = {}
+  for (const [id, c] of Object.entries(cache)) if (c.eur != null || c.eurFoil != null) snap[id] = [c.eur, c.eurFoil]
+  snaps[day] = snap
+  const days = Object.keys(snaps).sort()
+  while (days.length > 35) delete snaps[days.shift()]
+  await set(SNAP_KEY, snaps)
+  return snaps
+}
+
+export async function loadPriceSnapshots() {
+  return (await get(SNAP_KEY)) || {}
+}

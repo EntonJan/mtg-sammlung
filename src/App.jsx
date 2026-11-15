@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, googleProvider } from './firebase'
-import { entryKey, loadCollection, loadDecks, newDeckId, saveAll } from './store'
-import { addToCache, ensureCards, loadCardCache, refreshStalePrices, resolveDeckLines, setWaitHandler } from './scryfall'
+import { entryKey, loadCollection, loadDecks, newDeckId, saveAll, saveHistoryPoint } from './store'
+import { addToCache, ensureCards, loadCardCache, refreshStalePrices, resolveDeckLines, savePriceSnapshot, setWaitHandler, today } from './scryfall'
 import { groupOf, subtypesOf, unitPrice } from './util'
 import CollectionView from './components/CollectionView'
 import AddCards from './components/AddCards'
@@ -11,6 +11,7 @@ import CardDetail from './components/CardDetail'
 import Sidebar from './components/Sidebar'
 import DeckView from './components/DeckView'
 import MatchView from './components/MatchView'
+import ValueView from './components/ValueView'
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -94,6 +95,14 @@ function Main({ user }) {
         if (!alive) return
         setCards({ ...fresh })
         setStatus('')
+        // Tageswert für den Verlauf merken (Firestore) + Preis-Schnappschuss (lokal)
+        await savePriceSnapshot()
+        const val = (map) => Object.values(map).reduce((t, e) => t + (unitPrice(fresh[e.id], e.finish) ?? 0) * e.qty, 0)
+        const free = val(S.current.entries)
+        const inDecks = Object.values(S.current.decks).reduce((t, d) => t + val(d.entries), 0)
+        if (free + inDecks > 0) {
+          await saveHistoryPoint(user.uid, today(), { total: Math.round((free + inDecks) * 100) / 100, free: Math.round(free * 100) / 100, decks: Math.round(inDecks * 100) / 100 })
+        }
       } catch (e) {
         setStatus(`Fehler: ${e.message}`)
       }
@@ -321,6 +330,7 @@ function Main({ user }) {
         <h1>MTG Sammlung</h1>
         <nav>
           <button className={view.kind === 'add' ? 'on' : ''} onClick={() => setView({ kind: 'add' })}>Hinzufügen</button>
+          <button className={view.kind === 'value' ? 'on' : ''} onClick={() => setView({ kind: 'value' })}>Wert</button>
           <button className={view.kind === 'match' ? 'on' : ''} onClick={() => setView({ kind: 'match' })}>Was fehlt mir?</button>
           <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
         </nav>
@@ -365,6 +375,8 @@ function Main({ user }) {
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
+          ) : view.kind === 'value' ? (
+            <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
           ) : view.kind === 'match' ? (
             <MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} />
           ) : view.kind === 'import' ? (
