@@ -162,3 +162,56 @@ export async function autocomplete(q) {
   if (!res.ok) return []
   return (await res.json()).data || []
 }
+
+// Deckliste (aus parseDecklist) bei Scryfall auflösen: zuerst exaktes Printing (Set + Nummer),
+// sonst über den Namen. Liefert die Zeilen mit .card bzw. die nicht gefundenen Zeilen.
+const norm = (s) => s.toLowerCase().replace(/[’']/g, "'").trim()
+const nameMatches = (card, name) => {
+  const n = norm(name)
+  const full = norm(card.name)
+  return full === n || full.split(' // ')[0] === n || n.split(' // ')[0] === full.split(' // ')[0]
+}
+
+async function lookup(idents, onProgress, offset, total) {
+  const found = []
+  for (let i = 0; i < idents.length; i += 75) {
+    const batch = idents.slice(i, i + 75)
+    const res = await sfFetch(`${API}/cards/collection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifiers: batch.map((x) => x.ident) }),
+    })
+    if (!res.ok) throw new Error(`Scryfall-Fehler ${res.status}`)
+    const json = await res.json()
+    found.push(...(json.data || []).map(slimCard))
+    onProgress?.(offset + Math.min(i + 75, idents.length), total)
+  }
+  return found
+}
+
+export async function resolveDeckLines(lines, onProgress) {
+  await loadCardCache()
+  const total = lines.length
+  const withPrint = lines.filter((l) => l.set && l.num)
+  const printCards = await lookup(
+    withPrint.map((l) => ({ l, ident: { set: l.set, collector_number: l.num } })), onProgress, 0, total
+  )
+  for (const l of withPrint) {
+    l.card = printCards.find((c) => c.set.toLowerCase() === l.set && c.num === l.num && nameMatches(c, l.name))
+      || printCards.find((c) => c.set.toLowerCase() === l.set && c.num === l.num)
+  }
+  const byName = lines.filter((l) => !l.card)
+  const nameCards = await lookup(
+    byName.map((l) => { const n = l.name.split(' // ')[0]; return { l, ident: l.set ? { name: n, set: l.set } : { name: n } } }), onProgress, withPrint.length, total
+  )
+  for (const l of byName) l.card = nameCards.find((c) => nameMatches(c, l.name))
+  // Fallback: mit Set nicht gefunden → nur Name
+  const retry = lines.filter((l) => !l.card && l.set)
+  if (retry.length) {
+    const again = await lookup(retry.map((l) => ({ l, ident: { name: l.name.split(' // ')[0] } })), null, 0, 0)
+    for (const l of retry) l.card = again.find((c) => nameMatches(c, l.name))
+  }
+  for (const l of lines) if (l.card) memCache[l.card.id] = l.card
+  await persistCache()
+  return { ok: lines.filter((l) => l.card), missing: lines.filter((l) => !l.card) }
+}

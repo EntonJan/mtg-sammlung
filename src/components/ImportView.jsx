@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { parseManaBox } from '../csv'
+import DeckImport from './DeckImport'
 
 // ManaBox-CSV importieren: Sammlung ersetzen (Abgleich) oder hinzufügen
-export default function ImportView({ entries, hasDecks, onImport }) {
+export default function ImportView({ entries, decks, onImport, onImportDeck }) {
+  const hasDecks = Object.keys(decks).length > 0
   const [parsed, setParsed] = useState(null)
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState('')
@@ -77,6 +79,7 @@ export default function ImportView({ entries, hasDecks, onImport }) {
           </button>
         </div>
       )}
+      <DeckImport decks={decks} onImportDeck={onImportDeck} />
     </div>
   )
 }

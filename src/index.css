@@ -218,7 +218,8 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 
 /* Hinzufügen */
 .add, .import { padding: 0 0 16px; overflow-y: auto; flex: 1; }
-.import { padding: 16px; max-width: 720px; }
+.import { padding: 16px; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
+.import > h2 { margin: 0; }
 .ac { position: relative; flex: 1 1 260px; display: flex; }
 .ac .search { width: 100%; }
 .ac-list {
@@ -262,3 +263,15 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
   .modal { flex-direction: column; padding: 14px; }
   .detail-img { width: 100%; max-width: 280px; align-self: center; }
 }
+
+/* Deck-Import */
+.import-box h2 { margin: 0; font-size: 18px; }
+.import-box textarea {
+  width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+  padding: 10px; font: 13px/1.5 ui-monospace, Consolas, monospace; resize: vertical;
+}
+.import-box code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.deck-target { display: flex; gap: 8px; flex-wrap: wrap; }
+.deck-target > * { flex: 1 1 220px; }
+.ok-text { color: var(--good); }
+.warn ul { margin: 6px 0 0; padding-left: 18px; font-family: ui-monospace, Consolas, monospace; }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, googleProvider } from './firebase'
 import { entryKey, loadCollection, loadDecks, newDeckId, saveAll } from './store'
-import { addToCache, ensureCards, loadCardCache, refreshStalePrices, setWaitHandler } from './scryfall'
+import { addToCache, ensureCards, loadCardCache, refreshStalePrices, resolveDeckLines, setWaitHandler } from './scryfall'
 import { groupOf, unitPrice } from './util'
 import CollectionView from './components/CollectionView'
 import AddCards from './components/AddCards'
@@ -235,6 +235,31 @@ function Main({ user }) {
     setView({ kind: 'collection' })
   }, [commit, flush])
 
+  // Bestehendes Deck importieren: Karten neu anlegen und direkt ins Deck legen
+  const importDeck = useCallback(async (targetId, name, lines) => {
+    setStatus('Suche Karten bei Scryfall …')
+    try {
+      const { ok, missing } = await resolveDeckLines(lines, (d, t) => setStatus(`Suche Karten … ${d}/${t}`))
+      setCards((p) => { const n = { ...p }; ok.forEach((l) => { n[l.card.id] = l.card }); return n })
+      const s = S.current
+      const id = targetId || newDeckId()
+      const base = s.decks[id] || { id, name, order: Object.keys(s.decks).length, commanders: [], entries: {} }
+      let ents = base.entries
+      const cmds = new Set(base.commanders)
+      let added = 0
+      for (const l of ok) {
+        ents = bump(ents, l.card.id, l.finish, l.qty)
+        if (l.commander) cmds.add(entryKey(l.card.id, l.finish))
+        added += l.qty
+      }
+      commit({ decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds] } }, changedDecks: [id] })
+      await flush()
+      return { deckId: id, name: base.name, added, missing }
+    } finally {
+      setStatus('')
+    }
+  }, [commit, flush])
+
   const freeCount = useMemo(() => Object.values(entries || {}).reduce((s, e) => s + e.qty, 0), [entries])
   const catCounts = useMemo(() => {
     const out = {}
@@ -307,7 +332,7 @@ function Main({ user }) {
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
           ) : view.kind === 'import' ? (
-            <ImportView entries={entries} hasDecks={Object.keys(decks).length > 0} onImport={importEntries} />
+            <ImportView entries={entries} decks={decks} onImport={importEntries} onImportDeck={importDeck} />
           ) : (
             <div className="center muted">Deck nicht gefunden.</div>
           )}
