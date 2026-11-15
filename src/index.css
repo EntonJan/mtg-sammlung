@@ -428,3 +428,5 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .drag-ghost { position: fixed; top: -100px; left: -100px; background: var(--accent); color: var(--accent-ink); padding: 6px 12px; border-radius: 8px; font-weight: 700; }
 
 .de-name { margin: 0 0 4px; color: #c9c2a8; }
+
+.export { display: flex; flex-direction: column; gap: 10px; max-width: 900px; }

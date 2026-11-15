@@ -5,6 +5,7 @@ import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../
 import Mana from './Mana'
 import DeckStats from './DeckStats'
 import DeckHand from './DeckHand'
+import DeckExport from './DeckExport'
 import CollectionView from './CollectionView'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
@@ -105,13 +106,14 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       </div>
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['hand', 'Probehand']].map(([k, l]) => (
+        {[['list', 'Liste'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {tab === 'stats' && <DeckStats rows={rows} />}
       {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} />}
+      {tab === 'export' && <DeckExport deck={deck} rows={rows} commanderKeys={cmdKeys} />}
       {tab === 'cats' && <DeckCategories deck={deck} rows={rows} onUpdate={onUpdate} />}
 
       {tab === 'list' && <>
