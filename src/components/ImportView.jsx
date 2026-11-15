@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { parseManaBox } from '../csv'
 
 // ManaBox-CSV importieren: Sammlung ersetzen (Abgleich) oder hinzufügen
-export default function ImportView({ entries, onImport }) {
+export default function ImportView({ entries, hasDecks, onImport }) {
   const [parsed, setParsed] = useState(null)
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState('')
   const [mode, setMode] = useState('replace')
   const [busy, setBusy] = useState(false)
+  const [subtract, setSubtract] = useState(true)
 
   const current = Object.values(entries).reduce((s, e) => s + e.qty, 0)
 
@@ -26,7 +27,7 @@ export default function ImportView({ entries, onImport }) {
   async function run() {
     setBusy(true)
     try {
-      await onImport(parsed.entries, mode)
+      await onImport(parsed.entries, mode, subtract)
       setParsed(null)
       setFileName('')
     } catch (e) {
@@ -65,6 +66,12 @@ export default function ImportView({ entries, onImport }) {
             <input type="radio" checked={mode === 'add'} onChange={() => setMode('add')} />
             <span><b>Hinzufügen</b> – Anzahlen werden zur bestehenden Sammlung addiert (z. B. für einen Export nur neuer Karten).</span>
           </label>
+          {mode === 'replace' && hasDecks && (
+            <label className="check-line">
+              <input type="checkbox" checked={subtract} onChange={(e) => setSubtract(e.target.checked)} />
+              <span>Karten, die schon in Decks liegen, abziehen (sonst wären sie doppelt, falls du sie in ManaBox nicht ausgebucht hast)</span>
+            </label>
+          )}
           <button className="btn primary" disabled={busy} onClick={run}>
             {busy ? 'Importiere …' : 'Import starten'}
           </button>

@@ -1,56 +1,90 @@
-// Sammlung in Firestore speichern: wenige große Dokumente statt tausender Einzeldokumente
-// (schneller und spart Lese-/Schreibzugriffe im kostenlosen Firebase-Kontingent).
+// Speichern in Firestore: wenige große Dokumente statt tausender Einzeldokumente
+// (schnell und schont das kostenlose Firebase-Kontingent).
 //
 // Datenmodell (pro Nutzer):
 //   users/{uid}/collection/meta     { chunks, updatedAt, count }
 //   users/{uid}/collection/chunk_N  { items: [ "scryfallId|finish|anzahl", ... ] }
+//   users/{uid}/decks/{deckId}      { name, items: [...], commanders: ["id|finish"], order, createdAt }
 //
-// finish = normal | foil | etched. Ein Eintrag = ein Printing in einer Ausführung.
-import { doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
+// „Schrank-Prinzip“: collection = freie Karten. Karten in Decks sind NICHT mehr in collection.
+// Besitz gesamt = collection + alle Decks.
+import { collection, doc, getDoc, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { db } from './firebase'
 
 const CHUNK = 2500
 
 export const entryKey = (id, finish) => `${id}|${finish}`
 
-export async function loadCollection(uid) {
-  const metaSnap = await getDoc(doc(db, 'users', uid, 'collection', 'meta'))
-  if (!metaSnap.exists()) return {}
-  const { chunks = 0 } = metaSnap.data()
-  const snaps = await Promise.all(
-    Array.from({ length: chunks }, (_, i) => getDoc(doc(db, 'users', uid, 'collection', `chunk_${i}`)))
-  )
+const toItems = (entries) =>
+  Object.values(entries).filter((e) => e.qty > 0).map((e) => `${e.id}|${e.finish}|${e.qty}`)
+
+function fromItems(items = []) {
   const entries = {}
-  for (const s of snaps) {
-    for (const raw of s.data()?.items || []) {
-      const [id, finish, qty] = raw.split('|')
-      const q = Number(qty)
-      if (q > 0) entries[entryKey(id, finish)] = { id, finish, qty: q }
-    }
+  for (const raw of items) {
+    const [id, finish, qty] = raw.split('|')
+    const q = Number(qty)
+    if (q > 0) entries[entryKey(id, finish)] = { id, finish, qty: q }
   }
   return entries
 }
 
-export async function saveCollection(uid, entries, prevChunks = 0) {
-  const items = Object.values(entries)
-    .filter((e) => e.qty > 0)
-    .map((e) => `${e.id}|${e.finish}|${e.qty}`)
-  const chunks = Math.ceil(items.length / CHUNK)
+export async function loadCollection(uid) {
+  const metaSnap = await getDoc(doc(db, 'users', uid, 'collection', 'meta'))
+  if (!metaSnap.exists()) return { entries: {}, chunks: 0 }
+  const { chunks = 0 } = metaSnap.data()
+  const snaps = await Promise.all(
+    Array.from({ length: chunks }, (_, i) => getDoc(doc(db, 'users', uid, 'collection', `chunk_${i}`)))
+  )
+  return { entries: fromItems(snaps.flatMap((s) => s.data()?.items || [])), chunks }
+}
+
+export async function loadDecks(uid) {
+  const snap = await getDocs(collection(db, 'users', uid, 'decks'))
+  const decks = {}
+  snap.forEach((d) => {
+    const v = d.data()
+    decks[d.id] = {
+      id: d.id,
+      name: v.name || 'Unbenanntes Deck',
+      order: v.order ?? 0,
+      commanders: v.commanders || [],
+      entries: fromItems(v.items),
+    }
+  })
+  return decks
+}
+
+// Speichert Sammlung + geänderte Decks in EINEM Batch,
+// damit eine verschobene Karte nie doppelt oder gar nicht gespeichert wird.
+export async function saveAll(uid, { entries, prevChunks, decks, dirtyDecks, saveCollection }) {
   const batch = writeBatch(db)
-  for (let i = 0; i < chunks; i++) {
-    batch.set(doc(db, 'users', uid, 'collection', `chunk_${i}`), {
-      items: items.slice(i * CHUNK, (i + 1) * CHUNK),
+  let chunks = prevChunks
+  if (saveCollection) {
+    const items = toItems(entries)
+    chunks = Math.ceil(items.length / CHUNK)
+    for (let i = 0; i < chunks; i++) {
+      batch.set(doc(db, 'users', uid, 'collection', `chunk_${i}`), { items: items.slice(i * CHUNK, (i + 1) * CHUNK) })
+    }
+    for (let i = chunks; i < prevChunks; i++) batch.delete(doc(db, 'users', uid, 'collection', `chunk_${i}`))
+    batch.set(doc(db, 'users', uid, 'collection', 'meta'), { chunks, count: items.length, updatedAt: serverTimestamp() })
+  }
+  for (const id of dirtyDecks) {
+    const d = decks[id]
+    const ref = doc(db, 'users', uid, 'decks', id)
+    if (!d) batch.delete(ref)
+    else batch.set(ref, {
+      name: d.name,
+      order: d.order,
+      commanders: d.commanders,
+      items: toItems(d.entries),
+      updatedAt: serverTimestamp(),
     })
   }
-  // Überzählige alte Chunks leeren
-  for (let i = chunks; i < prevChunks; i++) {
-    batch.delete(doc(db, 'users', uid, 'collection', `chunk_${i}`))
-  }
-  batch.set(doc(db, 'users', uid, 'collection', 'meta'), {
-    chunks,
-    count: items.length,
-    updatedAt: serverTimestamp(),
-  })
   await batch.commit()
   return chunks
 }
+
+export function newDeckId() {
+  return doc(collection(db, '_')).id
+}
+

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { COLORS, COLOR_NAMES, TYPES, RARITIES, FINISH_LABEL, unitPrice, euro } from '../util'
 import Mana from './Mana'
+import { dragProps } from '../drag'
 
 const DEFAULT_FILTER = {
   name: '', text: '', type: '', rarity: '', set: '',
@@ -247,9 +248,10 @@ function VirtualList({ items, onOpen }) {
               className="row"
               style={{ transform: `translateY(${vi.start}px)`, height: vi.size }}
               onClick={() => onOpen(c)}
+              {...dragProps({ id: r.id, finish: r.finish, from: 'collection' })}
             >
               <span className="qty">{r.qty}×</span>
-              <img className="thumb" src={c.thumb} alt="" loading="lazy" />
+              <img className="thumb" src={c.thumb} alt="" loading="lazy" draggable={false} />
               <span className="row-main">
                 <span className="row-name">
                   {c.name}
@@ -305,8 +307,8 @@ function VirtualGrid({ items, onOpen }) {
             style={{ transform: `translateY(${vi.start}px)`, height: rowH, gridTemplateColumns: `repeat(${cols}, 1fr)` }}
           >
             {items.slice(vi.index * cols, vi.index * cols + cols).map((r) => (
-              <div key={r.key} className="tile" onClick={() => onOpen(r.card)}>
-                <img src={r.card.img} alt={r.card.name} loading="lazy" />
+              <div key={r.key} className="tile" onClick={() => onOpen(r.card)} {...dragProps({ id: r.id, finish: r.finish, from: 'collection' })}>
+                <img src={r.card.img} alt={r.card.name} loading="lazy" draggable={false} />
                 <span className="tile-badge">{r.qty}×</span>
                 {r.finish === 'foil' && r.printings === 1 && <span className="tile-foil">Foil</span>}
                 <span className="tile-price">{euro(r.price)}</span>
