@@ -6,6 +6,36 @@ const CACHE_KEY = 'scryfall-cards-v1'
 const PRICE_MAX_AGE = 24 * 60 * 60 * 1000 // Preise 1x täglich aktualisieren
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// Alle Scryfall-Anfragen laufen nacheinander durch EINE Warteschlange mit Mindestabstand.
+// Zu viele Anfragen beantwortet Scryfall mit 429 – ohne CORS-Header, weshalb der Browser
+// nur „Failed to fetch“ meldet. Darum: drosseln und bei Netzwerkfehlern/429 mit Pause erneut versuchen.
+const GAP = 150
+let queue = Promise.resolve()
+let lastCall = 0
+
+export function sfFetch(url, opts = {}) {
+  const run = async () => {
+    let wait = 1000
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const delta = Date.now() - lastCall
+      if (delta < GAP) await sleep(GAP - delta)
+      lastCall = Date.now()
+      try {
+        const res = await fetch(url, { ...opts, headers: { Accept: 'application/json', ...(opts.headers || {}) } })
+        if (res.status !== 429 && res.status < 500) return res
+      } catch {
+        // Netzwerk-/CORS-Fehler (meist verstecktes 429) → später erneut versuchen
+      }
+      await sleep(wait)
+      wait *= 2
+    }
+    throw new Error('Scryfall ist gerade nicht erreichbar. Bitte in einer Minute erneut versuchen.')
+  }
+  const p = queue.then(run, run)
+  queue = p.catch(() => {})
+  return p
+}
+
 // Nur die Felder speichern, die die App braucht (spart Speicher bei ~8.000 Printings)
 export function slimCard(c) {
   const face = c.card_faces?.[0] || {}
@@ -54,32 +84,48 @@ export async function fetchCards(ids, onProgress) {
   let done = 0
   for (let i = 0; i < unique.length; i += 75) {
     const batch = unique.slice(i, i + 75)
-    const res = await fetch(`${API}/cards/collection`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ identifiers: batch.map((id) => ({ id })) }),
-    })
-    if (res.status === 429) { await sleep(1000); i -= 75; continue }
-    if (!res.ok) throw new Error(`Scryfall-Fehler ${res.status}`)
+    let res
+    try {
+      res = await sfFetch(`${API}/cards/collection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifiers: batch.map((id) => ({ id })) }),
+      })
+    } catch (e) {
+      await persistCache() // Bereits geladene Karten behalten
+      throw e
+    }
+    if (!res.ok) { await persistCache(); throw new Error(`Scryfall-Fehler ${res.status}`) }
     const json = await res.json()
     for (const c of json.data || []) memCache[c.id] = slimCard(c)
     done += batch.length
     onProgress?.(done, unique.length)
-    await sleep(110) // Scryfall bittet um max. ~10 Anfragen/Sekunde
+    if ((i / 75) % 20 === 19) await persistCache() // Zwischenstand sichern
   }
   await persistCache()
   return memCache
 }
 
 // Fehlende Karten nachladen, veraltete Preise im Hintergrund aktualisieren
-export async function ensureCards(ids, onProgress) {
+let running = Promise.resolve()
+const exclusive = (fn) => { const p = running.then(fn, fn); running = p.catch(() => {}); return p }
+
+export function ensureCards(ids, onProgress) {
+  return exclusive(() => ensureCardsInner(ids, onProgress))
+}
+
+async function ensureCardsInner(ids, onProgress) {
   const cache = await loadCardCache()
   const missing = ids.filter((id) => !cache[id])
   if (missing.length) await fetchCards(missing, onProgress)
   return memCache
 }
 
-export async function refreshStalePrices(ids, onProgress) {
+export function refreshStalePrices(ids, onProgress) {
+  return exclusive(() => refreshInner(ids, onProgress))
+}
+
+async function refreshInner(ids, onProgress) {
   const cache = await loadCardCache()
   const now = Date.now()
   const stale = ids.filter((id) => !cache[id] || now - (cache[id].fetched || 0) > PRICE_MAX_AGE)
@@ -96,7 +142,7 @@ export function addToCache(card) {
 // Suche nach Karten (alle Printings) für das manuelle Hinzufügen
 export async function searchCards(query) {
   const url = `${API}/cards/search?unique=prints&order=released&q=${encodeURIComponent(query)}`
-  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  const res = await sfFetch(url)
   if (res.status === 404) return []
   if (!res.ok) throw new Error(`Scryfall-Fehler ${res.status}`)
   const json = await res.json()
@@ -105,7 +151,7 @@ export async function searchCards(query) {
 
 export async function autocomplete(q) {
   if (q.length < 2) return []
-  const res = await fetch(`${API}/cards/autocomplete?q=${encodeURIComponent(q)}`)
+  const res = await sfFetch(`${API}/cards/autocomplete?q=${encodeURIComponent(q)}`)
   if (!res.ok) return []
   return (await res.json()).data || []
 }
