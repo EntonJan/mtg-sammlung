@@ -329,7 +329,7 @@ function Main({ user }) {
           ) : deck ? (
             <DeckView
               key={deck.id}
-              deck={deck} cards={cards} onOpen={setOpen} onMove={moveCard}
+              deck={deck} cards={cards} entries={entries} onOpen={setOpen} onMove={moveCard}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}

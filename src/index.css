@@ -350,3 +350,18 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .small-curve { height: 110px; }
 .curve-bar.good { background: var(--good); }
 .sim .pip-table { margin-top: 12px; }
+
+/* Deckbau-Modus */
+.deck-split { flex: 1; min-height: 0; display: flex; }
+.deck-split > .deck { flex: 1; min-width: 0; }
+.deck-split.builder > .deck { flex: 1 1 50%; }
+.builder-pane { flex: 1 1 50%; min-width: 0; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: #151518; }
+.builder-head { display: flex; gap: 10px; align-items: baseline; padding: 12px 16px 0; flex-wrap: wrap; }
+.builder-pane .collection { min-height: 0; }
+.add-mini { color: var(--good); font-weight: 700; }
+.tile { position: relative; }
+.tile-add { position: absolute; bottom: 34px; right: 8%; background: rgba(0,0,0,.75); color: var(--good); font-weight: 700; }
+@media (max-width: 900px) {
+  .deck-split.builder { flex-direction: column; }
+  .builder-pane { border-left: none; border-top: 1px solid var(--line); min-height: 50vh; }
+}

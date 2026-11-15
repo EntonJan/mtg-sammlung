@@ -5,12 +5,13 @@ import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../
 import Mana from './Mana'
 import DeckStats from './DeckStats'
 import DeckHand from './DeckHand'
+import CollectionView from './CollectionView'
 import DeckCategories, { TagPicker } from './DeckCategories'
 import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, cards, onMove, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
+export default function DeckView({ deck, cards, entries, onMove, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
@@ -18,6 +19,8 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
   const [tab, setTab] = useState('list')
   const [groupBy, setGroupBy] = useState('type')
   const [picker, setPicker] = useState(null)
+  const [builder, setBuilder] = useState(() => { try { return localStorage.getItem('builder') === '1' } catch { return false } })
+  const toggleBuilder = () => setBuilder((b) => { try { localStorage.setItem('builder', b ? '0' : '1') } catch { /* egal */ } return !b })
 
   const rows = useMemo(() => Object.values(deck.entries)
     .filter((e) => cards[e.id])
@@ -62,6 +65,7 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
   const save = () => { setEditing(false); if (name.trim() && name.trim() !== deck.name) onRename(name.trim()) }
 
   return (
+    <div className={`deck-split ${builder ? 'builder' : ''}`}>
     <div
       className={`deck ${over ? 'over' : ''}`}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-mtg-card')) { e.preventDefault(); setOver(true) } }}
@@ -80,6 +84,9 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
           <span>Wert <b>{euro(value)}</b></span>
           {identity.length > 0 && <span>Farbidentität <b>{identity.map((c) => COLOR_NAMES[c]).join(', ')}</b></span>}
         </div>
+        <button className={`btn small ${builder ? 'active' : ''}`} onClick={toggleBuilder} title="Sammlung daneben einblenden">
+          {builder ? 'Deckbau-Modus aus' : 'Deckbau-Modus'}
+        </button>
         {confirmDel ? (
           <span className="confirm">
             Alle {count} Karten zurück in die Sammlung und Deck löschen?
@@ -125,6 +132,23 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
         ))}
       </div>
       </>}
+    </div>
+    {builder && (
+      <aside className="builder-pane">
+        <div className="builder-head">
+          <b>Sammlung</b>
+          <span className="muted small">
+            {identity.length ? `nur Farbidentität ${identity.join('')} · ` : 'kein Commander gesetzt – alle Farben · '}
+            + oder Ziehen legt 1 Exemplar ins Deck
+          </span>
+        </div>
+        <CollectionView
+          entries={entries} cards={cards} onOpen={onOpen}
+          identity={identity.length ? identity : null}
+          onQuickAdd={(r) => onMove({ id: r.id, finish: r.finish, from: 'collection' }, deck.id)}
+        />
+      </aside>
+    )}
     </div>
   )
 }

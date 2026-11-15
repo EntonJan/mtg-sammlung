@@ -15,7 +15,7 @@ function loadPref(key, fallback) {
 }
 function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* egal */ } }
 
-export default function CollectionView({ entries, cards, onOpen, cat, sub }) {
+export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd }) {
   const [f, setF] = useState(() => loadPref('filter', DEFAULT_FILTER))
   const [view, setView] = useState(() => loadPref('view', { mode: 'list' }).mode)
   const [showFilters, setShowFilters] = useState(false)
@@ -55,6 +55,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub }) {
 
     let out = rows.filter(({ card: c, finish, price }) => {
       if (cat && groupOf(c.type) !== cat) return false
+      if (identity && !c.ci.every((x) => identity.includes(x))) return false
       if (sub && !subtypesOf(c.type).includes(sub)) return false
       if (name && !c.name.toLowerCase().includes(name)) return false
       if (text && !(c.text || '').toLowerCase().includes(text) && !c.type.toLowerCase().includes(text)) return false
@@ -111,7 +112,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub }) {
     }[df.sort]
     out.sort((a, b) => dir * cmp(a, b))
     return out
-  }, [rows, df, cat, sub])
+  }, [rows, df, cat, sub, identity])
 
   const totals = useMemo(() => {
     let qty = 0, value = 0
@@ -225,13 +226,13 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub }) {
       </div>
 
       {view === 'list'
-        ? <VirtualList items={filtered} onOpen={onOpen} />
-        : <VirtualGrid items={filtered} onOpen={onOpen} />}
+        ? <VirtualList items={filtered} onOpen={onOpen} onQuickAdd={onQuickAdd} />
+        : <VirtualGrid items={filtered} onOpen={onOpen} onQuickAdd={onQuickAdd} />}
     </div>
   )
 }
 
-function VirtualList({ items, onOpen }) {
+function VirtualList({ items, onOpen, onQuickAdd }) {
   const parentRef = useRef(null)
   const v = useVirtualizer({
     count: items.length,
@@ -268,6 +269,10 @@ function VirtualList({ items, onOpen }) {
               <Mana cost={c.cost} />
               <span className={`rar rar-${c.rarity}`} title={c.rarity}>●</span>
               <span className="price">{euro(r.price)}</span>
+              {onQuickAdd && (
+                <button className="mini add-mini" title="1 Exemplar ins Deck"
+                  onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
+              )}
             </div>
           )
         })}
@@ -277,7 +282,7 @@ function VirtualList({ items, onOpen }) {
   )
 }
 
-function VirtualGrid({ items, onOpen }) {
+function VirtualGrid({ items, onOpen, onQuickAdd }) {
   const parentRef = useRef(null)
   const [width, setWidth] = useState(800)
   useEffect(() => {
@@ -315,6 +320,10 @@ function VirtualGrid({ items, onOpen }) {
                 <span className="tile-badge">{r.qty}×</span>
                 {r.finish === 'foil' && r.printings === 1 && <span className="tile-foil">Foil</span>}
                 <span className="tile-price">{euro(r.price)}</span>
+                {onQuickAdd && (
+                  <button className="mini tile-add" title="1 Exemplar ins Deck"
+                    onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
+                )}
               </div>
             ))}
           </div>
