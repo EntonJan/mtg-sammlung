@@ -426,3 +426,5 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .tile.sel img { outline: 3px solid var(--accent); outline-offset: 2px; }
 .selbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 16px 8px; padding: 8px 12px; background: #2e2817; border: 1px solid var(--accent); border-radius: 8px; }
 .drag-ghost { position: fixed; top: -100px; left: -100px; background: var(--accent); color: var(--accent-ink); padding: 6px 12px; border-radius: 8px; font-weight: 700; }
+
+.de-name { margin: 0 0 4px; color: #c9c2a8; }

@@ -4,7 +4,7 @@ import Mana from './Mana'
 
 // Detailansicht: großes Bild, Regeltext, freie Exemplare (Sammlung) und Exemplare in Decks.
 // Verschieben per Auswahlfeld – funktioniert auch am Handy, wo Drag & Drop nicht geht.
-export default function CardDetail({ card, entries, decks, cards, onChange, onMove, onClose }) {
+export default function CardDetail({ card, entries, decks, cards, onChange, onMove, onClose, deName }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
@@ -40,6 +40,7 @@ export default function CardDetail({ card, entries, decks, cards, onChange, onMo
         <img className="detail-img" src={card.img} alt={card.name} />
         <div className="detail-info">
           <h2>{card.name} <Mana cost={card.cost} /></h2>
+          {deName && deName !== card.name && <p className="de-name">🇩🇪 {deName}</p>}
           <p className="muted">{card.type}</p>
           <p className="oracle">{card.text}</p>
           <p className="muted small">

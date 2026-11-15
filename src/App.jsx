@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, googleProvider } from './firebase'
 import { entryKey, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
-import { addToCache, ensureCards, loadCardCache, refreshStalePrices, resolveDeckLines, savePriceSnapshot, setWaitHandler, today } from './scryfall'
+import { addToCache, ensureCards, getGermanNames, loadCardCache, loadGermanNames, refreshStalePrices, resolveDeckLines, savePriceSnapshot, setWaitHandler, today } from './scryfall'
 import { groupOf, subtypesOf, unitPrice, wishAlarm } from './util'
 import CollectionView from './components/CollectionView'
 import AddCards from './components/AddCards'
@@ -60,6 +60,7 @@ function Main({ user }) {
   const [toast, setToast] = useState('')
   const [sideOpen, setSideOpen] = useState(false)
   const [wishlist, setWishlistState] = useState([])
+  const [deNames, setDeNames] = useState({})
 
   // Aktueller Stand in Refs, damit schnelle Aktionen hintereinander nichts überschreiben
   const S = useRef({ entries: {}, decks: {}, chunks: 0, collectionDirty: false, dirtyDecks: new Set() })
@@ -108,6 +109,13 @@ function Main({ user }) {
         if (free + inDecks > 0) {
           await saveHistoryPoint(user.uid, today(), { total: Math.round((free + inDecks) * 100) / 100, free: Math.round(free * 100) / 100, decks: Math.round(inDecks * 100) / 100 })
         }
+        // Deutsche Namen im Hintergrund nachladen (einmalig, danach nur für neue Karten)
+        setDeNames({ ...(await getGermanNames()) })
+        const oracles = [...new Set(ids.map((id) => fresh[id]?.oracleId).filter(Boolean))]
+        const names = await loadGermanNames(oracles, (d, t) => alive && t > 40 && setStatus(`Lade deutsche Kartennamen … ${d}/${t}`))
+        if (!alive) return
+        setDeNames({ ...names })
+        setStatus('')
       } catch (e) {
         setStatus(`Fehler: ${e.message}`)
       }
@@ -462,7 +470,7 @@ function Main({ user }) {
             <div className="center muted">Lade …</div>
           ) : view.kind === 'collection' ? (
             Object.keys(entries).length || Object.keys(decks).length ? (
-              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} decks={decks} onMoveMany={moveMany} />
+              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} decks={decks} onMoveMany={moveMany} deNames={deNames} />
             ) : (
               <div className="center">
                 <p>Deine Sammlung ist noch leer.</p>
@@ -478,7 +486,7 @@ function Main({ user }) {
           ) : deck ? (
             <DeckView
               key={deck.id}
-              deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={dropCard} onMoveMany={moveMany}
+              deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={dropCard} onMoveMany={moveMany} deNames={deNames}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}
@@ -504,7 +512,7 @@ function Main({ user }) {
 
       {open && (
         <CardDetail
-          card={open} entries={entries} decks={decks} cards={cards}
+          card={open} entries={entries} decks={decks} cards={cards} deName={deNames[open.oracleId]}
           onChange={changeQty} onMove={moveCard} onClose={() => setOpen(null)}
         />
       )}

@@ -7,7 +7,7 @@ import { dragProps } from '../drag'
 const DEFAULT_FILTER = {
   name: '', text: '', type: '', rarity: '', set: '',
   colors: [], colorMode: 'any', cmcMin: '', cmcMax: '', minPrice: '',
-  finish: '', sort: 'name', dir: 'asc', group: true,
+  finish: '', sort: 'name', dir: 'asc', group: true, german: false,
 }
 
 function loadPref(key, fallback) {
@@ -15,7 +15,7 @@ function loadPref(key, fallback) {
 }
 function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* egal */ } }
 
-export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany }) {
+export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany, deNames = {} }) {
   const [selected, setSelected] = useState(() => new Set())
   const lastIdx = useRef(-1)
   const [f, setF] = useState(() => loadPref('filter', DEFAULT_FILTER))
@@ -59,7 +59,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
       if (cat && groupOf(c.type) !== cat) return false
       if (identity && !c.ci.every((x) => identity.includes(x))) return false
       if (sub && !subtypesOf(c.type).includes(sub)) return false
-      if (name && !c.name.toLowerCase().includes(name)) return false
+      if (name && !c.name.toLowerCase().includes(name) && !(deNames[c.oracleId] || '').toLowerCase().includes(name)) return false
       if (text && !(c.text || '').toLowerCase().includes(text) && !c.type.toLowerCase().includes(text)) return false
       if (df.type && !c.type.includes(df.type)) return false
       if (df.rarity && c.rarity !== df.rarity) return false
@@ -105,7 +105,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
 
     const dir = df.dir === 'asc' ? 1 : -1
     const cmp = {
-      name: (a, b) => a.card.name.localeCompare(b.card.name),
+      name: (a, b) => (df.german ? (deNames[a.card.oracleId] || a.card.name).localeCompare(deNames[b.card.oracleId] || b.card.name, 'de') : a.card.name.localeCompare(b.card.name)),
       price: (a, b) => (a.price ?? 0) - (b.price ?? 0),
       value: (a, b) => a.value - b.value,
       cmc: (a, b) => a.card.cmc - b.card.cmc || a.card.name.localeCompare(b.card.name),
@@ -114,7 +114,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
     }[df.sort]
     out.sort((a, b) => dir * cmp(a, b))
     return out
-  }, [rows, df, cat, sub, identity])
+  }, [rows, df, cat, sub, identity, deNames])
 
   const totals = useMemo(() => {
     let qty = 0, value = 0
@@ -242,6 +242,10 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
             <input type="checkbox" checked={f.group} onChange={(e) => set('group', e.target.checked)} />
             Gleiche Karten zusammenfassen
           </label>
+          <label className="check">
+            <input type="checkbox" checked={f.german} onChange={(e) => set('german', e.target.checked)} />
+            Deutsche Namen anzeigen
+          </label>
           <button className="btn ghost" onClick={() => setF({ ...DEFAULT_FILTER, group: f.group })}>Filter zurücksetzen</button>
         </div>
       )}
@@ -268,13 +272,13 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
       )}
 
       {view === 'list'
-        ? <VirtualList items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} />
+        ? <VirtualList items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} deNames={f.german ? deNames : null} />
         : <VirtualGrid items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} />}
     </div>
   )
 }
 
-function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
+function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNames }) {
   const parentRef = useRef(null)
   const v = useVirtualizer({
     count: items.length,
@@ -300,11 +304,11 @@ function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
               <img className="thumb" src={c.thumb} alt="" loading="lazy" draggable={false} />
               <span className="row-main">
                 <span className="row-name">
-                  {c.name}
+                  {deNames?.[c.oracleId] || c.name}
                   {r.finish !== 'normal' && r.printings === 1 && <em className="foil">{FINISH_LABEL[r.finish]}</em>}
                 </span>
                 <span className="row-sub">
-                  {c.type}
+                  {deNames?.[c.oracleId] ? `${c.name} · ` : ''}{c.type}
                   {r.printings > 1 ? ` · ${r.printings} Versionen` : ` · ${c.set} #${c.num}`}
                 </span>
               </span>

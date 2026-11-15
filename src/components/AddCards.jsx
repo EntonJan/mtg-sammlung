@@ -39,7 +39,7 @@ export default function AddCards({ entries, onChange }) {
         <div className="ac">
           <input
             className="search"
-            placeholder="Kartenname eingeben (oder Scryfall-Suche, z. B. t:dragon c:r)"
+            placeholder="Kartenname (englisch oder deutsch) oder Scryfall-Suche, z. B. t:dragon c:r"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             autoFocus

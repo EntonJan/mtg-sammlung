@@ -13,7 +13,7 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
@@ -116,7 +116,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
 
       {tab === 'list' && <>
       <CommanderPool deck={deck} rows={rows} onUpdate={onUpdate} onOpen={onOpen} />
-      <DeckFetch deck={deck} entries={entries} decks={decks} cards={cards} onMove={onMove} />
+      <DeckFetch deck={deck} entries={entries} decks={decks} cards={cards} onMove={onMove} deNames={deNames} />
       {rows.length > 0 && (
         <div className="seg seg-small">
           <button className={groupBy === 'type' ? 'on' : ''} onClick={() => setGroupBy('type')}>Nach Typ</button>
@@ -157,7 +157,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           entries={entries} cards={cards} onOpen={onOpen}
           identity={identity.length ? identity : null}
           onQuickAdd={(r) => onMove({ id: r.id, finish: r.finish, from: 'collection' }, deck.id)}
-          decks={{ [deck.id]: deck }} onMoveMany={onMoveMany}
+          decks={{ [deck.id]: deck }} onMoveMany={onMoveMany} deNames={deNames}
         />
       </aside>
     )}

@@ -3,7 +3,7 @@ import { FINISH_LABEL } from '../util'
 
 // „Karte holen“: eigene Karte suchen und ins Deck legen – aus der Sammlung
 // oder, wenn kein freies Exemplar mehr da ist, aus einem anderen Deck umlegen.
-export default function DeckFetch({ deck, entries, decks, cards, onMove }) {
+export default function DeckFetch({ deck, entries, decks, cards, onMove, deNames = {} }) {
   const [q, setQ] = useState('')
 
   // Alle Fundorte je Karte (oracleId): Sammlung + andere Decks
@@ -12,7 +12,7 @@ export default function DeckFetch({ deck, entries, decks, cards, onMove }) {
     const add = (e, from, label) => {
       const c = cards[e.id]; if (!c) return
       const k = c.oracleId || c.name
-      if (!m.has(k)) m.set(k, { name: c.name, list: [] })
+      if (!m.has(k)) m.set(k, { name: c.name, de: deNames[c.oracleId] || '', list: [] })
       m.get(k).list.push({ ...e, from, label, card: c })
     }
     for (const e of Object.values(entries)) add(e, 'collection', 'Sammlung')
@@ -21,12 +21,12 @@ export default function DeckFetch({ deck, entries, decks, cards, onMove }) {
       for (const e of Object.values(d.entries)) add(e, d.id, d.name)
     }
     return m
-  }, [entries, decks, cards, deck.id])
+  }, [entries, decks, cards, deck.id, deNames])
 
   const hits = useMemo(() => {
     const t = q.trim().toLowerCase()
     if (t.length < 2) return []
-    return [...sources.values()].filter((s) => s.name.toLowerCase().includes(t)).slice(0, 8)
+    return [...sources.values()].filter((s) => s.name.toLowerCase().includes(t) || s.de.toLowerCase().includes(t)).slice(0, 8)
   }, [q, sources])
 
   return (
@@ -36,7 +36,7 @@ export default function DeckFetch({ deck, entries, decks, cards, onMove }) {
         <div className="fetch-list">
           {hits.map((h) => (
             <div key={h.name} className="fetch-item">
-              <b>{h.name}</b>
+              <b>{h.name}</b>{h.de && h.de !== h.name && <span className="muted small"> · {h.de}</span>}
               <div className="fetch-sources">
                 {h.list
                   .sort((a, b) => (a.from !== 'collection') - (b.from !== 'collection'))

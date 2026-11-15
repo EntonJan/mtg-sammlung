@@ -150,10 +150,53 @@ export function addToCache(card) {
 export async function searchCards(query) {
   const url = `${API}/cards/search?unique=prints&order=released&q=${encodeURIComponent(query)}`
   const res = await sfFetch(url)
-  if (res.status === 404) return []
-  if (!res.ok) throw new Error(`Scryfall-Fehler ${res.status}`)
-  const json = await res.json()
-  return (json.data || []).slice(0, 60).map(slimCard)
+  if (res.ok) return (await res.json()).data.slice(0, 60).map(slimCard)
+  if (res.status !== 404) throw new Error(`Scryfall-Fehler ${res.status}`)
+  // Nichts gefunden → evtl. deutscher Name: in allen Sprachen suchen und auf englische Drucke abbilden
+  const de = await sfFetch(`${API}/cards/search?unique=cards&include_multilingual=true&q=${encodeURIComponent(query)}`)
+  if (!de.ok) return []
+  const oracles = [...new Set((await de.json()).data.map((c) => c.oracle_id || c.card_faces?.[0]?.oracle_id).filter(Boolean))].slice(0, 10)
+  if (!oracles.length) return []
+  const en = await sfFetch(`${API}/cards/search?unique=prints&order=released&q=${encodeURIComponent(oracles.map((o) => `oracleid:${o}`).join(' or '))}`)
+  if (!en.ok) return []
+  return (await en.json()).data.slice(0, 60).map(slimCard)
+}
+
+// Deutsche Kartennamen je oracleId (lokal gecacht, einmalig nachgeladen)
+const DE_KEY = 'names-de-v1'
+let deNames = null
+export async function getGermanNames() {
+  if (!deNames) deNames = (await get(DE_KEY)) || {}
+  return deNames
+}
+
+export async function loadGermanNames(oracleIds, onProgress) {
+  const names = await getGermanNames()
+  const todo = [...new Set(oracleIds)].filter((o) => o && !(o in names))
+  const BATCH = 18 // Scryfall-Suchanfragen dürfen max. ~1000 Zeichen lang sein
+  for (let i = 0; i < todo.length; i += BATCH) {
+    const batch = todo.slice(i, i + BATCH)
+    const q = `lang:de (${batch.map((o) => `oracleid:${o}`).join(' or ')})`
+    let url = `${API}/cards/search?unique=cards&include_multilingual=true&q=${encodeURIComponent(q)}`
+    while (url) {
+      const res = await sfFetch(url)
+      if (res.status === 404) break
+      if (!res.ok) throw new Error(`Scryfall-Fehler ${res.status}`)
+      const json = await res.json()
+      for (const c of json.data || []) {
+        const oid = c.oracle_id || c.card_faces?.[0]?.oracle_id
+        const n = c.printed_name || c.card_faces?.map((f) => f.printed_name).filter(Boolean).join(' // ')
+        if (oid && n) names[oid] = n
+      }
+      url = json.has_more ? json.next_page : null
+    }
+    // Karten ohne deutschen Druck merken, damit sie nicht erneut angefragt werden
+    for (const o of batch) if (!(o in names)) names[o] = null
+    onProgress?.(Math.min(i + BATCH, todo.length), todo.length)
+    if ((i / BATCH) % 10 === 9) await set(DE_KEY, names)
+  }
+  await set(DE_KEY, names)
+  return names
 }
 
 export async function autocomplete(q) {
