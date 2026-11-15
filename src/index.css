@@ -438,3 +438,22 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .settings a { color: var(--accent); }
 /* Android-App: Platz für Statusleiste */
 body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
+
+/* Scan */
+.scan { padding: 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 12px; max-width: 900px; }
+.scan-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.file-btn { position: relative; overflow: hidden; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.scan-stage { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; }
+.scan-stage video { width: 100%; height: 100%; object-fit: contain; display: none; }
+.scan-stage.on video { display: block; }
+.scan-frame { position: absolute; border: 2px solid rgba(217,164,65,.9); border-radius: 4.5% / 3.2%; box-shadow: 0 0 0 4000px rgba(0,0,0,.35); pointer-events: none; }
+.scan-name { position: absolute; left: 7%; top: 3.5%; width: 66%; height: 6.5%; border: 2px dashed #fff; border-radius: 4px; }
+.scan-info { position: absolute; left: 4%; top: 89.5%; width: 45%; height: 7.5%; border: 1px dashed rgba(255,255,255,.6); border-radius: 4px; }
+.scan-btn { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); }
+.scan-help { color: var(--text); padding: 20px; max-width: 520px; text-align: center; }
+.scan-hit { display: flex; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.scan-hit img { width: 150px; border-radius: 4.75% / 3.5%; align-self: flex-start; }
+.scan-hit-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.prints { max-width: 100%; }
+@media (max-width: 640px) { .scan { padding: 10px; } .scan-stage { aspect-ratio: 3 / 4; } .scan-hit img { width: 110px; } }

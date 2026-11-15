@@ -16,6 +16,7 @@ import ValueView from './components/ValueView'
 import BinderView from './components/BinderView'
 import WishlistView from './components/WishlistView'
 import SurplusView from './components/SurplusView'
+import ScanView from './components/ScanView'
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -197,6 +198,15 @@ function Main({ user }) {
     rememberCard(card)
     commit({ entries: bump(S.current.entries, card.id, finish, delta), collectionChanged: true, label: `${card.name} ${delta > 0 ? '+' : '−'}1` })
   }, [commit, rememberCard])
+
+  // Gescannte Karte als NEUES Exemplar hinzufügen (Sammlung oder direkt in Deck/Ordner)
+  const addScanned = useCallback((card, finish, target, delta = 1) => {
+    if (target === 'collection') return changeQty(card, finish, delta)
+    rememberCard(card)
+    const d = S.current.decks[target]
+    if (!d) return
+    commit({ decks: { ...S.current.decks, [target]: { ...d, entries: bump(d.entries, card.id, finish, delta) } }, changedDecks: [target], label: `${card.name} ${delta > 0 ? '+' : '−'}1 (${d.name})` })
+  }, [changeQty, rememberCard, commit])
 
   // Schrank-Prinzip: 1 Exemplar von „from“ nach „to“ verschieben (collection oder Deck-ID)
   const moveCard = useCallback(({ id, finish, from }, to, qty = 1) => {
@@ -425,6 +435,7 @@ function Main({ user }) {
         <h1>MTG Sammlung</h1>
         <nav>
           <button className={view.kind === 'add' ? 'on' : ''} onClick={() => setView({ kind: 'add' })}>Hinzufügen</button>
+          <button className={view.kind === 'scan' ? 'on' : ''} onClick={() => setView({ kind: 'scan' })}>📷 Scannen</button>
           <button className={view.kind === 'wish' ? 'on' : ''} onClick={() => setView({ kind: 'wish' })}>
             Wunschliste{wishAlarms > 0 && <span className="badge">🔔 {wishAlarms}</span>}
           </button>
@@ -483,6 +494,8 @@ function Main({ user }) {
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
+          ) : view.kind === 'scan' ? (
+            <ScanView decks={decks} onAdd={addScanned} onUndoAdd={(c, f, t) => addScanned(c, f, t, -1)} />
           ) : view.kind === 'surplus' ? (
             <SurplusView entries={entries} decks={decks} cards={cards} onMoveMany={moveMany} onOpen={setOpen} />
           ) : view.kind === 'wish' ? (
