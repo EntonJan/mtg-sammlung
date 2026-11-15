@@ -48,6 +48,21 @@ function crop(src, sw, sh, box, mode = 'raw') {
   return c
 }
 
+// Oberes Band der Karte (Namenszeile) – um die Kartenmitte leicht gedreht, damit schief
+// gehaltene Karten trotzdem gelesen werden
+function band(src, sw, sh, frame, angle) {
+  const B = { x: frame.x + 0.03 * frame.w, y: frame.y + 0.02 * frame.h, w: 0.8 * frame.w, h: 0.15 * frame.h }
+  const s = 1400 / (B.w * sw)
+  const c = document.createElement('canvas')
+  c.width = 1400; c.height = Math.round(B.h * sh * s)
+  const g = c.getContext('2d')
+  const cx = (frame.x + frame.w / 2) * sw * s, cy = (frame.y + frame.h / 2) * sh * s
+  g.translate(-B.x * sw * s, -B.y * sh * s)
+  g.translate(cx, cy); g.rotate(angle); g.translate(-cx, -cy)
+  g.drawImage(src, 0, 0, sw * s, sh * s)
+  return c
+}
+
 // Bereiche relativ zum Kartenrahmen (Kartenformat 63 × 88 mm) – mehrere Varianten,
 // weil die Karte im Kamerabild nie ganz exakt im Rahmen liegt
 const NAME_TRIES = [
@@ -77,13 +92,26 @@ function parseInfo(t) {
 export async function recognize(src, sw, sh, frame) {
   const w = await getWorker()
   const sub = (b) => ({ x: frame.x + b.x * frame.w, y: frame.y + b.y * frame.h, w: b.w * frame.w, h: b.h * frame.h })
-  await w.setParameters({ tessedit_pageseg_mode: '7' }) // eine Textzeile
   let best = { name: '', confidence: 0 }
-  for (const [box, mode] of NAME_TRIES) {
-    const { data } = await w.recognize(crop(src, sw, sh, sub(box), mode))
-    const name = cleanName(data.text)
-    if (name.length >= 3 && data.confidence > best.confidence) best = { name, confidence: data.confidence }
-    if (best.confidence >= 85) break
+  const consider = (text, conf) => {
+    const name = cleanName(text)
+    if (name.replace(/[^A-Za-z]/g, '').length >= 3 && conf > best.confidence) best = { name, confidence: conf }
+  }
+  // 1) Namensband (mehrere Zeilen erlaubt), gerade und leicht gedreht
+  await w.setParameters({ tessedit_pageseg_mode: '6' })
+  for (const a of [0, 0.026, -0.026, 0.05, -0.05]) {
+    const { data } = await w.recognize(band(src, sw, sh, frame, a))
+    for (const l of data.lines || []) consider(l.text, l.confidence)
+    if (best.confidence >= 80) break
+  }
+  // 2) Feste Ausschnitte als Rückfall
+  if (best.confidence < 80) {
+    await w.setParameters({ tessedit_pageseg_mode: '7' }) // eine Textzeile
+    for (const [box, mode] of NAME_TRIES) {
+      const { data } = await w.recognize(crop(src, sw, sh, sub(box), mode))
+      consider(data.text, data.confidence)
+      if (best.confidence >= 85) break
+    }
   }
   let info = {}
   try {
@@ -112,26 +140,40 @@ function similarity(a, b) {
 }
 
 // Erkannten Text bei Scryfall nachschlagen
-export async function lookup({ name, info }) {
+export async function lookup({ name, info, confidence = 0 }) {
   // 1) Exaktes Printing über Set + Nummer (falls lesbar) – passt der Name grob, ist das sicher
   if (info?.set && info?.num) {
     const p = await sfFetch(`${API}/cards/${info.set}/${info.num}`)
     if (p.ok) {
       const exact = slimCard(await p.json())
-      if (!name || similarity(name, exact.name.split(' // ')[0]) >= 0.5) return { card: exact, exact: true }
+      if (name && nameScore(name, exact) >= 0.5) return { card: exact, exact: true }
     }
   }
   if (!name || name.length < 3) return null
-  // 2) Unscharfe Namenssuche (englisch), sonst deutsche Namen
-  let card = null
-  const res = await sfFetch(`${API}/cards/named?fuzzy=${encodeURIComponent(name)}`)
-  if (res.ok) card = slimCard(await res.json())
-  else card = (await searchCards(name).catch(() => []))[0] || null
-  if (!card) return null
-  // Schutz vor Unsinn: erkannter Text muss dem Kartennamen ähneln
-  const front = card.name.split(' // ')[0]
-  if (similarity(name, front) < 0.6 && similarity(name, card.name) < 0.6 && res.ok) return null
-  return { card, exact: false }
+  // 2) Unscharfe Namenssuche (englisch); bei Fehlschlag hinten Störwörter abschneiden
+  const words = name.split(' ')
+  for (let n = words.length; n >= Math.min(2, words.length); n--) {
+    const q = words.slice(0, n).join(' ')
+    const res = await sfFetch(`${API}/cards/named?fuzzy=${encodeURIComponent(q)}`)
+    if (!res.ok) continue
+    const card = slimCard(await res.json())
+    if (nameScore(q, card) >= 0.6) return { card, exact: false }
+  }
+  // 3) Deutscher Name? Nur bei gut lesbarem Text
+  if (confidence >= 70) {
+    const card = (await searchCards(name).catch(() => []))[0]
+    if (card) return { card, exact: false }
+  }
+  return null
+}
+
+// Wie gut passt der erkannte Text zum Kartennamen? (ganzer Name oder Vorderseite, auch als Präfix)
+function nameScore(text, card) {
+  const t = text.toLowerCase()
+  return Math.max(...[card.name, card.name.split(' // ')[0]].map((n) => {
+    const nl = n.toLowerCase()
+    return Math.max(similarity(t, nl), similarity(t.slice(0, nl.length), nl))
+  }))
 }
 
 export async function printingsOf(card) {
