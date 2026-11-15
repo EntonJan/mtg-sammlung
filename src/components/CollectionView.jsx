@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { COLORS, COLOR_NAMES, TYPES, RARITIES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../util'
+import { COLORS, COLOR_NAMES, TYPES, RARITIES, FINISH_LABEL, GROUPS, groupOf, subtypesOf, unitPrice, euro } from '../util'
 import Mana from './Mana'
 import { dragProps } from '../drag'
 
@@ -15,7 +15,7 @@ function loadPref(key, fallback) {
 }
 function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* egal */ } }
 
-export default function CollectionView({ entries, cards, onOpen, cat }) {
+export default function CollectionView({ entries, cards, onOpen, cat, sub }) {
   const [f, setF] = useState(() => loadPref('filter', DEFAULT_FILTER))
   const [view, setView] = useState(() => loadPref('view', { mode: 'list' }).mode)
   const [showFilters, setShowFilters] = useState(false)
@@ -55,6 +55,7 @@ export default function CollectionView({ entries, cards, onOpen, cat }) {
 
     let out = rows.filter(({ card: c, finish, price }) => {
       if (cat && groupOf(c.type) !== cat) return false
+      if (sub && !subtypesOf(c.type).includes(sub)) return false
       if (name && !c.name.toLowerCase().includes(name)) return false
       if (text && !(c.text || '').toLowerCase().includes(text) && !c.type.toLowerCase().includes(text)) return false
       if (df.type && !c.type.includes(df.type)) return false
@@ -110,7 +111,7 @@ export default function CollectionView({ entries, cards, onOpen, cat }) {
     }[df.sort]
     out.sort((a, b) => dir * cmp(a, b))
     return out
-  }, [rows, df, cat])
+  }, [rows, df, cat, sub])
 
   const totals = useMemo(() => {
     let qty = 0, value = 0
@@ -217,7 +218,7 @@ export default function CollectionView({ entries, cards, onOpen, cat }) {
       )}
 
       <div className="summary">
-        {cat && <span className="cat-label">{GROUPS.find(([k]) => k === cat)?.[1]}</span>}
+        {cat && <span className="cat-label">{GROUPS.find(([k]) => k === cat)?.[1]}{sub && ` › ${sub}`}</span>}
         <span><b>{totals.qty.toLocaleString('de-DE')}</b> Karten</span>
         <span><b>{totals.lines.toLocaleString('de-DE')}</b> {f.group ? 'verschiedene' : 'Einträge'}</span>
         <span>Wert <b>{euro(totals.value)}</b></span>

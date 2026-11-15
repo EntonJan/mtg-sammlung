@@ -57,3 +57,10 @@ export function groupOf(type = '') {
   for (const [k] of GROUPS) if (front.includes(k)) return k
   return 'Other'
 }
+
+// Untertypen der Vorderseite, z. B. "Creature — Elf Druid" → ["Elf", "Druid"]
+export function subtypesOf(type = '') {
+  const front = type.split(' // ')[0]
+  const i = front.indexOf('—')
+  return i < 0 ? [] : front.slice(i + 1).trim().split(/\s+/).filter(Boolean)
+}

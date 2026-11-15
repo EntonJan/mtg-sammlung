@@ -3,7 +3,7 @@ import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, googleProvider } from './firebase'
 import { entryKey, loadCollection, loadDecks, newDeckId, saveAll } from './store'
 import { addToCache, ensureCards, loadCardCache, refreshStalePrices, resolveDeckLines, setWaitHandler } from './scryfall'
-import { groupOf, unitPrice } from './util'
+import { groupOf, subtypesOf, unitPrice } from './util'
 import CollectionView from './components/CollectionView'
 import AddCards from './components/AddCards'
 import ImportView from './components/ImportView'
@@ -261,13 +261,18 @@ function Main({ user }) {
   }, [commit, flush])
 
   const freeCount = useMemo(() => Object.values(entries || {}).reduce((s, e) => s + e.qty, 0), [entries])
-  const catCounts = useMemo(() => {
-    const out = {}
+  // Anzahl freier Karten je Kategorie und je Untertyp (für die Sidebar)
+  const { catCounts, subCounts } = useMemo(() => {
+    const catCounts = {}, subCounts = {}
     for (const e of Object.values(entries || {})) {
       const c = cards[e.id]
-      if (c) { const g = groupOf(c.type); out[g] = (out[g] || 0) + e.qty }
+      if (!c) continue
+      const g = groupOf(c.type)
+      catCounts[g] = (catCounts[g] || 0) + e.qty
+      const m = (subCounts[g] ||= {})
+      for (const st of subtypesOf(c.type)) m[st] = (m[st] || 0) + e.qty
     }
-    return out
+    return { catCounts, subCounts }
   }, [entries, cards])
   const deckStats = useMemo(() => {
     const out = {}
@@ -302,7 +307,7 @@ function Main({ user }) {
       <div className="body">
         {entries && (
           <Sidebar
-            view={view} setView={setView} freeCount={freeCount} catCounts={catCounts} decks={decks} deckStats={deckStats}
+            view={view} setView={setView} freeCount={freeCount} catCounts={catCounts} subCounts={subCounts} decks={decks} deckStats={deckStats}
             onDrop={(d, to) => moveCard(d, to)} onCreate={createDeck}
             open={sideOpen} onClose={() => setSideOpen(false)}
           />
@@ -314,7 +319,7 @@ function Main({ user }) {
             <div className="center muted">Lade …</div>
           ) : view.kind === 'collection' ? (
             Object.keys(entries).length || Object.keys(decks).length ? (
-              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} />
+              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} />
             ) : (
               <div className="center">
                 <p>Deine Sammlung ist noch leer.</p>

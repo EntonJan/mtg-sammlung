@@ -3,9 +3,10 @@ import { readDrag } from '../drag'
 import { GROUPS, euro } from '../util'
 
 // Linke Leiste: „Sammlung“ + alle Decks. Jeder Eintrag ist ein Ablageziel für Drag & Drop.
-export default function Sidebar({ view, setView, freeCount, catCounts, decks, deckStats, onDrop, onCreate, open, onClose }) {
+export default function Sidebar({ view, setView, freeCount, catCounts, subCounts, decks, deckStats, onDrop, onCreate, open, onClose }) {
   const [over, setOver] = useState(null)
   const [newName, setNewName] = useState('')
+  const [subFilter, setSubFilter] = useState('')
 
   const list = Object.values(decks).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
 
@@ -30,17 +31,45 @@ export default function Sidebar({ view, setView, freeCount, catCounts, decks, de
       </div>
       {view.kind === 'collection' && (
         <div className="side-sub">
-          {GROUPS.filter(([k]) => catCounts[k]).map(([k, label]) => (
-            <div
-              key={k}
-              className={`side-item sub ${view.cat === k ? 'on' : ''}`}
-              onClick={() => go(view.cat === k ? { kind: 'collection' } : { kind: 'collection', cat: k })}
-              {...target('collection')}
-            >
-              <span className="side-name">{label}</span>
-              <span className="side-count">{catCounts[k].toLocaleString('de-DE')}</span>
-            </div>
-          ))}
+          {GROUPS.filter(([k]) => catCounts[k]).map(([k, label]) => {
+            const subs = Object.entries(subCounts[k] || {})
+              .filter(([st]) => !subFilter || st.toLowerCase().includes(subFilter.toLowerCase()))
+              .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            const openCat = view.cat === k
+            return (
+              <div key={k}>
+                <div
+                  className={`side-item sub ${openCat && !view.sub ? 'on' : ''}`}
+                  onClick={() => { setSubFilter(''); go(openCat && !view.sub ? { kind: 'collection' } : { kind: 'collection', cat: k }) }}
+                  {...target('collection')}
+                >
+                  <span className={`caret ${openCat ? 'open' : ''}`} style={{ visibility: Object.keys(subCounts[k] || {}).length ? 'visible' : 'hidden' }}>▸</span>
+                  <span className="side-name">{label}</span>
+                  <span className="side-count">{catCounts[k].toLocaleString('de-DE')}</span>
+                </div>
+                {openCat && Object.keys(subCounts[k] || {}).length > 0 && (
+                  <div className="side-subsub">
+                    {Object.keys(subCounts[k]).length > 12 && (
+                      <input className="sub-filter" placeholder="Untertyp suchen …" value={subFilter}
+                        onChange={(e) => setSubFilter(e.target.value)} onClick={(e) => e.stopPropagation()} />
+                    )}
+                    {subs.map(([st, n]) => (
+                      <div
+                        key={st}
+                        className={`side-item subsub ${view.sub === st ? 'on' : ''}`}
+                        onClick={() => go(view.sub === st ? { kind: 'collection', cat: k } : { kind: 'collection', cat: k, sub: st })}
+                        {...target('collection')}
+                      >
+                        <span className="side-name">{st}</span>
+                        <span className="side-count">{n.toLocaleString('de-DE')}</span>
+                      </div>
+                    ))}
+                    {!subs.length && <p className="side-empty">Kein Treffer.</p>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
