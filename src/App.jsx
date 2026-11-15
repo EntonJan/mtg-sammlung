@@ -137,8 +137,20 @@ function Main({ user }) {
     }
   }, [user.uid])
 
-  const commit = useCallback(({ entries: ne, decks: nd, collectionChanged, changedDecks = [] }) => {
+  // Rückgängig/Wiederholen: vor jeder Änderung den alten Stand merken (Objekte sind unveränderlich → billig)
+  const undoStack = useRef([])
+  const redoStack = useRef([])
+  const [undoInfo, setUndoInfo] = useState({ undo: 0, redo: 0 })
+  const syncUndo = () => setUndoInfo({ undo: undoStack.current.length, redo: redoStack.current.length })
+
+  const commit = useCallback(({ entries: ne, decks: nd, collectionChanged, changedDecks = [], label, noHistory }) => {
     const s = S.current
+    if (!noHistory) {
+      undoStack.current.push({ entries: s.entries, decks: s.decks, label: label || 'Änderung' })
+      if (undoStack.current.length > 50) undoStack.current.shift()
+      redoStack.current = []
+      syncUndo()
+    }
     if (ne) { s.entries = ne; setEntries(ne) }
     if (nd) { s.decks = nd; setDecks(nd) }
     if (collectionChanged) s.collectionDirty = true
@@ -147,6 +159,32 @@ function Main({ user }) {
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(flush, 1000)
   }, [flush])
+
+  const restore = useCallback((from, to, verb) => {
+    const snap = from.current.pop()
+    if (!snap) return
+    const s = S.current
+    to.current.push({ entries: s.entries, decks: s.decks, label: snap.label })
+    const ids = new Set([...Object.keys(s.decks), ...Object.keys(snap.decks)])
+    const changed = [...ids].filter((id) => s.decks[id] !== snap.decks[id])
+    commit({ entries: snap.entries, decks: snap.decks, collectionChanged: s.entries !== snap.entries, changedDecks: changed, noHistory: true })
+    syncUndo()
+    notify(`${verb}: ${snap.label}`)
+  }, [commit])
+  const undo = useCallback(() => restore(undoStack, redoStack, 'Rückgängig'), [restore])
+  const redo = useCallback(() => restore(redoStack, undoStack, 'Wiederholt'), [restore])
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo])
 
   useEffect(() => {
     const warn = (e) => { if (saveState !== 'saved') { e.preventDefault(); e.returnValue = '' } }
@@ -161,7 +199,7 @@ function Main({ user }) {
   // Freie Exemplare in der Sammlung ändern (manuell hinzufügen/entfernen)
   const changeQty = useCallback((card, finish, delta) => {
     rememberCard(card)
-    commit({ entries: bump(S.current.entries, card.id, finish, delta), collectionChanged: true })
+    commit({ entries: bump(S.current.entries, card.id, finish, delta), collectionChanged: true, label: `${card.name} ${delta > 0 ? '+' : '−'}1` })
   }, [commit, rememberCard])
 
   // Schrank-Prinzip: 1 Exemplar von „from“ nach „to“ verschieben (collection oder Deck-ID)
@@ -197,7 +235,7 @@ function Main({ user }) {
       nd[to] = { ...d, entries: bump(d.entries, id, finish, qty) }
       changedDecks.push(to)
     }
-    commit({ entries: ne, decks: nd, collectionChanged: from === 'collection' || to === 'collection', changedDecks })
+    commit({ entries: ne, decks: nd, collectionChanged: from === 'collection' || to === 'collection', changedDecks, label: `${name} → ${to === 'collection' ? 'Sammlung' : nd[to].name}` })
     notify(`${name} → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
   }, [cards, commit])
 
@@ -219,7 +257,7 @@ function Main({ user }) {
       moved += q
     }
     if (!moved) return
-    commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [...changed] })
+    commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [...changed], label: `${moved} Karten verschoben` })
     notify(`${moved} Karten → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
   }, [commit])
 
@@ -229,13 +267,13 @@ function Main({ user }) {
   const createDeck = useCallback((name, kind) => {
     const id = newDeckId()
     const order = Object.keys(S.current.decks).length
-    commit({ decks: { ...S.current.decks, [id]: { id, name, order, commanders: [], entries: {}, ...(kind ? { kind } : {}) } }, changedDecks: [id] })
+    commit({ decks: { ...S.current.decks, [id]: { id, name, order, commanders: [], entries: {}, ...(kind ? { kind } : {}) } }, changedDecks: [id], label: `„${name}“ angelegt` })
     return id
   }, [commit])
 
   const updateDeck = useCallback((id, patch) => {
     const d = S.current.decks[id]
-    commit({ decks: { ...S.current.decks, [id]: { ...d, ...patch } }, changedDecks: [id] })
+    commit({ decks: { ...S.current.decks, [id]: { ...d, ...patch } }, changedDecks: [id], label: `„${d.name}“ geändert` })
   }, [commit])
 
   const toggleCommander = useCallback((id, key) => {
@@ -258,7 +296,7 @@ function Main({ user }) {
       de = bump(de, p.id, p.finish, q)
     }
     const deck = { id, name, order: Object.keys(s.decks).length, commanders: commanders.filter((k) => de[k]), entries: de }
-    commit({ entries: ne, decks: { ...s.decks, [id]: deck }, collectionChanged: true, changedDecks: [id] })
+    commit({ entries: ne, decks: { ...s.decks, [id]: deck }, collectionChanged: true, changedDecks: [id], label: `Deck „${name}“ angelegt` })
     setView({ kind: 'deck', id })
     notify(`Deck „${name}“ mit ${Object.values(de).reduce((t, e) => t + e.qty, 0)} Karten angelegt`)
   }, [commit])
@@ -270,7 +308,7 @@ function Main({ user }) {
     for (const e of Object.values(s.decks[id].entries)) ne = bump(ne, e.id, e.finish, e.qty)
     const nd = { ...s.decks }
     delete nd[id]
-    commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [id] })
+    commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [id], label: `„${s.decks[id].name}“ aufgelöst` })
     setView({ kind: 'collection' })
   }, [commit])
 
@@ -313,7 +351,7 @@ function Main({ user }) {
     const full = await ensureCards(Object.keys(parsed.entries).map((k) => k.split('|')[0]), (d, t) => setStatus(`Lade Kartendaten … ${d}/${t}`))
     setCards({ ...full })
     setStatus('')
-    commit({ entries: next, decks: nd, collectionChanged: true, changedDecks })
+    commit({ entries: next, decks: nd, collectionChanged: true, changedDecks, label: 'ManaBox-Import' })
     await flush()
     setView({ kind: 'collection' })
   }, [commit, flush])
@@ -335,7 +373,7 @@ function Main({ user }) {
         if (l.commander) cmds.add(entryKey(l.card.id, l.finish))
         added += l.qty
       }
-      commit({ decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds] } }, changedDecks: [id] })
+      commit({ decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds] } }, changedDecks: [id], label: `Deck-Import „${base.name}“` })
       await flush()
       return { deckId: id, name: base.name, added, missing }
     } finally {
@@ -400,6 +438,8 @@ function Main({ user }) {
           <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
         </nav>
         <div className="user">
+          <button className="btn icon small" disabled={!undoInfo.undo} onClick={undo} title="Rückgängig (Strg+Z)">↶</button>
+          <button className="btn icon small" disabled={!undoInfo.redo} onClick={redo} title="Wiederholen (Strg+Y)">↷</button>
           <span className={`save save-${saveState}`}>{saveLabel}</span>
           <button className="btn ghost small" onClick={() => signOut(auth)} title={user.email}>Abmelden</button>
         </div>
