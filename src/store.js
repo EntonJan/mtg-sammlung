@@ -49,6 +49,9 @@ export async function loadDecks(uid) {
       order: v.order ?? 0,
       commanders: v.commanders || [],
       entries: fromItems(v.items),
+      tags: v.tags || {},           // oracleId → ["Ramp", …]
+      cats: v.cats || null,         // [{ name, target }] – null = Standardkategorien
+      pool: v.pool || null,         // Commander-Pool für Partner-Würfel
     }
   })
   return decks
@@ -77,6 +80,9 @@ export async function saveAll(uid, { entries, prevChunks, decks, dirtyDecks, sav
       order: d.order,
       commanders: d.commanders,
       items: toItems(d.entries),
+      tags: d.tags || {},
+      cats: d.cats || null,
+      pool: d.pool || null,
       updatedAt: serverTimestamp(),
     })
   }

@@ -333,6 +333,7 @@ function Main({ user }) {
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}
+              onUpdate={(patch) => updateDeck(deck.id, patch)}
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />

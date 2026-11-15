@@ -4,15 +4,19 @@ import { entryKey } from '../store'
 import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../util'
 import Mana from './Mana'
 import DeckStats from './DeckStats'
+import DeckCategories, { TagPicker } from './DeckCategories'
+import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, cards, onMove, onRename, onDelete, onToggleCommander, onOpen }) {
+export default function DeckView({ deck, cards, onMove, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [tab, setTab] = useState('list')
+  const [groupBy, setGroupBy] = useState('type')
+  const [picker, setPicker] = useState(null)
 
   const rows = useMemo(() => Object.values(deck.entries)
     .filter((e) => cards[e.id])
@@ -25,9 +29,19 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
 
   const groups = useMemo(() => {
     const m = {}
+    if (groupBy === 'cat') {
+      const tags = deck.tags || {}
+      for (const r of rest) {
+        const t = tags[tagKey(r.card)] || []
+        if (!t.length) (m[groupOf(r.card.type) === 'Land' ? '__land' : '__none'] ||= []).push(r)
+        for (const c of t) (m[c] ||= []).push(r)
+      }
+      return [...catsOf(deck).map((c) => [c.name, c.name]), ['__none', 'Ohne Kategorie'], ['__land', 'Länder']]
+        .filter(([k]) => m[k]).map(([k, label]) => ({ k, label, rows: m[k] }))
+    }
     for (const r of rest) (m[groupOf(r.card.type)] ||= []).push(r)
     return GROUPS.filter(([k]) => m[k]).map(([k, label]) => ({ k, label, rows: m[k] }))
-  }, [rest])
+  }, [rest, groupBy, deck])
 
   const count = rows.reduce((s, r) => s + r.qty, 0)
   const value = rows.reduce((s, r) => s + (r.price ?? 0) * r.qty, 0)
@@ -77,14 +91,21 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
       </div>
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['stats', 'Statistik']].map(([k, l]) => (
+        {[['list', 'Liste'], ['cats', 'Kategorien'], ['stats', 'Statistik']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {tab === 'stats' && <DeckStats rows={rows} />}
+      {tab === 'cats' && <DeckCategories deck={deck} rows={rows} onUpdate={onUpdate} />}
 
       {tab === 'list' && <>
+      {rows.length > 0 && (
+        <div className="seg seg-small">
+          <button className={groupBy === 'type' ? 'on' : ''} onClick={() => setGroupBy('type')}>Nach Typ</button>
+          <button className={groupBy === 'cat' ? 'on' : ''} onClick={() => setGroupBy('cat')}>Nach Kategorie</button>
+        </div>
+      )}
       {warnings.map((w) => <p key={w} className="warn">{w}</p>)}
 
       {!rows.length && (
@@ -95,10 +116,10 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
 
       <div className="deck-cols">
         {commanders.length > 0 && (
-          <Group label="Commander" rows={commanders} deckId={deck.id} cmd onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} />
+          <Group label="Commander" rows={commanders} deck={deck} cmd onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
         )}
         {groups.map((g) => (
-          <Group key={g.k} label={g.label} rows={g.rows} deckId={deck.id} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} />
+          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
         ))}
       </div>
       </>}
@@ -106,7 +127,9 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
   )
 }
 
-function Group({ label, rows, deckId, cmd, onMove, onToggleCommander, onOpen }) {
+function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate }) {
+  const deckId = deck.id
+  const tags = deck.tags || {}
   const n = rows.reduce((s, r) => s + r.qty, 0)
   return (
     <section className="deck-group">
@@ -117,6 +140,9 @@ function Group({ label, rows, deckId, cmd, onMove, onToggleCommander, onOpen }) 
           <img className="thumb" src={r.card.thumb} alt="" loading="lazy" draggable={false} />
           <span className="row-main">
             <span className="row-name">{r.card.name}{r.finish !== 'normal' && <em className="foil">{FINISH_LABEL[r.finish]}</em>}</span>
+            {(tags[tagKey(r.card)] || []).length > 0 && (
+              <span className="chips">{tags[tagKey(r.card)].map((t) => <span key={t} className="chip">{t}</span>)}</span>
+            )}
           </span>
           <Mana cost={r.card.cost} />
           <span className="row-actions" onClick={(e) => e.stopPropagation()}>
@@ -124,9 +150,11 @@ function Group({ label, rows, deckId, cmd, onMove, onToggleCommander, onOpen }) 
               <button className={`mini ${cmd ? 'on' : ''}`} title={cmd ? 'Kein Commander mehr' : 'Als Commander festlegen'}
                 onClick={() => onToggleCommander(r.key)}>★</button>
             )}
+            <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
             <button className="mini" title="1 Exemplar zurück in die Sammlung"
               onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
           </span>
+          {picker === `${gk}|${r.key}` && <TagPicker deck={deck} card={r.card} onUpdate={onUpdate} onClose={() => setPicker(null)} />}
         </div>
       ))}
     </section>
