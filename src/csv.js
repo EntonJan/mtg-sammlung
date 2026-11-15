@@ -1,0 +1,22 @@
+// ManaBox-CSV einlesen
+import Papa from 'papaparse'
+import { entryKey } from './store'
+
+export function parseManaBox(text) {
+  const { data, errors } = Papa.parse(text, { header: true, skipEmptyLines: true })
+  if (!data.length || !('Scryfall ID' in data[0])) {
+    throw new Error('Das sieht nicht nach einem ManaBox-Export aus (Spalte „Scryfall ID“ fehlt).')
+  }
+  const entries = {}
+  let cards = 0
+  for (const r of data) {
+    const id = r['Scryfall ID']?.trim()
+    const qty = Number(r['Quantity'] || 0)
+    if (!id || !qty) continue
+    const finish = ['foil', 'etched'].includes(r['Foil']) ? r['Foil'] : 'normal'
+    const k = entryKey(id, finish)
+    entries[k] = { id, finish, qty: (entries[k]?.qty || 0) + qty }
+    cards += qty
+  }
+  return { entries, cards, rows: data.length, errors: errors.length }
+}
