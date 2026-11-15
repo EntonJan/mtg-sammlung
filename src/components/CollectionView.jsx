@@ -15,7 +15,9 @@ function loadPref(key, fallback) {
 }
 function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* egal */ } }
 
-export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd }) {
+export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany }) {
+  const [selected, setSelected] = useState(() => new Set())
+  const lastIdx = useRef(-1)
   const [f, setF] = useState(() => loadPref('filter', DEFAULT_FILTER))
   const [view, setView] = useState(() => loadPref('view', { mode: 'list' }).mode)
   const [showFilters, setShowFilters] = useState(false)
@@ -119,6 +121,32 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
     for (const r of filtered) { qty += r.qty; value += r.value }
     return { qty, value, lines: filtered.length }
   }, [filtered])
+
+  // Mehrfachauswahl: Strg/Cmd+Klick einzeln, Shift+Klick Bereich, normaler Klick öffnet Details
+  const onRowClick = (e, r, idx) => {
+    if (e.ctrlKey || e.metaKey) {
+      setSelected((s) => { const n = new Set(s); n.has(r.key) ? n.delete(r.key) : n.add(r.key); return n })
+      lastIdx.current = idx
+    } else if (e.shiftKey && lastIdx.current >= 0) {
+      const [a, b] = [Math.min(lastIdx.current, idx), Math.max(lastIdx.current, idx)]
+      setSelected((s) => { const n = new Set(s); for (let i = a; i <= b; i++) n.add(filtered[i].key); return n })
+      window.getSelection()?.removeAllRanges()
+    } else if (selected.size) {
+      setSelected(new Set()); lastIdx.current = idx
+    } else {
+      lastIdx.current = idx
+      onOpen(r.card)
+    }
+  }
+  const selectedRows = filtered.filter((r) => selected.has(r.key))
+  const payloadFor = (r) => (selected.has(r.key) && selectedRows.length > 1
+    ? { multi: selectedRows.map((x) => ({ id: x.id, finish: x.finish, qty: 1, from: 'collection' })) }
+    : { id: r.id, finish: r.finish, from: 'collection' })
+  const moveSelected = (to) => {
+    onMoveMany(selectedRows.map((x) => ({ id: x.id, finish: x.finish, qty: 1, from: 'collection' })), to)
+    setSelected(new Set())
+  }
+  const targets = Object.values(decks || {}).sort((a, b) => (a.kind === 'binder') - (b.kind === 'binder') || a.name.localeCompare(b.name))
 
   const activeFilters = ['text', 'type', 'rarity', 'set', 'cmcMin', 'cmcMax', 'minPrice', 'finish']
     .filter((k) => f[k] !== '').length + (f.colors.length ? 1 : 0)
@@ -225,14 +253,28 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
         <span>Wert <b>{euro(totals.value)}</b></span>
       </div>
 
+      {selectedRows.length > 0 && (
+        <div className="selbar">
+          <b>{selectedRows.length} ausgewählt</b>
+          {onMoveMany && targets.length > 0 && (
+            <select value="" onChange={(e) => e.target.value && moveSelected(e.target.value)}>
+              <option value="">→ je 1 Exemplar verschieben nach …</option>
+              {targets.map((d) => <option key={d.id} value={d.id}>{d.kind === 'binder' ? '📁 ' : ''}{d.name}</option>)}
+            </select>
+          )}
+          <span className="muted small">oder die Auswahl auf ein Deck ziehen</span>
+          <button className="btn small ghost" onClick={() => setSelected(new Set())}>Auswahl aufheben</button>
+        </div>
+      )}
+
       {view === 'list'
-        ? <VirtualList items={filtered} onOpen={onOpen} onQuickAdd={onQuickAdd} />
-        : <VirtualGrid items={filtered} onOpen={onOpen} onQuickAdd={onQuickAdd} />}
+        ? <VirtualList items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} />
+        : <VirtualGrid items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} />}
     </div>
   )
 }
 
-function VirtualList({ items, onOpen, onQuickAdd }) {
+function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
   const parentRef = useRef(null)
   const v = useVirtualizer({
     count: items.length,
@@ -249,10 +291,10 @@ function VirtualList({ items, onOpen, onQuickAdd }) {
           return (
             <div
               key={r.key}
-              className="row"
+              className={`row ${selected.has(r.key) ? 'sel' : ''}`}
               style={{ transform: `translateY(${vi.start}px)`, height: vi.size }}
-              onClick={() => onOpen(c)}
-              {...dragProps({ id: r.id, finish: r.finish, from: 'collection' })}
+              onClick={(e) => onRowClick(e, r, vi.index)}
+              {...dragProps(payloadFor(r))}
             >
               <span className="qty">{r.qty}×</span>
               <img className="thumb" src={c.thumb} alt="" loading="lazy" draggable={false} />
@@ -282,7 +324,7 @@ function VirtualList({ items, onOpen, onQuickAdd }) {
   )
 }
 
-function VirtualGrid({ items, onOpen, onQuickAdd }) {
+function VirtualGrid({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
   const parentRef = useRef(null)
   const [width, setWidth] = useState(800)
   useEffect(() => {
@@ -314,8 +356,8 @@ function VirtualGrid({ items, onOpen, onQuickAdd }) {
             className="grid-row"
             style={{ transform: `translateY(${vi.start}px)`, height: rowH, gridTemplateColumns: `repeat(${cols}, 1fr)` }}
           >
-            {items.slice(vi.index * cols, vi.index * cols + cols).map((r) => (
-              <div key={r.key} className="tile" onClick={() => onOpen(r.card)} {...dragProps({ id: r.id, finish: r.finish, from: 'collection' })}>
+            {items.slice(vi.index * cols, vi.index * cols + cols).map((r, j) => (
+              <div key={r.key} className={`tile ${selected.has(r.key) ? 'sel' : ''}`} onClick={(e) => onRowClick(e, r, vi.index * cols + j)} {...dragProps(payloadFor(r))}>
                 <img src={r.card.img} alt={r.card.name} loading="lazy" draggable={false} />
                 <span className="tile-badge">{r.qty}×</span>
                 {r.finish === 'foil' && r.printings === 1 && <span className="tile-foil">Foil</span>}

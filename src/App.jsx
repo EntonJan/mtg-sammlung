@@ -223,6 +223,9 @@ function Main({ user }) {
     notify(`${moved} Karten → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
   }, [commit])
 
+  // Ziel für Drag & Drop: einzelne Karte oder Mehrfachauswahl
+  const dropCard = useCallback((d, to) => (d.multi ? moveMany(d.multi, to) : moveCard(d, to)), [moveMany, moveCard])
+
   const createDeck = useCallback((name, kind) => {
     const id = newDeckId()
     const order = Object.keys(S.current.decks).length
@@ -408,7 +411,7 @@ function Main({ user }) {
         {entries && (
           <Sidebar
             view={view} setView={setView} freeCount={freeCount} catCounts={catCounts} subCounts={subCounts} decks={decks} deckStats={deckStats}
-            onDrop={(d, to) => moveCard(d, to)} onCreate={createDeck}
+            onDrop={dropCard} onCreate={createDeck}
             open={sideOpen} onClose={() => setSideOpen(false)}
           />
         )}
@@ -419,7 +422,7 @@ function Main({ user }) {
             <div className="center muted">Lade …</div>
           ) : view.kind === 'collection' ? (
             Object.keys(entries).length || Object.keys(decks).length ? (
-              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} />
+              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} decks={decks} onMoveMany={moveMany} />
             ) : (
               <div className="center">
                 <p>Deine Sammlung ist noch leer.</p>
@@ -428,14 +431,14 @@ function Main({ user }) {
             )
           ) : deck?.kind === 'binder' ? (
             <BinderView
-              key={deck.id} deck={deck} cards={cards} onOpen={setOpen} onMove={moveCard}
+              key={deck.id} deck={deck} cards={cards} onOpen={setOpen} onMove={dropCard}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
             />
           ) : deck ? (
             <DeckView
               key={deck.id}
-              deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={moveCard}
+              deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={dropCard} onMoveMany={moveMany}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}

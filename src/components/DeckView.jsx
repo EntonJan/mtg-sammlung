@@ -13,7 +13,7 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
@@ -157,6 +157,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onRename
           entries={entries} cards={cards} onOpen={onOpen}
           identity={identity.length ? identity : null}
           onQuickAdd={(r) => onMove({ id: r.id, finish: r.finish, from: 'collection' }, deck.id)}
+          decks={{ [deck.id]: deck }} onMoveMany={onMoveMany}
         />
       </aside>
     )}

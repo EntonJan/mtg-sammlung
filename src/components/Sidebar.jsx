@@ -21,22 +21,6 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
 
   const go = (v) => { setView(v); onClose?.() }
 
-  const Entry = ({ d, binder }) => {
-    const st = deckStats[d.id] || { count: 0, value: 0 }
-    return (
-      <div
-        className={`side-item ${view.kind === 'deck' && view.id === d.id ? 'on' : ''} ${over === d.id ? 'over' : ''}`}
-        onClick={() => go({ kind: 'deck', id: d.id })}
-        {...target(d.id)}
-        title={`${st.count} Karten · ${euro(st.value)}`}
-      >
-        {binder && <span className="side-icon">📁</span>}
-        <span className="side-name">{d.name}</span>
-        <span className={`side-count ${!binder && st.count === 100 ? 'full' : ''}`}>{st.count}</span>
-      </div>
-    )
-  }
-
   return (
     <aside className={`sidebar ${open ? 'open' : ''}`}>
       <div
@@ -94,10 +78,10 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
 
       <div className="side-list">
         <div className="side-head">Decks</div>
-        {list.map((d) => <Entry key={d.id} d={d} />)}
+        {list.map((d) => <Entry key={d.id} d={d} st={deckStats[d.id]} on={view.kind === 'deck' && view.id === d.id} over={over === d.id} go={go} target={target} />)}
         {!list.length && <p className="side-empty">Noch keine Decks. Lege unten eins an und ziehe Karten darauf.</p>}
         {binders.length > 0 && <div className="side-head">Ordner</div>}
-        {binders.map((d) => <Entry key={d.id} d={d} binder />)}
+        {binders.map((d) => <Entry key={d.id} d={d} binder st={deckStats[d.id]} on={view.kind === 'deck' && view.id === d.id} over={over === d.id} go={go} target={target} />)}
       </div>
 
       <form
@@ -111,5 +95,22 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
         </select>
       </form>
     </aside>
+  )
+}
+
+// Eigene Komponente außerhalb von Sidebar – sonst würde React den Eintrag bei jedem
+// Hover neu erzeugen und das Ablageziel während des Ziehens verschwinden.
+function Entry({ d, binder, st = { count: 0, value: 0 }, on, over, go, target }) {
+  return (
+    <div
+      className={`side-item ${on ? 'on' : ''} ${over ? 'over' : ''}`}
+      onClick={() => go({ kind: 'deck', id: d.id })}
+      {...target(d.id)}
+      title={`${st.count} Karten · ${euro(st.value)}`}
+    >
+      {binder && <span className="side-icon">📁</span>}
+      <span className="side-name">{d.name}</span>
+      <span className={`side-count ${!binder && st.count === 100 ? 'full' : ''}`}>{st.count}</span>
+    </div>
   )
 }

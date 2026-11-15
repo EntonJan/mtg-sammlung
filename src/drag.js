@@ -7,9 +7,17 @@ export function dragProps(payload) {
     onDragStart: (e) => {
       e.dataTransfer.setData(TYPE, JSON.stringify(payload))
       e.dataTransfer.effectAllowed = 'move'
+      if (payload.multi) {
+        // Eigenes Zieh-Bild: „N Karten“
+        const g = document.createElement('div')
+        g.className = 'drag-ghost'
+        g.textContent = `${payload.multi.length} Karten`
+        document.body.appendChild(g)
+        e.dataTransfer.setDragImage(g, 20, 20)
+      }
       document.body.classList.add('dragging')
     },
-    onDragEnd: () => document.body.classList.remove('dragging'),
+    onDragEnd: () => { document.body.classList.remove('dragging'); document.querySelectorAll('.drag-ghost').forEach((g) => g.remove()) },
   }
 }
 
