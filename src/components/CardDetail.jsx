@@ -79,9 +79,14 @@ export default function CardDetail({ card, entries, decks, cards, onChange, onMo
                 {inDecks.flatMap(({ deck, items }) => items.map((e) => (
                   <div key={`${deck.id}|${e.id}|${e.finish}`} className="owned-row">
                     <span className="ver"><b>{deck.name}</b> · {e.qty}× {version(e)}</span>
-                    <button className="btn small ghost" onClick={() => onMove({ id: e.id, finish: e.finish, from: deck.id }, 'collection')}>
-                      ↩ zurück
-                    </button>
+                    <select
+                      className="move-select" value=""
+                      onChange={(ev) => ev.target.value && onMove({ id: e.id, finish: e.finish, from: deck.id }, ev.target.value)}
+                    >
+                      <option value="">verschieben …</option>
+                      <option value="collection">↩ zurück in die Sammlung</option>
+                      {deckList.filter((d) => d.id !== deck.id).map((d) => <option key={d.id} value={d.id}>→ {d.name}</option>)}
+                    </select>
                   </div>
                 )))}
               </div>

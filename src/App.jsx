@@ -157,7 +157,14 @@ function Main({ user }) {
     const srcMap = from === 'collection' ? s.entries : s.decks[from]?.entries
     const have = srcMap?.[entryKey(id, finish)]?.qty || 0
     const name = cards[id]?.name || 'Karte'
-    if (have < qty) { notify(`${name}: kein freies Exemplar mehr`); return }
+    if (have < qty) {
+      const oid = cards[id]?.oracleId
+      const where = Object.values(s.decks).filter((d) => d.id !== to && Object.values(d.entries).some((e) => cards[e.id]?.oracleId === oid)).map((d) => d.name)
+      notify(where.length
+        ? `${name}: kein freies Exemplar – steckt in ${where.join(', ')}. Im Deck über „Karte holen“ umlegen.`
+        : `${name}: kein freies Exemplar mehr`)
+      return
+    }
 
     let ne = s.entries
     const nd = { ...s.decks }
@@ -350,7 +357,7 @@ function Main({ user }) {
           ) : deck ? (
             <DeckView
               key={deck.id}
-              deck={deck} cards={cards} entries={entries} onOpen={setOpen} onMove={moveCard}
+              deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={moveCard}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}

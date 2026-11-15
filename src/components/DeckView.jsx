@@ -6,12 +6,13 @@ import Mana from './Mana'
 import DeckStats from './DeckStats'
 import DeckHand from './DeckHand'
 import CollectionView from './CollectionView'
+import DeckFetch from './DeckFetch'
 import DeckCategories, { TagPicker } from './DeckCategories'
 import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, cards, entries, onMove, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
@@ -109,6 +110,7 @@ export default function DeckView({ deck, cards, entries, onMove, onRename, onDel
       {tab === 'cats' && <DeckCategories deck={deck} rows={rows} onUpdate={onUpdate} />}
 
       {tab === 'list' && <>
+      <DeckFetch deck={deck} entries={entries} decks={decks} cards={cards} onMove={onMove} />
       {rows.length > 0 && (
         <div className="seg seg-small">
           <button className={groupBy === 'type' ? 'on' : ''} onClick={() => setGroupBy('type')}>Nach Typ</button>

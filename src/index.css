@@ -378,3 +378,11 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .match-table tr.elsewhere td:first-child { border-left: 3px solid var(--accent); }
 .match-table tr.missing td:first-child { border-left: 3px solid var(--bad); }
 .match-table .chip { margin-left: 6px; }
+
+/* Karte holen */
+.fetch { margin-bottom: 10px; position: relative; max-width: 640px; }
+.fetch .search { width: 100%; }
+.fetch-list { margin-top: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.fetch-item { padding: 6px; border-bottom: 1px solid var(--line); }
+.fetch-item:last-child { border-bottom: none; }
+.fetch-sources { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
