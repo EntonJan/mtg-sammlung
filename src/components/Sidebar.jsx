@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { readDrag } from '../drag'
-import { euro } from '../util'
+import { GROUPS, euro } from '../util'
 
 // Linke Leiste: „Sammlung“ + alle Decks. Jeder Eintrag ist ein Ablageziel für Drag & Drop.
-export default function Sidebar({ view, setView, freeCount, decks, deckStats, onDrop, onCreate, open, onClose }) {
+export default function Sidebar({ view, setView, freeCount, catCounts, decks, deckStats, onDrop, onCreate, open, onClose }) {
   const [over, setOver] = useState(null)
   const [newName, setNewName] = useState('')
 
@@ -20,13 +20,29 @@ export default function Sidebar({ view, setView, freeCount, decks, deckStats, on
   return (
     <aside className={`sidebar ${open ? 'open' : ''}`}>
       <div
-        className={`side-item main ${view.kind === 'collection' ? 'on' : ''} ${over === 'collection' ? 'over' : ''}`}
+        className={`side-item main ${view.kind === 'collection' && !view.cat ? 'on' : ''} ${over === 'collection' ? 'over' : ''}`}
         onClick={() => go({ kind: 'collection' })}
         {...target('collection')}
       >
+        <span className={`caret ${view.kind === 'collection' ? 'open' : ''}`}>▸</span>
         <span className="side-name">Sammlung</span>
         <span className="side-count">{freeCount.toLocaleString('de-DE')}</span>
       </div>
+      {view.kind === 'collection' && (
+        <div className="side-sub">
+          {GROUPS.filter(([k]) => catCounts[k]).map(([k, label]) => (
+            <div
+              key={k}
+              className={`side-item sub ${view.cat === k ? 'on' : ''}`}
+              onClick={() => go(view.cat === k ? { kind: 'collection' } : { kind: 'collection', cat: k })}
+              {...target('collection')}
+            >
+              <span className="side-name">{label}</span>
+              <span className="side-count">{catCounts[k].toLocaleString('de-DE')}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="side-head">Decks</div>
       <div className="side-list">

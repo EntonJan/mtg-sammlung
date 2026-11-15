@@ -1,26 +1,8 @@
 import { useMemo, useState } from 'react'
 import { dragProps, readDrag } from '../drag'
 import { entryKey } from '../store'
-import { COLOR_NAMES, FINISH_LABEL, unitPrice, euro } from '../util'
+import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../util'
 import Mana from './Mana'
-
-const GROUPS = [
-  ['Creature', 'Kreaturen'],
-  ['Planeswalker', 'Planeswalker'],
-  ['Battle', 'Kämpfe'],
-  ['Instant', 'Spontanzauber'],
-  ['Sorcery', 'Hexereien'],
-  ['Artifact', 'Artefakte'],
-  ['Enchantment', 'Verzauberungen'],
-  ['Land', 'Länder'],
-]
-
-function groupOf(type) {
-  const front = type.split(' // ')[0]
-  if (front.includes('Land')) return 'Land'
-  for (const [k] of GROUPS) if (front.includes(k)) return k
-  return 'Other'
-}
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
@@ -42,7 +24,7 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
   const groups = useMemo(() => {
     const m = {}
     for (const r of rest) (m[groupOf(r.card.type)] ||= []).push(r)
-    return [...GROUPS, ['Other', 'Sonstige']].filter(([k]) => m[k]).map(([k, label]) => ({ k, label, rows: m[k] }))
+    return GROUPS.filter(([k]) => m[k]).map(([k, label]) => ({ k, label, rows: m[k] }))
   }, [rest])
 
   const count = rows.reduce((s, r) => s + r.qty, 0)

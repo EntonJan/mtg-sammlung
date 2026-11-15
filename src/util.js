@@ -37,3 +37,23 @@ export function manaSymbols(cost) {
   if (!cost) return []
   return [...cost.matchAll(/\{([^}]+)\}|( \/\/ )/g)].map((m) => m[1] ?? '//')
 }
+
+// Hauptkategorien nach Kartentyp (Vorderseite zählt; Länder haben Vorrang)
+export const GROUPS = [
+  ['Creature', 'Kreaturen'],
+  ['Planeswalker', 'Planeswalker'],
+  ['Battle', 'Kämpfe'],
+  ['Instant', 'Spontanzauber'],
+  ['Sorcery', 'Hexereien'],
+  ['Artifact', 'Artefakte'],
+  ['Enchantment', 'Verzauberungen'],
+  ['Land', 'Länder'],
+  ['Other', 'Sonstige'],
+]
+
+export function groupOf(type = '') {
+  const front = type.split(' // ')[0]
+  if (front.includes('Land')) return 'Land'
+  for (const [k] of GROUPS) if (front.includes(k)) return k
+  return 'Other'
+}
