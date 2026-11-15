@@ -365,3 +365,16 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
   .deck-split.builder { flex-direction: column; }
   .builder-pane { border-left: none; border-top: 1px solid var(--line); min-height: 50vh; }
 }
+
+/* Abgleich */
+.match { max-width: 1000px; }
+.mono-area { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); padding: 10px; font: 13px/1.5 ui-monospace, Consolas, monospace; resize: vertical; }
+.match-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.match-actions input { flex: 1 1 220px; }
+.match-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.match-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.match-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.match-table tr.have td:first-child { border-left: 3px solid var(--good); }
+.match-table tr.elsewhere td:first-child { border-left: 3px solid var(--accent); }
+.match-table tr.missing td:first-child { border-left: 3px solid var(--bad); }
+.match-table .chip { margin-left: 6px; }

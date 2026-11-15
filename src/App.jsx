@@ -10,6 +10,7 @@ import ImportView from './components/ImportView'
 import CardDetail from './components/CardDetail'
 import Sidebar from './components/Sidebar'
 import DeckView from './components/DeckView'
+import MatchView from './components/MatchView'
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -197,6 +198,25 @@ function Main({ user }) {
     updateDeck(id, { commanders: has ? d.commanders.filter((k) => k !== key) : [...d.commanders, key] })
   }, [updateDeck])
 
+  // Neues Deck aus freien Exemplaren der Sammlung anlegen (Abgleich „Was fehlt mir?“)
+  const createDeckFromPicks = useCallback((name, picks, commanders) => {
+    const s = S.current
+    const id = newDeckId()
+    let ne = s.entries
+    let de = {}
+    for (const p of picks) {
+      const have = ne[entryKey(p.id, p.finish)]?.qty || 0
+      const q = Math.min(have, p.qty)
+      if (!q) continue
+      ne = bump(ne, p.id, p.finish, -q)
+      de = bump(de, p.id, p.finish, q)
+    }
+    const deck = { id, name, order: Object.keys(s.decks).length, commanders: commanders.filter((k) => de[k]), entries: de }
+    commit({ entries: ne, decks: { ...s.decks, [id]: deck }, collectionChanged: true, changedDecks: [id] })
+    setView({ kind: 'deck', id })
+    notify(`Deck „${name}“ mit ${Object.values(de).reduce((t, e) => t + e.qty, 0)} Karten angelegt`)
+  }, [commit])
+
   // Deck auflösen: alle Karten zurück in die Sammlung
   const deleteDeck = useCallback((id) => {
     const s = S.current
@@ -294,6 +314,7 @@ function Main({ user }) {
         <h1>MTG Sammlung</h1>
         <nav>
           <button className={view.kind === 'add' ? 'on' : ''} onClick={() => setView({ kind: 'add' })}>Hinzufügen</button>
+          <button className={view.kind === 'match' ? 'on' : ''} onClick={() => setView({ kind: 'match' })}>Was fehlt mir?</button>
           <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
         </nav>
         <div className="user">
@@ -337,6 +358,8 @@ function Main({ user }) {
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
+          ) : view.kind === 'match' ? (
+            <MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} />
           ) : view.kind === 'import' ? (
             <ImportView entries={entries} decks={decks} onImport={importEntries} onImportDeck={importDeck} />
           ) : (
