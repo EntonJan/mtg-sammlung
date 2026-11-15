@@ -11,6 +11,7 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
   const [mode, setMode] = useState('replace')
   const [busy, setBusy] = useState(false)
   const [subtract, setSubtract] = useState(true)
+  const [separate, setSeparate] = useState([])
 
   const current = Object.values(entries).reduce((s, e) => s + e.qty, 0)
 
@@ -20,7 +21,10 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
     if (!file) return
     setFileName(file.name)
     try {
-      setParsed(parseManaBox(await file.text()))
+      const p = parseManaBox(await file.text())
+      setParsed(p)
+      // Tausch-/Handelsordner standardmäßig als eigenen Ordner übernehmen
+      setSeparate(Object.keys(p.byBinder).filter((b) => /trade|tausch|handel|verkauf|sell/i.test(b)))
     } catch (e) {
       setError(e.message)
     }
@@ -29,7 +33,7 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
   async function run() {
     setBusy(true)
     try {
-      await onImport(parsed.entries, mode, subtract)
+      await onImport(parsed, mode, subtract, separate)
       setParsed(null)
       setFileName('')
     } catch (e) {
@@ -68,6 +72,18 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
             <input type="radio" checked={mode === 'add'} onChange={() => setMode('add')} />
             <span><b>Hinzufügen</b> – Anzahlen werden zur bestehenden Sammlung addiert (z. B. für einen Export nur neuer Karten).</span>
           </label>
+          {Object.keys(parsed.byBinder).length > 1 && (
+            <div className="binders">
+              <b className="small">ManaBox-Ordner als eigenen Ordner übernehmen (nicht in die freie Sammlung):</b>
+              {Object.entries(parsed.byBinder).map(([b, ents]) => (
+                <label key={b} className="check-line">
+                  <input type="checkbox" checked={separate.includes(b)}
+                    onChange={(e) => setSeparate((s) => e.target.checked ? [...s, b] : s.filter((x) => x !== b))} />
+                  <span>{b} <span className="muted">({Object.values(ents).reduce((t, x) => t + x.qty, 0)} Karten)</span></span>
+                </label>
+              ))}
+            </div>
+          )}
           {mode === 'replace' && hasDecks && (
             <label className="check-line">
               <input type="checkbox" checked={subtract} onChange={(e) => setSubtract(e.target.checked)} />

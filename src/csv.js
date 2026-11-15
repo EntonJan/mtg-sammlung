@@ -8,6 +8,7 @@ export function parseManaBox(text) {
     throw new Error('Das sieht nicht nach einem ManaBox-Export aus (Spalte „Scryfall ID“ fehlt).')
   }
   const entries = {}
+  const byBinder = {}
   let cards = 0
   for (const r of data) {
     const id = r['Scryfall ID']?.trim()
@@ -16,7 +17,10 @@ export function parseManaBox(text) {
     const finish = ['foil', 'etched'].includes(r['Foil']) ? r['Foil'] : 'normal'
     const k = entryKey(id, finish)
     entries[k] = { id, finish, qty: (entries[k]?.qty || 0) + qty }
+    const b = (r['Binder Name'] || '').trim() || 'Ohne Ordner'
+    const be = (byBinder[b] ||= {})
+    be[k] = { id, finish, qty: (be[k]?.qty || 0) + qty }
     cards += qty
   }
-  return { entries, cards, rows: data.length, errors: errors.length }
+  return { entries, byBinder, cards, rows: data.length, errors: errors.length }
 }

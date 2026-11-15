@@ -12,6 +12,7 @@ import Sidebar from './components/Sidebar'
 import DeckView from './components/DeckView'
 import MatchView from './components/MatchView'
 import ValueView from './components/ValueView'
+import BinderView from './components/BinderView'
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -196,10 +197,10 @@ function Main({ user }) {
     notify(`${name} → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
   }, [cards, commit])
 
-  const createDeck = useCallback((name) => {
+  const createDeck = useCallback((name, kind) => {
     const id = newDeckId()
     const order = Object.keys(S.current.decks).length
-    commit({ decks: { ...S.current.decks, [id]: { id, name, order, commanders: [], entries: {} } }, changedDecks: [id] })
+    commit({ decks: { ...S.current.decks, [id]: { id, name, order, commanders: [], entries: {}, ...(kind ? { kind } : {}) } }, changedDecks: [id] })
     return id
   }, [commit])
 
@@ -244,29 +245,46 @@ function Main({ user }) {
     setView({ kind: 'collection' })
   }, [commit])
 
-  const importEntries = useCallback(async (incoming, mode, subtractDecks) => {
+  const importEntries = useCallback(async (parsed, mode, subtractDecks, separate = []) => {
+    const s = S.current
+    // Karten aus „abgetrennten“ ManaBox-Ordnern (z. B. Tradebinder) gehen in eigene Ordner
+    let incoming = {}
+    for (const [b, ents] of Object.entries(parsed.byBinder)) {
+      if (separate.includes(b)) continue
+      for (const [k, e] of Object.entries(ents)) incoming[k] = { ...e, qty: (incoming[k]?.qty || 0) + e.qty }
+    }
+    const nd = { ...s.decks }
+    const changedDecks = []
+    for (const b of separate) {
+      const existing = Object.values(nd).find((d) => d.kind === 'binder' && d.name === b)
+      const id = existing?.id || newDeckId()
+      let ents = mode === 'replace' || !existing ? {} : { ...existing.entries }
+      for (const e of Object.values(parsed.byBinder[b])) ents = bump(ents, e.id, e.finish, e.qty)
+      nd[id] = { ...(existing || { id, name: b, order: Object.keys(nd).length, commanders: [], kind: 'binder' }), entries: ents }
+      changedDecks.push(id)
+    }
     let next
     if (mode === 'replace') {
       next = { ...incoming }
       // Karten, die in Decks liegen, stehen in ManaBox noch in der Sammlung → abziehen
       if (subtractDecks) {
-        for (const d of Object.values(S.current.decks)) {
+        for (const d of Object.values(nd)) {
+          if (changedDecks.includes(d.id)) continue
           for (const e of Object.values(d.entries)) {
             const k = entryKey(e.id, e.finish)
             if (next[k]) next = bump(next, e.id, e.finish, -Math.min(e.qty, next[k].qty))
           }
         }
       }
-    }
-    else {
-      next = { ...S.current.entries }
+    } else {
+      next = { ...s.entries }
       for (const [k, e] of Object.entries(incoming)) next[k] = { ...e, qty: (next[k]?.qty || 0) + e.qty }
     }
     setStatus('Lade Kartendaten …')
-    const full = await ensureCards(Object.values(next).map((e) => e.id), (d, t) => setStatus(`Lade Kartendaten … ${d}/${t}`))
+    const full = await ensureCards(Object.keys(parsed.entries).map((k) => k.split('|')[0]), (d, t) => setStatus(`Lade Kartendaten … ${d}/${t}`))
     setCards({ ...full })
     setStatus('')
-    commit({ entries: next, collectionChanged: true })
+    commit({ entries: next, decks: nd, collectionChanged: true, changedDecks })
     await flush()
     setView({ kind: 'collection' })
   }, [commit, flush])
@@ -364,6 +382,12 @@ function Main({ user }) {
                 <button className="btn primary" onClick={() => setView({ kind: 'import' })}>ManaBox-CSV importieren</button>
               </div>
             )
+          ) : deck?.kind === 'binder' ? (
+            <BinderView
+              key={deck.id} deck={deck} cards={cards} onOpen={setOpen} onMove={moveCard}
+              onRename={(name) => updateDeck(deck.id, { name })}
+              onDelete={() => deleteDeck(deck.id)}
+            />
           ) : deck ? (
             <DeckView
               key={deck.id}

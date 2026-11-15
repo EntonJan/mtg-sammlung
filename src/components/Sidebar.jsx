@@ -8,7 +8,10 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
   const [newName, setNewName] = useState('')
   const [subFilter, setSubFilter] = useState('')
 
-  const list = Object.values(decks).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+  const all = Object.values(decks).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+  const list = all.filter((d) => d.kind !== 'binder')
+  const binders = all.filter((d) => d.kind === 'binder')
+  const [newKind, setNewKind] = useState('deck')
 
   const target = (key) => ({
     onDragOver: (e) => { if (e.dataTransfer.types.includes('application/x-mtg-card')) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOver(key) } },
@@ -17,6 +20,22 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
   })
 
   const go = (v) => { setView(v); onClose?.() }
+
+  const Entry = ({ d, binder }) => {
+    const st = deckStats[d.id] || { count: 0, value: 0 }
+    return (
+      <div
+        className={`side-item ${view.kind === 'deck' && view.id === d.id ? 'on' : ''} ${over === d.id ? 'over' : ''}`}
+        onClick={() => go({ kind: 'deck', id: d.id })}
+        {...target(d.id)}
+        title={`${st.count} Karten · ${euro(st.value)}`}
+      >
+        {binder && <span className="side-icon">📁</span>}
+        <span className="side-name">{d.name}</span>
+        <span className={`side-count ${!binder && st.count === 100 ? 'full' : ''}`}>{st.count}</span>
+      </div>
+    )
+  }
 
   return (
     <aside className={`sidebar ${open ? 'open' : ''}`}>
@@ -73,31 +92,23 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
         </div>
       )}
 
-      <div className="side-head">Decks</div>
       <div className="side-list">
-        {list.map((d) => {
-          const s = deckStats[d.id] || { count: 0, value: 0 }
-          return (
-            <div
-              key={d.id}
-              className={`side-item ${view.kind === 'deck' && view.id === d.id ? 'on' : ''} ${over === d.id ? 'over' : ''}`}
-              onClick={() => go({ kind: 'deck', id: d.id })}
-              {...target(d.id)}
-              title={`${s.count} Karten · ${euro(s.value)}`}
-            >
-              <span className="side-name">{d.name}</span>
-              <span className={`side-count ${s.count === 100 ? 'full' : ''}`}>{s.count}</span>
-            </div>
-          )
-        })}
+        <div className="side-head">Decks</div>
+        {list.map((d) => <Entry key={d.id} d={d} />)}
         {!list.length && <p className="side-empty">Noch keine Decks. Lege unten eins an und ziehe Karten darauf.</p>}
+        {binders.length > 0 && <div className="side-head">Ordner</div>}
+        {binders.map((d) => <Entry key={d.id} d={d} binder />)}
       </div>
 
       <form
         className="side-new"
-        onSubmit={(e) => { e.preventDefault(); if (newName.trim()) { const id = onCreate(newName.trim()); setNewName(''); go({ kind: 'deck', id }) } }}
+        onSubmit={(e) => { e.preventDefault(); if (newName.trim()) { const id = onCreate(newName.trim(), newKind === 'binder' ? 'binder' : undefined); setNewName(''); go({ kind: 'deck', id }) } }}
       >
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="+ Neues Deck" />
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newKind === 'binder' ? '+ Neuer Ordner' : '+ Neues Deck'} />
+        <select value={newKind} onChange={(e) => setNewKind(e.target.value)} title="Deck oder Ordner (z. B. Tauschordner)">
+          <option value="deck">Deck</option>
+          <option value="binder">Ordner</option>
+        </select>
       </form>
     </aside>
   )

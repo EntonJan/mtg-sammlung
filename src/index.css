@@ -84,7 +84,10 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .side-list { flex: 1; min-height: 0; overflow-y: auto; }
 .side-empty { padding: 8px 14px; font-size: 13px; color: var(--muted); }
 .side-new { padding: 10px; border-top: 1px solid var(--line); }
-.side-new input { width: 100%; }
+.side-new { display: flex; gap: 6px; }
+.side-new input { flex: 1; min-width: 0; }
+.side-new select { padding: 6px; font-size: 13px; }
+.side-icon { font-size: 13px; }
 .side-backdrop { display: none; }
 .caret { display: inline-block; width: 12px; font-size: 11px; color: var(--muted); transition: transform .15s; }
 .caret.open { transform: rotate(90deg); }
@@ -404,3 +407,7 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .value { max-width: 1000px; }
 .linechart { width: 100%; height: auto; }
 .match-table tbody tr:hover { background: var(--panel2); }
+
+.binder-table tr { cursor: grab; }
+.binder-table .qty { width: 40px; }
+.binders { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
