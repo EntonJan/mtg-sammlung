@@ -4,6 +4,7 @@ import { entryKey } from '../store'
 import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../util'
 import Mana from './Mana'
 import DeckStats from './DeckStats'
+import DeckHand from './DeckHand'
 import DeckCategories, { TagPicker } from './DeckCategories'
 import { catsOf, tagKey } from '../categories'
 
@@ -91,12 +92,13 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
       </div>
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['cats', 'Kategorien'], ['stats', 'Statistik']].map(([k, l]) => (
+        {[['list', 'Liste'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['hand', 'Probehand']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {tab === 'stats' && <DeckStats rows={rows} />}
+      {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} />}
       {tab === 'cats' && <DeckCategories deck={deck} rows={rows} onUpdate={onUpdate} />}
 
       {tab === 'list' && <>

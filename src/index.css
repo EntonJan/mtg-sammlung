@@ -337,3 +337,16 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .cat-cards { margin: 8px 0 0; padding-left: 16px; font-size: 13px; color: var(--muted); max-height: 160px; overflow-y: auto; }
 .cat-new { display: flex; gap: 8px; max-width: 520px; }
 .cat-new input { flex: 1; }
+
+/* Probehand */
+.hand-wrap { display: flex; flex-direction: column; gap: 14px; }
+.hand-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hint { background: #22303f; color: #b8cde6; padding: 8px 12px; border-radius: 8px; font-size: 13px; margin: 0; }
+.hand { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.hand img { width: 100%; aspect-ratio: 488 / 680; border-radius: 4.75% / 3.5%; background: var(--panel2); cursor: pointer; transition: transform .12s; }
+.hand img:hover { transform: translateY(-4px); }
+.hand img.drawn { outline: 2px solid var(--accent); }
+.sim h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
+.small-curve { height: 110px; }
+.curve-bar.good { background: var(--good); }
+.sim .pip-table { margin-top: 12px; }
