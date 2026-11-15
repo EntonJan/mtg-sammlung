@@ -1,0 +1,124 @@
+import { useState } from 'react'
+import {
+  EmailAuthProvider, linkWithCredential, reauthenticateWithPopup, sendPasswordResetEmail,
+  signInWithEmailAndPassword, signInWithPopup, updatePassword,
+} from 'firebase/auth'
+import { auth, googleProvider } from '../firebase'
+import { isNativeApp } from '../util'
+
+// In der Android-App (Capacitor-WebView) blockt Google den Login per Popup →
+// dort nur E-Mail + Passwort. Das Passwort legt man einmal im Browser fest.
+
+const MSG = {
+  'auth/invalid-credential': 'E-Mail oder Passwort falsch.',
+  'auth/wrong-password': 'E-Mail oder Passwort falsch.',
+  'auth/user-not-found': 'Kein Konto mit dieser E-Mail.',
+  'auth/too-many-requests': 'Zu viele Versuche – bitte kurz warten.',
+  'auth/weak-password': 'Das Passwort muss mindestens 6 Zeichen haben.',
+  'auth/invalid-email': 'Ungültige E-Mail-Adresse.',
+}
+const msg = (e) => MSG[e.code] || e.message
+
+export function Login() {
+  const native = isNativeApp()
+  const [email, setEmail] = useState('')
+  const [pw, setPw] = useState('')
+  const [err, setErr] = useState('')
+  const [info, setInfo] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setErr(''); setBusy(true)
+    try { await signInWithEmailAndPassword(auth, email.trim(), pw) } catch (x) { setErr(msg(x)) } finally { setBusy(false) }
+  }
+  const reset = async () => {
+    setErr('')
+    if (!email.trim()) { setErr('Bitte zuerst die E-Mail eingeben.'); return }
+    try { await sendPasswordResetEmail(auth, email.trim()); setInfo('E-Mail zum Zurücksetzen ist unterwegs.') } catch (x) { setErr(msg(x)) }
+  }
+
+  return (
+    <div className="center login">
+      <h1>MTG Sammlung</h1>
+      <p className="muted">Deine Karten. Deine Decks. Ohne Ruckeln.</p>
+      {!native && (
+        <button className="btn primary big" onClick={() => signInWithPopup(auth, googleProvider).catch((x) => setErr(msg(x)))}>
+          Mit Google anmelden
+        </button>
+      )}
+      <form className="login-form" onSubmit={submit}>
+        {!native && <span className="muted small">oder mit E-Mail und App-Passwort</span>}
+        <input type="email" autoComplete="username" placeholder="E-Mail (dein Google-Konto)" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input type="password" autoComplete="current-password" placeholder="Passwort" value={pw} onChange={(e) => setPw(e.target.value)} />
+        <button className={`btn ${native ? 'primary big' : ''}`} disabled={busy}>{busy ? 'Anmelden …' : 'Anmelden'}</button>
+        <button type="button" className="btn ghost small" onClick={reset}>Passwort vergessen?</button>
+      </form>
+      {native && (
+        <p className="muted small" style={{ maxWidth: 340 }}>
+          Noch kein Passwort? Öffne die App einmal im Browser (entonjan.github.io/mtg-sammlung), melde dich mit Google an
+          und lege oben unter ⚙ ein App-Passwort fest.
+        </p>
+      )}
+      {err && <p className="error">{err}</p>}
+      {info && <p className="ok-text">{info}</p>}
+    </div>
+  )
+}
+
+// Einstellungen: App-Passwort festlegen/ändern (verknüpft E-Mail+Passwort mit dem Google-Konto)
+export function Settings({ user, onClose }) {
+  const hasPw = user.providerData.some((p) => p.providerId === 'password')
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [err, setErr] = useState('')
+  const [ok, setOk] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const save = async (e) => {
+    e.preventDefault()
+    setErr(''); setOk('')
+    if (pw.length < 6) { setErr('Mindestens 6 Zeichen.'); return }
+    if (pw !== pw2) { setErr('Die Passwörter stimmen nicht überein.'); return }
+    setBusy(true)
+    const run = () => (hasPw ? updatePassword(user, pw) : linkWithCredential(user, EmailAuthProvider.credential(user.email, pw)))
+    try {
+      try { await run() } catch (x) {
+        if (x.code !== 'auth/requires-recent-login') throw x
+        await reauthenticateWithPopup(user, googleProvider)
+        await run()
+      }
+      setOk('Gespeichert. In der Android-App meldest du dich jetzt mit deiner E-Mail und diesem Passwort an.')
+      setPw(''); setPw2('')
+    } catch (x) { setErr(msg(x)) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal settings" onClick={(e) => e.stopPropagation()}>
+        <button className="close" onClick={onClose} aria-label="Schließen">×</button>
+        <div className="detail-info">
+          <h2>Einstellungen</h2>
+          <p className="muted small">Angemeldet als {user.email}</p>
+
+          <h3>Android-App</h3>
+          <p className="small">
+            Die App gibt es als APK zum direkten Installieren:{' '}
+            <a href="https://github.com/EntonJan/mtg-sammlung/releases/latest" target="_blank" rel="noreferrer">Download (GitHub)</a>.
+            In der App funktioniert der Google-Login nicht (Google erlaubt das in Apps nicht) – dafür brauchst du ein App-Passwort.
+          </p>
+          {!isNativeApp() && (
+            <form className="login-form left" onSubmit={save}>
+              <b className="small">{hasPw ? 'App-Passwort ändern' : 'App-Passwort festlegen'}</b>
+              <input type="password" autoComplete="new-password" placeholder="Neues Passwort" value={pw} onChange={(e) => setPw(e.target.value)} />
+              <input type="password" autoComplete="new-password" placeholder="Passwort wiederholen" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+              <button className="btn primary" disabled={busy}>{busy ? 'Speichere …' : 'Speichern'}</button>
+              {err && <p className="error">{err}</p>}
+              {ok && <p className="ok-text">{ok}</p>}
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

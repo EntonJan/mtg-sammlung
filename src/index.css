@@ -430,3 +430,11 @@ body.dragging .side-item:not(.on) { background: rgba(217,164,65,.06); }
 .de-name { margin: 0 0 4px; color: #c9c2a8; }
 
 .export { display: flex; flex-direction: column; gap: 10px; max-width: 900px; }
+
+/* Login / Einstellungen */
+.login-form { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 320px; align-items: stretch; }
+.login-form.left { max-width: 360px; }
+.settings { max-width: 520px; }
+.settings a { color: var(--accent); }
+/* Android-App: Platz für Statusleiste */
+body.native header { padding-top: max(10px, env(safe-area-inset-top)); }

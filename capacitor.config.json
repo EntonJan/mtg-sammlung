@@ -1,0 +1,8 @@
+{
+  "appId": "de.entonjan.mtgsammlung",
+  "appName": "MTG Sammlung",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#121214"
+  }
+}

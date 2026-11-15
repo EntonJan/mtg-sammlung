@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MTG Sammlung</string>
+    <string name="title_activity_main">MTG Sammlung</string>
+    <string name="package_name">de.entonjan.mtgsammlung</string>
+    <string name="custom_url_scheme">de.entonjan.mtgsammlung</string>
+</resources>

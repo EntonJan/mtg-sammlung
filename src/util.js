@@ -70,3 +70,6 @@ export const wishAlarm = (w, cards) => {
   const p = unitPrice(cards[w.id], w.finish)
   return w.target != null && w.target !== '' && p != null && p <= Number(w.target)
 }
+
+// Läuft die App als Android-App (Capacitor)?
+export const isNativeApp = () => !!window.Capacitor?.isNativePlatform?.()

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
-import { auth, googleProvider } from './firebase'
+import { onAuthStateChanged, signOut } from 'firebase/auth'
+import { auth } from './firebase'
+import { Login, Settings } from './components/Auth'
 import { entryKey, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
 import { addToCache, ensureCards, getGermanNames, loadCardCache, loadGermanNames, refreshStalePrices, resolveDeckLines, savePriceSnapshot, setWaitHandler, today } from './scryfall'
 import { groupOf, subtypesOf, unitPrice, wishAlarm } from './util'
@@ -25,20 +26,6 @@ export default function App() {
   return <Main user={user} />
 }
 
-function Login() {
-  const [err, setErr] = useState('')
-  return (
-    <div className="center login">
-      <h1>MTG Sammlung</h1>
-      <p className="muted">Deine Karten. Deine Decks. Ohne Ruckeln.</p>
-      <button className="btn primary big" onClick={() => signInWithPopup(auth, googleProvider).catch((e) => setErr(e.message))}>
-        Mit Google anmelden
-      </button>
-      {err && <p className="error">{err}</p>}
-    </div>
-  )
-}
-
 // Eine Karte (Printing + Ausführung) um delta in einer Einträge-Map ändern
 function bump(map, id, finish, delta) {
   const k = entryKey(id, finish)
@@ -61,6 +48,7 @@ function Main({ user }) {
   const [sideOpen, setSideOpen] = useState(false)
   const [wishlist, setWishlistState] = useState([])
   const [deNames, setDeNames] = useState({})
+  const [showSettings, setShowSettings] = useState(false)
 
   // Aktueller Stand in Refs, damit schnelle Aktionen hintereinander nichts überschreiben
   const S = useRef({ entries: {}, decks: {}, chunks: 0, collectionDirty: false, dirtyDecks: new Set() })
@@ -449,6 +437,7 @@ function Main({ user }) {
           <button className="btn icon small" disabled={!undoInfo.undo} onClick={undo} title="Rückgängig (Strg+Z)">↶</button>
           <button className="btn icon small" disabled={!undoInfo.redo} onClick={redo} title="Wiederholen (Strg+Y)">↷</button>
           <span className={`save save-${saveState}`}>{saveLabel}</span>
+          <button className="btn icon small" onClick={() => setShowSettings(true)} title="Einstellungen / Android-App">⚙</button>
           <button className="btn ghost small" onClick={() => signOut(auth)} title={user.email}>Abmelden</button>
         </div>
       </header>
@@ -516,6 +505,7 @@ function Main({ user }) {
           onChange={changeQty} onMove={moveCard} onClose={() => setOpen(null)}
         />
       )}
+      {showSettings && <Settings user={user} onClose={() => setShowSettings(false)} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   )
