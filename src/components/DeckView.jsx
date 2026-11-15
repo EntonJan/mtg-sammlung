@@ -3,6 +3,7 @@ import { dragProps, readDrag } from '../drag'
 import { entryKey } from '../store'
 import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../util'
 import Mana from './Mana'
+import DeckStats from './DeckStats'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
@@ -11,6 +12,7 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [tab, setTab] = useState('list')
 
   const rows = useMemo(() => Object.values(deck.entries)
     .filter((e) => cards[e.id])
@@ -74,6 +76,15 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
         )}
       </div>
 
+      <div className="deck-tabs">
+        {[['list', 'Liste'], ['stats', 'Statistik']].map(([k, l]) => (
+          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
+        ))}
+      </div>
+
+      {tab === 'stats' && <DeckStats rows={rows} />}
+
+      {tab === 'list' && <>
       {warnings.map((w) => <p key={w} className="warn">{w}</p>)}
 
       {!rows.length && (
@@ -90,6 +101,7 @@ export default function DeckView({ deck, cards, onMove, onRename, onDelete, onTo
           <Group key={g.k} label={g.label} rows={g.rows} deckId={deck.id} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} />
         ))}
       </div>
+      </>}
     </div>
   )
 }
