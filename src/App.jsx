@@ -14,6 +14,7 @@ import MatchView from './components/MatchView'
 import ValueView from './components/ValueView'
 import BinderView from './components/BinderView'
 import WishlistView from './components/WishlistView'
+import SurplusView from './components/SurplusView'
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -200,6 +201,28 @@ function Main({ user }) {
     notify(`${name} → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
   }, [cards, commit])
 
+  // Mehrere Karten in einem Schritt verschieben (z. B. Überschüsse in den Tauschordner)
+  const moveMany = useCallback((list, to) => {
+    const s = S.current
+    let ne = s.entries
+    const nd = { ...s.decks }
+    const changed = new Set()
+    let moved = 0
+    for (const { id, finish, qty, from } of list) {
+      const src = from === 'collection' ? ne : nd[from]?.entries
+      const q = Math.min(qty, src?.[entryKey(id, finish)]?.qty || 0)
+      if (!q || from === to) continue
+      if (from === 'collection') ne = bump(ne, id, finish, -q)
+      else { nd[from] = { ...nd[from], entries: bump(nd[from].entries, id, finish, -q) }; changed.add(from) }
+      if (to === 'collection') ne = bump(ne, id, finish, q)
+      else { nd[to] = { ...nd[to], entries: bump(nd[to].entries, id, finish, q) }; changed.add(to) }
+      moved += q
+    }
+    if (!moved) return
+    commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [...changed] })
+    notify(`${moved} Karten → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
+  }, [commit])
+
   const createDeck = useCallback((name, kind) => {
     const id = newDeckId()
     const order = Object.keys(S.current.decks).length
@@ -369,6 +392,7 @@ function Main({ user }) {
             Wunschliste{wishAlarms > 0 && <span className="badge">🔔 {wishAlarms}</span>}
           </button>
           <button className={view.kind === 'value' ? 'on' : ''} onClick={() => setView({ kind: 'value' })}>Wert</button>
+          <button className={view.kind === 'surplus' ? 'on' : ''} onClick={() => setView({ kind: 'surplus' })}>Überzählig</button>
           <button className={view.kind === 'match' ? 'on' : ''} onClick={() => setView({ kind: 'match' })}>Was fehlt mir?</button>
           <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
         </nav>
@@ -419,6 +443,8 @@ function Main({ user }) {
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
+          ) : view.kind === 'surplus' ? (
+            <SurplusView entries={entries} decks={decks} cards={cards} onMoveMany={moveMany} onOpen={setOpen} />
           ) : view.kind === 'wish' ? (
             <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} />
           ) : view.kind === 'value' ? (
