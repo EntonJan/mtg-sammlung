@@ -22,7 +22,9 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   const [recon, setRecon] = useState(null)
   const [reconAny, setReconAny] = useState(false)
   const [tab, setTab] = useState('list')
-  const [groupBy, setGroupBy] = useState('type')
+  // Hauptgruppen immer nach Kartentyp; Unterkategorien (Removal, Ramp, Draw …) zuschaltbar
+  const [subOn, setSubOnState] = useState(() => { try { return localStorage.getItem('deckSubs') !== '0' } catch { return true } })
+  const setSubOn = (v) => { setSubOnState(v); try { localStorage.setItem('deckSubs', v ? '1' : '0') } catch { /* egal */ } }
   const [mode, setModeState] = useState(() => { try { return localStorage.getItem('deckMode') || 'list' } catch { return 'list' } })
   const setMode = (m) => { setModeState(m); try { localStorage.setItem('deckMode', m) } catch { /* egal */ } }
   const [picker, setPicker] = useState(null)
@@ -56,19 +58,23 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
 
   const groups = useMemo(() => {
     const m = {}
-    if (groupBy === 'cat') {
-      const tags = deck.tags || {}
-      for (const r of rest) {
-        const t = tags[tagKey(r.card)] || []
-        if (!t.length) (m[groupOf(r.card.type) === 'Land' ? '__land' : '__none'] ||= []).push(r)
-        for (const c of t) (m[c] ||= []).push(r)
-      }
-      return [...catsOf(deck).map((c) => [c.name, c.name]), ['__none', 'Ohne Kategorie'], ['__land', 'Länder']]
-        .filter(([k]) => m[k]).map(([k, label]) => ({ k, label, rows: m[k] }))
-    }
     for (const r of rest) (m[groupOf(r.card.type)] ||= []).push(r)
-    return GROUPS.filter(([k]) => m[k]).map(([k, label]) => ({ k, label, rows: m[k] }))
-  }, [rest, groupBy, deck])
+    const cats = catsOf(deck).map((c) => c.name)
+    const tags = deck.tags || {}
+    // Jede Karte landet in genau einer Unterkategorie: der ersten zugeordneten (Reihenfolge wie im Reiter „Kategorien“)
+    const subsOf = (rows) => {
+      const sm = {}
+      for (const r of rows) {
+        const t = tags[tagKey(r.card)] || []
+        const first = cats.find((c) => t.includes(c)) || t[0] || '__none'
+        ;(sm[first] ||= []).push(r)
+      }
+      const order = [...cats, ...Object.keys(sm).filter((k) => k !== '__none' && !cats.includes(k)), '__none']
+      const list = order.filter((k) => sm[k]).map((k) => ({ k, label: k === '__none' ? 'Ohne Kategorie' : k, rows: sm[k] }))
+      return list.length === 1 && list[0].k === '__none' ? null : list
+    }
+    return GROUPS.filter(([k]) => m[k]).map(([k, label]) => ({ k, label, rows: m[k], subs: subOn ? subsOf(m[k]) : null }))
+  }, [rest, subOn, deck])
 
   const count = rows.reduce((s, r) => s + r.qty, 0)
   const value = allRows.reduce((s, r) => s + (r.price ?? 0) * r.qty, 0)
@@ -162,8 +168,8 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       <DeckFetch deck={deck} entries={entries} decks={decks} cards={cards} onMove={onMove} deNames={deNames} />
       {rows.length > 0 && (
         <div className="seg seg-small">
-          <button className={groupBy === 'type' ? 'on' : ''} onClick={() => setGroupBy('type')}>Nach Typ</button>
-          <button className={groupBy === 'cat' ? 'on' : ''} onClick={() => setGroupBy('cat')}>Nach Kategorie</button>
+          <button className={!subOn ? 'on' : ''} onClick={() => setSubOn(false)}>Nur Typen</button>
+          <button className={subOn ? 'on' : ''} onClick={() => setSubOn(true)} title="Innerhalb der Typen nach Removal, Ramp, Draw … unterteilen">Typen + Unterkategorien</button>
         </div>
       )}
       {rows.length > 0 && (
@@ -189,7 +195,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           <Group label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         )}
         {groups.map((g) => (
-          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
+          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} subs={g.subs} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         ))}
         {rows.length + sideRows.length > 0 && (
           <Group gk="side" label="Sideboard" rows={sideRows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} onDropHere={dropToSide} />
@@ -218,7 +224,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   )
 }
 
-function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid, raster, toggleSide, sideKeys, onDropHere }) {
+function Group({ gk = 'cmd', label, rows, subs, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid, raster, toggleSide, sideKeys, onDropHere }) {
   const [dropOver, setDropOver] = useState(false)
   // Eigenes Ablageziel (Sideboard): Ziehen hierher legt die Karte ins Sideboard
   const dropZone = onDropHere ? {
@@ -250,6 +256,13 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
         onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
     </span>
   )
+  // Unterkategorien (Removal, Ramp …) innerhalb einer Typgruppe
+  const parts = (render) => subs ? subs.map((sub) => (
+    <div key={sub.k} className="deck-sub">
+      <h4>{sub.label} <span className="muted">({sub.rows.reduce((t, r) => t + r.qty, 0)})</span></h4>
+      {render(sub.rows)}
+    </div>
+  )) : render(rows)
   const picker_ = (r) => picker === `${gk}|${r.key}` && <TagPicker deck={deck} card={r.card} onUpdate={onUpdate} onClose={() => setPicker(null)} />
 
   // Raster: alle Karten vollständig nebeneinander
@@ -258,8 +271,8 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
       <section className={`deck-raster-group${zoneCls}`} {...dropZone}>
         <h3>{label} <span className="muted">({n})</span></h3>
         {emptyHint}
-        <div className="raster">
-          {rows.map((r) => (
+        {parts((rs) => <div className="raster">
+          {rs.map((r) => (
             <div key={r.key} className={`raster-card ${r.finish !== 'normal' ? 'foiled' : ''} ${picker === `${gk}|${r.key}` ? 'open' : ''}`}
               {...dragProps({ id: r.id, finish: r.finish, from: deckId })} onClick={() => onOpen(r.card)}>
               <img src={r.card.img} alt={r.card.name} loading="lazy" draggable={false} />
@@ -268,7 +281,7 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
               {picker_(r)}
             </div>
           ))}
-        </div>
+        </div>)}
       </section>
     )
   }
@@ -279,8 +292,8 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
       <section className={`deck-stack${zoneCls}`} {...dropZone}>
         <h3>{label} <span className="muted">({n})</span></h3>
         {emptyHint}
-        <div className="stack">
-          {rows.map((r) => (
+        {parts((rs) => <div className="stack">
+          {rs.map((r) => (
             <div key={r.key} className={`stack-card ${r.finish !== 'normal' ? 'foiled' : ''} ${picker === `${gk}|${r.key}` ? 'open' : ''}`}
               title={`${r.qty > 1 ? `${r.qty}× ` : ''}${r.card.name}${r.finish !== 'normal' ? ` (${FINISH_LABEL[r.finish]})` : ''}`}
               {...dragProps({ id: r.id, finish: r.finish, from: deckId })} onClick={() => onOpen(r.card)}>
@@ -290,7 +303,7 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
               {picker_(r)}
             </div>
           ))}
-        </div>
+        </div>)}
       </section>
     )
   }
@@ -299,7 +312,7 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
     <section className={`deck-group${zoneCls}`} {...dropZone}>
       <h3>{label} <span className="muted">({n})</span></h3>
       {emptyHint}
-      {rows.map((r) => (
+      {parts((rs) => rs.map((r) => (
         <div key={r.key} className="deck-row" {...dragProps({ id: r.id, finish: r.finish, from: deckId })} onClick={() => onOpen(r.card)}>
           <span className="qty">{r.qty}</span>
           <img className="thumb" src={r.card.thumb} alt="" loading="lazy" draggable={false} />
@@ -313,7 +326,7 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
           {actions(r)}
           {picker_(r)}
         </div>
-      ))}
+      )))}
     </section>
   )
 }

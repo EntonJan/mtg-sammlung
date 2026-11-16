@@ -532,3 +532,12 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .side-empty-hint { color: var(--muted); font-size: 12px; padding: 8px 4px; }
 .deck-stack.side-zone { width: 196px; }
 .mini { font-size: 11px; }
+
+/* Unterkategorien im Deck */
+.deck-sub { margin: 2px 0 8px; }
+.deck-sub h4 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); margin: 8px 0 3px; }
+.deck-sub h4 .muted { text-transform: none; }
+.deck-stack .deck-sub h4 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cats-types { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 14px; font-size: 13px; }
+.cats-types b { color: var(--accent); }
+.cat-cards .ctype { color: var(--muted); font-size: 11px; margin-top: 4px; list-style: none; }

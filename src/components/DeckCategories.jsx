@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { catsOf, suggestTags, tagKey } from '../categories'
+import { GROUPS, groupOf } from '../util'
 
 // Reiter „Kategorien“: Sollwerte, Fortschritt, automatische Vorschläge
 export default function DeckCategories({ deck, rows, onUpdate }) {
@@ -20,8 +21,15 @@ export default function DeckCategories({ deck, rows, onUpdate }) {
     onUpdate({ tags: next })
   }
 
+  const typeCount = {}
+  for (const r of rows) typeCount[groupOf(r.card.type)] = (typeCount[groupOf(r.card.type)] || 0) + r.qty
+  const byType = (list) => GROUPS.map(([k, label]) => [label, list.filter((r) => groupOf(r.card.type) === k)]).filter(([, l]) => l.length)
+
   return (
     <div className="cats">
+      <div className="cats-types">
+        {GROUPS.filter(([k]) => typeCount[k]).map(([k, label]) => <span key={k}>{label} <b>{typeCount[k]}</b></span>)}
+      </div>
       <div className="cats-actions">
         <button className="btn primary" disabled={!suggestions.length} onClick={applySuggestions}>
           Vorschläge übernehmen ({suggestions.length})
@@ -53,7 +61,10 @@ export default function DeckCategories({ deck, rows, onUpdate }) {
               </div>
               <div className="hbar-track"><span className={state} style={{ width: `${pct}%` }} /></div>
               <ul className="cat-cards">
-                {cardsIn(c.name).map((r) => <li key={r.key}>{r.qty > 1 ? `${r.qty}× ` : ''}{r.card.name}</li>)}
+                {byType(cardsIn(c.name)).map(([label, list]) => [
+                  <li key={label} className="ctype">{label}</li>,
+                  ...list.map((r) => <li key={r.key}>{r.qty > 1 ? `${r.qty}× ` : ''}{r.card.name}</li>),
+                ])}
               </ul>
             </section>
           )
