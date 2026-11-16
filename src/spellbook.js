@@ -2,7 +2,7 @@
 import { get, set } from 'idb-keyval'
 import { sfFetch } from './scryfall'
 
-const KEY = 'combos-v1'
+const KEY = 'combos-v2'
 let dbP = null
 
 async function loadDb() {
@@ -32,12 +32,13 @@ function index(data) {
   return { ...data, byCard }
 }
 
-const img = (name) => `https://api.scryfall.com/cards/named?format=image&version=small&exact=${encodeURIComponent(name)}`
+// Bild direkt vom Scryfall-CDN (zählt nicht gegen das API-Limit); Fallback über den Namen
+const img = (name, path) => path ? (path.startsWith('http') ? path : `https://cards.scryfall.io/small/front/${path}`) : `https://api.scryfall.com/cards/named?format=image&version=small&exact=${encodeURIComponent(name)}`
 
 function toVariant(db, c) {
   return {
     id: c[0],
-    uses: c[1].map((ci) => { const [name, oid] = db.cards[ci]; return { card: { id: oid || name, name, oracleId: oid, imageUriFrontSmall: img(name) } } }),
+    uses: c[1].map((ci) => { const [name, oid, path] = db.cards[ci]; return { card: { id: oid || name, name, oracleId: oid, imageUriFrontSmall: img(name, path) } } }),
     produces: c[2].map((fi) => ({ feature: { id: fi, name: db.feats[fi] } })),
     popularity: c[3], identity: c[4], manaValueNeeded: c[5], bracketTag: c[6],
   }

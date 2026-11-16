@@ -342,3 +342,30 @@ export async function getTokens(cardIds) {
   }
   return { parts: tokCache.parts, tokens: tokCache.tokens }
 }
+
+// Bilder für Karten, die man nicht besitzt (z. B. EDHREC-Vorschläge): per Name in 75er-Paketen,
+// dauerhaft gecacht – statt hunderter Einzelanfragen, die Scryfall bremsen würden
+const IMG_KEY = 'img-by-name-v1'
+let imgCache = null
+export async function getImagesByName(names) {
+  if (!imgCache) imgCache = (await get(IMG_KEY)) || {}
+  const todo = [...new Set(names)].filter((n) => !(n in imgCache))
+  for (let i = 0; i < todo.length; i += 75) {
+    const batch = todo.slice(i, i + 75)
+    const res = await sfFetch(`${API}/cards/collection`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifiers: batch.map((name) => ({ name: name.split(' // ')[0] })) }),
+    })
+    if (!res.ok) break
+    const j = await res.json()
+    for (const c of j.data || []) {
+      const face = c.card_faces?.[0] || {}
+      const url = (c.image_uris || face.image_uris || {}).normal || ''
+      imgCache[c.name] = url
+      imgCache[c.name.split(' // ')[0]] = url
+    }
+    for (const n of batch) if (!(n in imgCache)) imgCache[n] = ''
+  }
+  if (todo.length) await set(IMG_KEY, imgCache)
+  return imgCache
+}

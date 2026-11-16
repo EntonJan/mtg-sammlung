@@ -333,3 +333,4 @@ h2 .share-btn { margin-left: 12px; vertical-align: middle; font-family: var(--se
 .power-bar i { position: absolute; top: 0; bottom: 0; width: 1px; background: #121211; z-index: 1; }
 .power-scale { display: flex; justify-content: space-between; max-width: 360px; margin-top: 2px; }
 .power-edge { color: #e0a05a; }
+.sugg-ph { aspect-ratio: 488 / 680; border: 1px solid var(--gold-deep); border-radius: 4.75% / 3.5%; display: grid; place-items: center; padding: 10px; text-align: center; font-family: var(--title); color: #c8bfae; background: #1a1916; }

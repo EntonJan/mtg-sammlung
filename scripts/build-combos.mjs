@@ -32,7 +32,11 @@ const cards = [], cardIdx = new Map()
 const feats = [], featIdx = new Map()
 const cardOf = (c) => {
   const key = c.oracleId || c.name
-  if (!cardIdx.has(key)) { cardIdx.set(key, cards.length); cards.push([c.name, c.oracleId || '']) }
+  if (!cardIdx.has(key)) {
+    cardIdx.set(key, cards.length)
+    const img = (c.imageUriFrontSmall || '').replace('https://cards.scryfall.io/small/front/', '')
+    cards.push([c.name, c.oracleId || '', img])
+  }
   return cardIdx.get(key)
 }
 const featOf = (f) => { if (!featIdx.has(f.name)) { featIdx.set(f.name, feats.length); feats.push(f.name) } return featIdx.get(f.name) }

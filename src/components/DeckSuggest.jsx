@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { loadSuggestions, scryfallImg } from '../edhrec'
+import { loadSuggestions } from '../edhrec'
+import { getImagesByName } from '../scryfall'
 
 const LABELS = {
   newcards: 'Neue Karten', highsynergycards: 'Hohe Synergie', topcards: 'Top-Karten', gamechangers: 'Game Changer',
@@ -13,13 +14,18 @@ export default function DeckSuggest({ commanders, rows, ownedByName, onTake, deN
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('owned')
   const [list, setList] = useState('all')
+  const [imgs, setImgs] = useState({})
 
   const key = commanders.map((c) => c.name).join('|')
   useEffect(() => {
     if (!commanders.length) return
     let alive = true
     setData(null); setError('')
-    loadSuggestions(commanders).then((d) => alive && setData(d)).catch((e) => alive && setError(e.message))
+    loadSuggestions(commanders).then((d) => {
+      if (!alive) return
+      setData(d)
+      getImagesByName(d.lists.flatMap((l) => l.cards.map((c) => c.name))).then((m) => alive && setImgs({ ...m })).catch(() => {})
+    }).catch((e) => alive && setError(e.message))
     return () => { alive = false }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -68,7 +74,7 @@ export default function DeckSuggest({ commanders, rows, ownedByName, onTake, deN
           <div className="raster suggest-grid">
             {l.cards.map((c) => (
               <div key={c.name} className={`raster-card sugg ${c.own.free ? 'have' : c.own.decks.length ? 'indeck' : 'missing'}`} title={deNames[c.own.oracleId] ? `${c.name} (${deNames[c.own.oracleId]})` : c.name}>
-                <img src={c.own.img || scryfallImg(c.name)} alt={c.name} loading="lazy" />
+                {c.own.img || imgs[c.name] ? <img src={c.own.img || imgs[c.name]} alt={c.name} loading="lazy" /> : <div className="sugg-ph">{c.name}</div>}
                 {c.pct != null && <span className="sugg-pct" title={`in ${c.decks?.toLocaleString('de-DE')} von ${c.potential?.toLocaleString('de-DE')} Decks`}>{c.pct}%</span>}
                 {c.synergy ? <span className="sugg-syn" title="Synergie mit dem Commander">{c.synergy > 0 ? '+' : ''}{Math.round(c.synergy * 100)}%</span> : null}
                 <div className="sugg-own">
