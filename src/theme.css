@@ -229,3 +229,16 @@ body.native .modal-bg { padding-top: calc(10px + var(--safe-top)); padding-botto
 .combo-take { margin-left: 10px; padding: 1px 10px; }
 a { color: var(--accent); }
 a:hover { color: #f1d68a; }
+
+/* EDHREC-Vorschläge */
+.suggest-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+.suggest-head p { flex: 1 1 320px; margin: 0; }
+.suggest-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.raster-card.sugg { cursor: default; }
+.raster-card.sugg.missing img { opacity: .6; filter: grayscale(.5); }
+.sugg-pct, .sugg-syn { position: absolute; top: 6px; font-size: 11px; padding: 1px 6px; border-radius: 3px; background: rgba(14,13,12,.88); border: 1px solid var(--gold-deep); }
+.sugg-pct { left: 6px; color: var(--accent); }
+.sugg-syn { right: 6px; color: var(--good); }
+.sugg-own { margin-top: 5px; font-size: 13px; text-align: center; color: var(--muted); }
+.raster-card.sugg.have .sugg-own .btn { width: 100%; }
+.raster-card.sugg.indeck .sugg-own { color: #d9b45a; }

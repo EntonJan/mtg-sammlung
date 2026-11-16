@@ -11,6 +11,7 @@ import AddCards from './AddCards'
 import DeckImport from './DeckImport'
 import PrintPicker from './PrintPicker'
 import DeckCombos from './DeckCombos'
+import DeckSuggest from './DeckSuggest'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
@@ -50,14 +51,22 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   // Besitz je Oracle-ID: freie Exemplare in der Sammlung + Decks/Ordner, in denen die Karte steckt
   const ownedIndex = useMemo(() => {
     const idx = {}
-    const get = (oid) => (idx[oid] ||= { free: 0, decks: [], pick: null })
-    for (const e of Object.values(entries)) { const c = cards[e.id]; if (c) { const o = get(c.oracleId); o.free += e.qty; o.pick ||= { id: e.id, finish: e.finish } } }
-    for (const d of Object.values(decks)) {
-      for (const e of Object.values(d.entries)) { const c = cards[e.id]; if (c && !get(c.oracleId).decks.includes(d.name)) get(c.oracleId).decks.push(d.name) }
+    const byName = {}
+    const get = (c) => {
+      const o = (idx[c.oracleId] ||= { free: 0, decks: [], pick: null, img: c.img, oracleId: c.oracleId })
+      byName[c.name.toLowerCase()] = o
+      byName[c.name.split(' // ')[0].toLowerCase()] = o
+      return o
     }
-    return idx
+    for (const e of Object.values(entries)) { const c = cards[e.id]; if (c) { const o = get(c); o.free += e.qty; o.pick ||= { id: e.id, finish: e.finish } } }
+    for (const d of Object.values(decks)) {
+      for (const e of Object.values(d.entries)) { const c = cards[e.id]; if (c) { const o = get(c); if (!o.decks.includes(d.name)) o.decks.push(d.name) } }
+    }
+    return { idx, byName }
   }, [entries, decks, cards])
-  const owned = useCallback((oid) => ownedIndex[oid] || { free: 0, decks: [] }, [ownedIndex])
+  const NONE = useMemo(() => ({ free: 0, decks: [] }), [])
+  const owned = useCallback((oid) => ownedIndex.idx[oid] || NONE, [ownedIndex, NONE])
+  const ownedByName = useCallback((n) => ownedIndex.byName[n.toLowerCase()] || NONE, [ownedIndex, NONE])
   const toggleSide = (key) => onUpdate({ side: sideKeys.has(key) ? [...sideKeys].filter((k) => k !== key) : [...sideKeys, key] })
   // Karte (oder Mehrfachauswahl) ins Sideboard legen – auch direkt aus der Sammlung oder einem anderen Deck
   const dropToSide = (d) => {
@@ -170,12 +179,14 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       )}
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['combos', 'Combos'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
+        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {tab === 'stats' && <DeckStats rows={rows} />}
+      {tab === 'suggest' && <DeckSuggest commanders={commanders.map((r) => r.card)} rows={[...rest, ...poolRest]} ownedByName={ownedByName} deNames={deNames}
+        onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'combos' && <DeckCombos deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} owned={owned} deNames={deNames}
         onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} />}
