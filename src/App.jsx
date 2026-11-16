@@ -59,6 +59,7 @@ function Main({ user }) {
   const [shareMeta, setShareMeta] = useState({})   // { collection: id, wishlist: id }
   const [shareOpen, setShareOpen] = useState(null) // { kind, deckId?, title }
   const [moreOpen, setMoreOpen] = useState(false)
+  const [sales, setSales] = useState([])  // Verkaufsprotokoll
   const [friendsCfg, setFriendsCfgState] = useState({})
   const [friendReq, setFriendReq] = useState(0)
   const [deNames, setDeNames] = useState({})
@@ -90,6 +91,7 @@ function Main({ user }) {
         ])
         loadMeta(user.uid, 'shares').then((m) => alive && m && setShareMeta(m)).catch(() => {})
         loadMeta(user.uid, 'friends').then((m) => alive && m && setFriendsCfgState(m)).catch(() => {})
+        loadMeta(user.uid, 'sales').then((m) => alive && m?.items && setSales(m.items)).catch(() => {})
         if (!alive) return
         setWishlistState(wish?.items || [])
         Object.assign(S.current, { entries: ents, decks: dks, chunks })
@@ -554,6 +556,34 @@ function Main({ user }) {
 
   const go = (v) => { setMoreOpen(false); setView(v) }
 
+  // Verkauft: Exemplare aus dem Verkaufsordner (und damit aus der Sammlung) austragen und den Erlös protokollieren
+  const markSold = useCallback((binderId, list) => {
+    const s = S.current
+    const d = s.decks[binderId]
+    if (!d || !list.length) return
+    let ents = d.entries
+    const log = []
+    for (const x of list) {
+      const have = ents[entryKey(x.id, x.finish)]?.qty || 0
+      const q = Math.min(have, x.qty)
+      if (!q) continue
+      ents = bump(ents, x.id, x.finish, -q)
+      const c = cardsRef.current[x.id]
+      log.push({ t: Date.now(), id: x.id, name: c?.name || '?', set: c?.set || '', finish: x.finish, qty: q, price: x.price ?? null })
+    }
+    commit({ decks: { ...s.decks, [binderId]: { ...d, entries: ents } }, changedDecks: [binderId], label: `${log.reduce((t, l) => t + l.qty, 0)} Karte(n) verkauft` })
+    setSales((prev) => {
+      const next = [...prev, ...log].slice(-2000)
+      saveMeta(user.uid, 'sales', { items: next }).catch(console.error)
+      return next
+    })
+  }, [commit, user.uid])
+  const removeSale = useCallback((it) => setSales((prev) => {
+    const next = prev.filter((x) => !(x.t === it.t && x.id === it.id && x.finish === it.finish))
+    saveMeta(user.uid, 'sales', { items: next }).catch(console.error)
+    return next
+  }), [user.uid])
+
   // ---- Teilen-Links (Nur-Lesen) ----
   const sharesRef = useRef(shareMeta); sharesRef.current = shareMeta
   const wishRef = useRef(wishlist); wishRef.current = wishlist
@@ -773,7 +803,8 @@ function Main({ user }) {
           ) : view.kind === 'scan' ? (
             <ScanView decks={decks} onAdd={addScanned} onUndoAdd={(c, f, t) => addScanned(c, f, t, -1)} />
           ) : view.kind === 'sell' ? (
-            <SellView entries={entries} decks={decks} cards={cards} deNames={deNames} onMoveMany={moveMany} onCreateBinder={(n) => createDeck(n, 'binder')} onOpen={setOpen} />
+            <SellView entries={entries} decks={decks} cards={cards} deNames={deNames} onMoveMany={moveMany} onCreateBinder={(n) => createDeck(n, 'binder')} onOpen={setOpen}
+              sales={sales} onSold={markSold} onRemoveSale={removeSale} />
           ) : view.kind === 'wish' ? (
             <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} onShare={() => setShareOpen({ kind: 'wishlist', title: 'Wunschliste' })} />
           ) : view.kind === 'value' ? (
