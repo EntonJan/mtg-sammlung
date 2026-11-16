@@ -563,3 +563,5 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .pp-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pp-info b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pp-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+
+.mini.danger:hover { background: #5a1f1f; border-color: #b44; }

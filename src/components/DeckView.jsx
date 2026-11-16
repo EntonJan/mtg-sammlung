@@ -275,6 +275,7 @@ function Group({ gk = 'cmd', label, rows, subs, deck, onAddNew, onPrint, cmd, on
       <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
       <button className="mini" title="Printing (Edition/Foil) ändern" onClick={() => onPrint(r)}>⇄</button>
       {onAddNew && <button className="mini" title="Weiteres Exemplar neu hinzufügen (Deck + Sammlung)" onClick={() => onAddNew(r.card, r.finish)}>+</button>}
+      {onAddNew && <button className="mini danger" title="1 Exemplar ganz entfernen – aus Deck UND Sammlung (Strg+Z macht es rückgängig)" onClick={() => onAddNew(r.card, r.finish, -1)}>🗑</button>}
       <button className="mini" title="1 Exemplar zurück in die Sammlung"
         onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
     </span>

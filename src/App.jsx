@@ -205,7 +205,12 @@ function Main({ user }) {
     rememberCard(card)
     const d = S.current.decks[target]
     if (!d) return
-    commit({ decks: { ...S.current.decks, [target]: { ...d, entries: bump(d.entries, card.id, finish, delta) } }, changedDecks: [target], label: `${card.name} ${delta > 0 ? '+' : '−'}1 (${d.name})` })
+    const ents = bump(d.entries, card.id, finish, delta)
+    const k = entryKey(card.id, finish)
+    // Letztes Exemplar entfernt → auch Commander-/Pool-/Sideboard-Markierung aufräumen
+    const clean = (list) => (ents[k] || !list ? list : list.filter((x) => x !== k))
+    const nd = { ...d, entries: ents, commanders: clean(d.commanders), pool: clean(d.pool), side: clean(d.side || []) }
+    commit({ decks: { ...S.current.decks, [target]: nd }, changedDecks: [target], label: delta > 0 ? `${card.name} +1 (${d.name})` : `${card.name} aus ${d.name} und Sammlung entfernt` })
   }, [changeQty, rememberCard, commit])
 
   // Schrank-Prinzip: 1 Exemplar von „from“ nach „to“ verschieben (collection oder Deck-ID)
