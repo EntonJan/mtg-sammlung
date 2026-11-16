@@ -145,13 +145,14 @@ body.native header { padding-top: calc(8px + var(--safe-top)); }
 .ac-list { z-index: 30; background: #1a1916; border: 1px solid var(--gold-dim); box-shadow: 0 10px 28px rgba(0,0,0,.6); max-height: 320px; overflow-y: auto; }
 .ac-list li:hover { background: #2a251c; color: #f1e6c8; }
 
-/* Set-Symbole in Seltenheitsfarbe */
-.set-icon { display: inline-block; flex: none; background: #e9e4d8; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
-.set-icon.rar-uncommon { background: linear-gradient(135deg, #8fa2ad, #e3eef3 50%, #7d929c); }
-.set-icon.rar-rare { background: linear-gradient(135deg, #a6863d, #f1dc96 50%, #9a7a32); }
-.set-icon.rar-mythic { background: linear-gradient(135deg, #c2451c, #f6a13a 50%, #b73b16); }
-.set-icon.rar-special, .set-icon.rar-bonus { background: linear-gradient(135deg, #7a4fa8, #c9a6f0 50%, #6c4296); }
-.set-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Set-Symbole in Seltenheitsfarbe (Scryfall-SVGs sind schwarz → per Filter eingefärbt) */
+.set-icon { flex: none; object-fit: contain; filter: invert(93%); }
+.set-icon.rar-uncommon { filter: invert(72%) sepia(12%) saturate(300%) hue-rotate(160deg) brightness(1.05); }
+.set-icon.rar-rare { filter: invert(78%) sepia(55%) saturate(520%) hue-rotate(2deg) brightness(.98); }
+.set-icon.rar-mythic { filter: invert(55%) sepia(85%) saturate(1500%) hue-rotate(345deg) brightness(1.05); }
+.set-icon.rar-special, .set-icon.rar-bonus { filter: invert(60%) sepia(40%) saturate(900%) hue-rotate(225deg); }
+.set-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.set-line > span { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .set-line .set-name { color: #d8ccb0; }
 
 /* Größere Kartenbilder in Suche und Printing-Auswahl */
