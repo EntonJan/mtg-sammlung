@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { autocomplete, searchCards } from '../scryfall'
 import { entryKey } from '../store'
 import { euro } from '../util'
+import SetIcon from './SetIcon'
 
 // Karten manuell über die Scryfall-Suche hinzufügen
 // Auch im Deck nutzbar: dann zeigt „entries“ die Exemplare im Deck und onChange legt neue Exemplare direkt ins Deck
@@ -66,10 +67,13 @@ export default function AddCards({ entries, onChange, initialQuery = '', placeho
           const fo = entries[entryKey(c.id, 'foil')]?.qty || 0
           return (
             <div key={c.id} className="add-card">
-              <img src={c.thumb} alt={c.name} loading="lazy" />
+              <img src={c.img || c.thumb} alt={c.name} loading="lazy" />
               <div className="add-info">
                 <b>{c.name}</b>
-                <span className="muted small">{c.setName} ({c.set} #{c.num})</span>
+                <span className="set-line">
+                  <SetIcon set={c.set} rarity={c.rarity} size={26} title={c.setName} />
+                  <span><span className="set-name">{c.setName}</span><span className="muted small"> {c.set.toUpperCase()} #{c.num}{c.released ? ` · ${c.released.slice(0, 4)}` : ''}</span></span>
+                </span>
                 <div className="add-line">
                   <span>Normal {euro(c.eur)}</span>
                   <span className="stepper">

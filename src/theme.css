@@ -144,3 +144,26 @@ body.native header { padding-top: calc(8px + var(--safe-top)); }
 .deck-new .toolbar { padding-left: 0; padding-right: 0; }
 .ac-list { z-index: 30; background: #1a1916; border: 1px solid var(--gold-dim); box-shadow: 0 10px 28px rgba(0,0,0,.6); max-height: 320px; overflow-y: auto; }
 .ac-list li:hover { background: #2a251c; color: #f1e6c8; }
+
+/* Set-Symbole in Seltenheitsfarbe */
+.set-icon { display: inline-block; flex: none; background: #e9e4d8; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+.set-icon.rar-uncommon { background: linear-gradient(135deg, #8fa2ad, #e3eef3 50%, #7d929c); }
+.set-icon.rar-rare { background: linear-gradient(135deg, #a6863d, #f1dc96 50%, #9a7a32); }
+.set-icon.rar-mythic { background: linear-gradient(135deg, #c2451c, #f6a13a 50%, #b73b16); }
+.set-icon.rar-special, .set-icon.rar-bonus { background: linear-gradient(135deg, #7a4fa8, #c9a6f0 50%, #6c4296); }
+.set-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.set-line .set-name { color: #d8ccb0; }
+
+/* Größere Kartenbilder in Suche und Printing-Auswahl */
+.add-results { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+.add-card { gap: 14px; }
+.add-card img { width: 150px; border-radius: 6px; cursor: zoom-in; transition: transform .15s; }
+.add-card img:hover { transform: scale(1.6); transform-origin: left top; position: relative; z-index: 5; box-shadow: 0 12px 32px rgba(0,0,0,.7); }
+.add-info b { font-family: var(--title); font-size: 19px; }
+.pp-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.pp-card img { width: 110px; }
+@media (max-width: 640px) {
+  .add-results { grid-template-columns: 1fr; }
+  .add-card img { width: 120px; }
+  .add-card img:hover { transform: none; }
+}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { searchCards } from '../scryfall'
 import { entryKey } from '../store'
 import { euro, unitPrice } from '../util'
+import SetIcon from './SetIcon'
 
 const FIN = { normal: 'Normal', foil: 'Foil', etched: 'Etched', proxy: 'Proxy' }
 
@@ -59,9 +60,9 @@ export default function PrintPicker({ row, entries, onApply, onClose }) {
             const price = unitPrice(c, finish)
             return (
               <div key={c.id} className={`pp-card ${c.id === row.id ? 'current' : ''}`}>
-                <img src={c.thumb || c.img} alt={c.name} loading="lazy" />
+                <img src={c.img || c.thumb} alt={c.name} loading="lazy" />
                 <div className="pp-info">
-                  <b title={c.setName}>{c.setName}</b>
+                  <span className="set-line"><SetIcon set={c.set} rarity={c.rarity} size={24} title={c.setName} /><b title={c.setName}>{c.setName}</b></span>
                   <span className="muted small">{c.set.toUpperCase()} #{c.num} · {(c.released || '').slice(0, 4)}</span>
                   <span className="small">{price != null ? euro(price) : '–'}{free > 0 && <span className="ok-text"> · {free} frei in Sammlung</span>}</span>
                   {same ? <span className="muted small">aktuell</span> : (

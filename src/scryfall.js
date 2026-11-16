@@ -280,3 +280,24 @@ export async function savePriceSnapshot() {
 export async function loadPriceSnapshots() {
   return (await get(SNAP_KEY)) || {}
 }
+
+// Set-Symbole (Code → SVG-URL), einmal pro Woche von Scryfall geladen und lokal gecacht
+const SETS_KEY = 'set-icons-v1'
+let setIconsP = null
+export function getSetIcons() {
+  if (!setIconsP) {
+    setIconsP = (async () => {
+      const cached = await get(SETS_KEY)
+      if (cached && Date.now() - cached.at < 7 * 864e5) return cached.map
+      try {
+        const res = await sfFetch(`${API}/sets`)
+        if (!res.ok) return cached?.map || {}
+        const map = {}
+        for (const s of (await res.json()).data) map[s.code] = s.icon_svg_uri
+        await set(SETS_KEY, { at: Date.now(), map })
+        return map
+      } catch { return cached?.map || {} }
+    })()
+  }
+  return setIconsP
+}
