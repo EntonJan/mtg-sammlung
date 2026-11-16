@@ -1,9 +1,10 @@
 // Demo: echte Scryfall-Daten, aber Karten über Namen statt eigener IDs
 export * from '../src/scryfall.js'
-import { sfFetch, slimCard } from '../src/scryfall.js'
+import { getTokens as realTokens, sfFetch, slimCard } from '../src/scryfall.js'
 import { ALL_NAMES, slug } from './data'
 
 let cache = null
+const realId = {}
 export async function loadCardCache() {
   if (cache) return cache
   cache = {}
@@ -17,6 +18,7 @@ export async function loadCardCache() {
       const s = slimCard(c)
       const key = slug(ALL_NAMES.find((n) => n.toLowerCase() === c.name.toLowerCase() || c.name.toLowerCase().startsWith(n.toLowerCase() + ' //')) || c.name)
       cache[key] = { ...s, id: key }
+      realId[key] = c.id
     }
   }
   return cache
@@ -34,4 +36,13 @@ export async function loadPriceSnapshots() {
   }
   const d = new Date(Date.now() - 8 * 864e5).toLocaleDateString('sv-SE')
   return { [d]: old, [new Date().toLocaleDateString('sv-SE')]: {} }
+}
+
+// Token-Suche braucht echte Scryfall-IDs
+export async function getTokens(ids) {
+  await loadCardCache()
+  const r = await realTokens(ids.map((id) => realId[id] || id).filter((id) => /^[0-9a-f-]{36}$/.test(id)))
+  const parts = {}
+  for (const id of ids) parts[id] = r.parts[realId[id]] || []
+  return { parts, tokens: r.tokens }
 }
