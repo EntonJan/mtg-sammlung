@@ -468,3 +468,30 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 @media (max-width: 640px) { .sell .row .row-sub { display: none; } }
 
 .recon { display: flex; flex-direction: column; gap: 8px; background: #3a2a14; border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 4px 0 10px; font-size: 14px; }
+
+/* Deck: Bilderansicht als Stapel (wie Archidekt) */
+.deck-stacks { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 12px; align-items: flex-start; }
+.deck-stack { width: 170px; }
+.deck-stack h3 { font-size: 13px; margin: 0 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stack { display: flex; flex-direction: column; padding-bottom: 6px; }
+.stack-card { position: relative; width: 170px; cursor: grab; transition: transform .12s; }
+/* Karte 170 × 237 px – sichtbar bleibt nur die Namenszeile (~30 px) */
+.stack-card + .stack-card { margin-top: -206px; }
+.stack-card img { width: 100%; aspect-ratio: 488 / 680; border-radius: 4.75% / 3.5%; display: block; background: var(--panel2); box-shadow: 0 -1px 3px rgba(0,0,0,.5); }
+.stack-card:hover, .stack-card.open { z-index: 5; transform: translateY(-4px); }
+.stack-card:hover img { box-shadow: 0 8px 24px rgba(0,0,0,.7); }
+/* Platz schaffen, damit die überfahrene Karte die folgenden nicht verdeckt */
+.stack-card:hover ~ .stack-card { transform: translateY(206px); }
+.stack-card:last-child:hover ~ .stack-card { transform: none; }
+.stack-qty, .stack-foil { position: absolute; top: 6px; font-size: 11px; padding: 1px 6px; border-radius: 6px; }
+.stack-qty { left: 6px; background: rgba(0,0,0,.8); color: #fff; }
+.stack-foil { left: 40px; background: linear-gradient(90deg,#8ec5fc,#e0c3fc); color: #222; }
+.stack-card .row-actions { position: absolute; top: 34px; right: 6px; flex-direction: column; opacity: 0; transition: opacity .1s; }
+.stack-card:hover .row-actions, .stack-card.open .row-actions { opacity: 1; }
+.stack-card .mini { background: rgba(20,20,24,.9); }
+.stack-card .tag-picker { top: 34px; right: 40px; }
+@media (max-width: 640px) {
+  .deck-stack, .stack-card { width: 130px; }
+  .stack-card + .stack-card { margin-top: -156px; }
+  .stack-card:hover ~ .stack-card { transform: translateY(156px); }
+}

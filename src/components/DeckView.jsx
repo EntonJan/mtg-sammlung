@@ -23,6 +23,8 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   const [reconAny, setReconAny] = useState(false)
   const [tab, setTab] = useState('list')
   const [groupBy, setGroupBy] = useState('type')
+  const [mode, setModeState] = useState(() => { try { return localStorage.getItem('deckMode') || 'list' } catch { return 'list' } })
+  const setMode = (m) => { setModeState(m); try { localStorage.setItem('deckMode', m) } catch { /* egal */ } }
   const [picker, setPicker] = useState(null)
   const [builder, setBuilder] = useState(() => { try { return localStorage.getItem('builder') === '1' } catch { return false } })
   const toggleBuilder = () => setBuilder((b) => { try { localStorage.setItem('builder', b ? '0' : '1') } catch { /* egal */ } return !b })
@@ -151,6 +153,12 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           <button className={groupBy === 'cat' ? 'on' : ''} onClick={() => setGroupBy('cat')}>Nach Kategorie</button>
         </div>
       )}
+      {rows.length > 0 && (
+        <div className="seg seg-small" style={{ marginLeft: 8 }}>
+          <button className={mode === 'list' ? 'on' : ''} onClick={() => setMode('list')}>Liste</button>
+          <button className={mode === 'grid' ? 'on' : ''} onClick={() => setMode('grid')}>Bilder</button>
+        </div>
+      )}
       {warnings.map((w) => <p key={w} className="warn">{w}</p>)}
 
       {!rows.length && (
@@ -159,15 +167,15 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         </div>
       )}
 
-      <div className="deck-cols">
+      <div className={mode === 'grid' ? 'deck-stacks' : 'deck-cols'}>
         {poolRest.length > 0 && (
-          <Group gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} />
+          <Group gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} grid={mode === 'grid'} />
         )}
         {commanders.length > 0 && (
-          <Group label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
+          <Group label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} />
         )}
         {groups.map((g) => (
-          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} />
+          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} />
         ))}
       </div>
       </>}
@@ -193,11 +201,51 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   )
 }
 
-function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool }) {
+function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid }) {
   const pool = new Set(deck.pool || [])
   const deckId = deck.id
   const tags = deck.tags || {}
   const n = rows.reduce((s, r) => s + r.qty, 0)
+  const legendary = (r) => cmd || /Legendary/.test(r.card.type) || /can be your commander/.test(r.card.text || '')
+
+  const actions = (r) => (
+    <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+      {legendary(r) && (
+        <button className={`mini ${cmd ? 'on' : ''}`} title={cmd ? 'Kein Commander mehr' : 'Als Commander festlegen'}
+          onClick={() => onToggleCommander(r.key)}>★</button>
+      )}
+      {legendary(r) && (
+        <button className={`mini ${pool.has(r.key) ? 'on' : ''}`} title={pool.has(r.key) ? 'Aus Commander-Pool entfernen' : 'In den Commander-Pool (Würfeln)'}
+          onClick={() => togglePool(r.key)}>🎲</button>
+      )}
+      <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
+      <button className="mini" title="1 Exemplar zurück in die Sammlung"
+        onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
+    </span>
+  )
+  const picker_ = (r) => picker === `${gk}|${r.key}` && <TagPicker deck={deck} card={r.card} onUpdate={onUpdate} onClose={() => setPicker(null)} />
+
+  // Bilderansicht wie bei Archidekt: Karten als Stapel, nur die Namenszeile sichtbar, beim Überfahren ganz
+  if (grid) {
+    return (
+      <section className="deck-stack">
+        <h3>{label} <span className="muted">({n})</span></h3>
+        <div className="stack">
+          {rows.map((r) => (
+            <div key={r.key} className={`stack-card ${picker === `${gk}|${r.key}` ? 'open' : ''}`}
+              {...dragProps({ id: r.id, finish: r.finish, from: deckId })} onClick={() => onOpen(r.card)}>
+              <img src={r.card.img} alt={r.card.name} loading="lazy" draggable={false} />
+              {r.qty > 1 && <span className="stack-qty">{r.qty}×</span>}
+              {r.finish !== 'normal' && <span className="stack-foil">{FINISH_LABEL[r.finish]}</span>}
+              {actions(r)}
+              {picker_(r)}
+            </div>
+          ))}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="deck-group">
       <h3>{label} <span className="muted">({n})</span></h3>
@@ -212,20 +260,8 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
             )}
           </span>
           <Mana cost={r.card.cost} />
-          <span className="row-actions" onClick={(e) => e.stopPropagation()}>
-            {(cmd || /Legendary/.test(r.card.type) || /can be your commander/.test(r.card.text || '')) && (
-              <button className={`mini ${cmd ? 'on' : ''}`} title={cmd ? 'Kein Commander mehr' : 'Als Commander festlegen'}
-                onClick={() => onToggleCommander(r.key)}>★</button>
-            )}
-            {(cmd || /Legendary/.test(r.card.type) || /can be your commander/.test(r.card.text || '')) && (
-              <button className={`mini ${pool.has(r.key) ? 'on' : ''}`} title={pool.has(r.key) ? 'Aus Commander-Pool entfernen' : 'In den Commander-Pool (Würfeln)'}
-                onClick={() => togglePool(r.key)}>🎲</button>
-            )}
-            <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
-            <button className="mini" title="1 Exemplar zurück in die Sammlung"
-              onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
-          </span>
-          {picker === `${gk}|${r.key}` && <TagPicker deck={deck} card={r.card} onUpdate={onUpdate} onClose={() => setPicker(null)} />}
+          {actions(r)}
+          {picker_(r)}
         </div>
       ))}
     </section>
