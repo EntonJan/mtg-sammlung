@@ -138,3 +138,9 @@ body.native header { padding-top: calc(8px + var(--safe-top)); }
   body.native nav { padding-bottom: calc(4px + var(--safe-bottom)); }
   body.native main { padding-bottom: calc(58px + var(--safe-bottom)); }
 }
+
+/* Eingebettete Suche (Deck/Ordner): Vorschlagsliste nicht abschneiden, sondern über allem anzeigen */
+.deck-new .add { overflow: visible; flex: none; padding-bottom: 8px; }
+.deck-new .toolbar { padding-left: 0; padding-right: 0; }
+.ac-list { z-index: 30; background: #1a1916; border: 1px solid var(--gold-dim); box-shadow: 0 10px 28px rgba(0,0,0,.6); max-height: 320px; overflow-y: auto; }
+.ac-list li:hover { background: #2a251c; color: #f1e6c8; }
