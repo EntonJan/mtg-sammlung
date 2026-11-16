@@ -73,3 +73,7 @@ export const wishAlarm = (w, cards) => {
 
 // Läuft die App als Android-App (Capacitor)?
 export const isNativeApp = () => !!window.Capacitor?.isNativePlatform?.()
+
+// Link zur Cardmarket-Seite der Karte (genaues Produkt, sonst Suche nach dem Namen)
+export const cardmarketUrl = (card) =>
+  card.cm || `https://www.cardmarket.com/de/Magic/Products/Search?searchString=${encodeURIComponent(card.name.split(' // ')[0])}`

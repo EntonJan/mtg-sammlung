@@ -457,3 +457,12 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .scan-hit-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .prints { max-width: 100%; }
 @media (max-width: 640px) { .scan { padding: 10px; } .scan-stage { aspect-ratio: 3 / 4; } .scan-hit img { width: 110px; } }
+
+/* Verkaufen / Cardmarket */
+.sell-head { padding: 12px 16px 0; }
+.sell-head h2 { margin: 0 0 4px; }
+.cm-btn { text-decoration: none; color: var(--text); white-space: nowrap; }
+.cm-btn:hover { border-color: #3d7cc9; color: #9cc3f2; }
+.cm-link { color: #9cc3f2; }
+.sell .row .btn { padding: 4px 8px; font-size: 12px; }
+@media (max-width: 640px) { .sell .row .row-sub { display: none; } }

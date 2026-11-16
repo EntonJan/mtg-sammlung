@@ -15,7 +15,7 @@ import MatchView from './components/MatchView'
 import ValueView from './components/ValueView'
 import BinderView from './components/BinderView'
 import WishlistView from './components/WishlistView'
-import SurplusView from './components/SurplusView'
+import SellView from './components/SellView'
 import ScanView from './components/ScanView'
 
 export default function App() {
@@ -440,7 +440,7 @@ function Main({ user }) {
             Wunschliste{wishAlarms > 0 && <span className="badge">🔔 {wishAlarms}</span>}
           </button>
           <button className={view.kind === 'value' ? 'on' : ''} onClick={() => setView({ kind: 'value' })}>Wert</button>
-          <button className={view.kind === 'surplus' ? 'on' : ''} onClick={() => setView({ kind: 'surplus' })}>Überzählig</button>
+          <button className={view.kind === 'sell' ? 'on' : ''} onClick={() => setView({ kind: 'sell' })}>Verkaufen</button>
           <button className={view.kind === 'match' ? 'on' : ''} onClick={() => setView({ kind: 'match' })}>Was fehlt mir?</button>
           <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
         </nav>
@@ -496,8 +496,8 @@ function Main({ user }) {
             <AddCards entries={entries} onChange={changeQty} />
           ) : view.kind === 'scan' ? (
             <ScanView decks={decks} onAdd={addScanned} onUndoAdd={(c, f, t) => addScanned(c, f, t, -1)} />
-          ) : view.kind === 'surplus' ? (
-            <SurplusView entries={entries} decks={decks} cards={cards} onMoveMany={moveMany} onOpen={setOpen} />
+          ) : view.kind === 'sell' ? (
+            <SellView entries={entries} decks={decks} cards={cards} deNames={deNames} onMoveMany={moveMany} onCreateBinder={(n) => createDeck(n, 'binder')} onOpen={setOpen} />
           ) : view.kind === 'wish' ? (
             <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} />
           ) : view.kind === 'value' ? (

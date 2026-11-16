@@ -67,6 +67,7 @@ export function slimCard(c) {
     eur: c.prices?.eur ? Number(c.prices.eur) : null,
     eurFoil: c.prices?.eur_foil ? Number(c.prices.eur_foil) : null,
     legalCmd: c.legalities?.commander,
+    cm: c.purchase_uris?.cardmarket || null, // Link zur Cardmarket-Produktseite
     released: c.released_at,
     fetched: Date.now(),
   }

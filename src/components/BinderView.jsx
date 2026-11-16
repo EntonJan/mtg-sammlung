@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { dragProps, readDrag } from '../drag'
 import { entryKey } from '../store'
-import { FINISH_LABEL, euro, unitPrice } from '../util'
+import { FINISH_LABEL, cardmarketUrl, euro, unitPrice } from '../util'
 
 // Ordner (z. B. Tauschordner): Karten mit Preisen, als Liste teilbar
 export default function BinderView({ deck, cards, onMove, onRename, onDelete, onOpen }) {
@@ -77,6 +77,7 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
               <td className="muted small">{r.card.setName} ({r.card.set} #{r.card.num})</td>
               <td className="price">{euro(r.price)}</td>
               <td onClick={(e) => e.stopPropagation()}>
+                <a className="btn small cm-btn" href={cardmarketUrl(r.card)} target="_blank" rel="noreferrer">Cardmarket ↗</a>{' '}
                 <button className="mini" title="1 Exemplar zurück in die Sammlung"
                   onClick={() => onMove({ id: r.id, finish: r.finish, from: deck.id }, 'collection')}>↩</button>
               </td>
