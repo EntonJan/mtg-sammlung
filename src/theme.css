@@ -173,3 +173,4 @@ body.native header { padding-top: calc(8px + var(--safe-top)); }
 .add-info .set-line > span { flex: 1; text-align: left; align-items: flex-start; }
 .add-info .set-line > span > span { display: block; }
 .set-icon.rar-rare { filter: invert(68%) sepia(48%) saturate(420%) hue-rotate(5deg) brightness(.97); }
+.add-card img.set-icon, .pp-card img.set-icon { width: 26px; height: 26px; border-radius: 0; align-self: center; cursor: default; transform: none !important; box-shadow: none !important; }
