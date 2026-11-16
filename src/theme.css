@@ -384,3 +384,13 @@ nav button:not(.on) .ico-line { color: #b39a62; }
 .sold-sum { margin-left: auto; color: var(--good); font-family: var(--serif); letter-spacing: 0; }
 .sold-row { display: grid; grid-template-columns: 90px 1fr auto auto; gap: 10px; align-items: center; padding: 4px 0; border-bottom: 1px solid #1f1c17; }
 @media (max-width: 640px) { .sell-row .cm-btn { display: none; } .sell-price .muted { display: none; } }
+
+/* Manasymbole: Zahlen in gleich hohen Ziffern (Garamond hat Mediävalziffern) und exakt mittig */
+.mana-sym, .pip {
+  font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-weight: 700; line-height: 1; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #1a1612;
+}
+.mana-sym { font-size: 10.5px; }
