@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { deleteShare, newShareId, publishShare, shareRows } from './share'
 import ShareDialog from './components/ShareDialog'
+import FriendsView from './components/FriendsView'
+import { watchFriends } from './friends'
 import { auth } from './firebase'
 import { Login, Settings } from './components/Auth'
 import { entryKey, fromItems, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
@@ -52,6 +54,8 @@ function Main({ user }) {
   const [wishlist, setWishlistState] = useState([])
   const [shareMeta, setShareMeta] = useState({})   // { collection: id, wishlist: id }
   const [shareOpen, setShareOpen] = useState(null) // { kind, deckId?, title }
+  const [friendsCfg, setFriendsCfgState] = useState({})
+  const [friendReq, setFriendReq] = useState(0)
   const [deNames, setDeNames] = useState({})
   const [showSettings, setShowSettings] = useState(false)
 
@@ -80,6 +84,7 @@ function Main({ user }) {
           loadCollection(user.uid), loadDecks(user.uid), loadCardCache(), loadMeta(user.uid, 'wishlist').catch(() => null),
         ])
         loadMeta(user.uid, 'shares').then((m) => alive && m && setShareMeta(m)).catch(() => {})
+        loadMeta(user.uid, 'friends').then((m) => alive && m && setFriendsCfgState(m)).catch(() => {})
         if (!alive) return
         setWishlistState(wish?.items || [])
         Object.assign(S.current, { entries: ents, decks: dks, chunks })
@@ -538,6 +543,10 @@ function Main({ user }) {
   }, [user.uid, rememberCard])
   const wishAlarms = useMemo(() => wishlist.filter((w) => wishAlarm(w, cards)).length, [wishlist, cards])
 
+  // Offene Freundschaftsanfragen für das Abzeichen im Menü
+  useEffect(() => watchFriends(user.uid, (l) => setFriendReq(Object.values(l).filter((f) => f.status === 'in').length)), [user.uid])
+  const setFriendsCfg = useCallback((c) => { setFriendsCfgState(c); saveMeta(user.uid, 'friends', c).catch(console.error) }, [user.uid])
+
   // ---- Teilen-Links (Nur-Lesen) ----
   const sharesRef = useRef(shareMeta); sharesRef.current = shareMeta
   const wishRef = useRef(wishlist); wishRef.current = wishlist
@@ -583,7 +592,8 @@ function Main({ user }) {
     const payload = buildShare(kind, deckId)
     await publishShare(user.uid, id, payload)
     if (kind === 'deck' || kind === 'binder') updateDeckRef.current(deckId, { shareId: id })
-    else { const m = { ...sharesRef.current, [kind]: id }; setShareMeta(m); await saveMeta(user.uid, 'shares', m) }
+    else { const m = { ...sharesRef.current, [kind]: id }; sharesRef.current = m; setShareMeta(m); await saveMeta(user.uid, 'shares', m) }
+    return id
   }, [buildShare, user.uid])
   const removeShare = useCallback(async (kind, deckId) => {
     const id = shareIdOf(kind, deckId)
@@ -670,6 +680,9 @@ function Main({ user }) {
           <button className={view.kind === 'value' ? 'on' : ''} onClick={() => setView({ kind: 'value' })}>Wert</button>
           <button className={view.kind === 'sell' ? 'on' : ''} onClick={() => setView({ kind: 'sell' })}>Verkaufen</button>
           <button className={view.kind === 'match' ? 'on' : ''} onClick={() => setView({ kind: 'match' })}>Was fehlt mir?</button>
+          <button className={view.kind === 'friends' ? 'on' : ''} onClick={() => setView({ kind: 'friends' })}>
+            Freunde{friendReq > 0 && <span className="badge">{friendReq}</span>}
+          </button>
           <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
         </nav>
         <div className="user">
@@ -740,6 +753,9 @@ function Main({ user }) {
             <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} onShare={() => setShareOpen({ kind: 'wishlist', title: 'Wunschliste' })} />
           ) : view.kind === 'value' ? (
             <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
+          ) : view.kind === 'friends' ? (
+            <FriendsView uid={user.uid} decks={decks} entries={entries} cards={cards} wishlist={wishlist} shareMeta={shareMeta}
+              friendsCfg={friendsCfg} setFriendsCfg={setFriendsCfg} ensureShare={createShare} onCount={setFriendReq} />
           ) : view.kind === 'match' ? (
             <MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} wishlist={wishlist} setWishlist={setWishlist} />
           ) : view.kind === 'import' ? (
