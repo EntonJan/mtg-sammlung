@@ -4,11 +4,21 @@ import { gunzipSync } from 'node:zlib'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
 const out = process.argv[2] || 'dist/data/combos.json'
-const res = await fetch('https://backend.commanderspellbook.com/variants.json.gz', {
-  headers: { 'User-Agent': 'mtg-sammlung/1.0 (github.com/EntonJan/mtg-sammlung)' },
-})
-if (!res.ok) { console.error('Spellbook-Download fehlgeschlagen', res.status); process.exit(1) }
-const data = JSON.parse(gunzipSync(Buffer.from(await res.arrayBuffer())).toString('utf8'))
+const URLS = [
+  'https://json.commanderspellbook.com/variants.json.gz',
+  'https://json.commanderspellbook.com/variants.json',
+  'https://backend.commanderspellbook.com/variants.json.gz',
+  'https://backend.commanderspellbook.com/variants.json',
+]
+let buf = null
+for (const url of URLS) {
+  const res = await fetch(url, { headers: { 'User-Agent': 'mtg-sammlung/1.0 (github.com/EntonJan/mtg-sammlung)' } }).catch((e) => ({ ok: false, status: e.message }))
+  console.log(url, res.status)
+  if (res.ok) { buf = Buffer.from(await res.arrayBuffer()); break }
+}
+if (!buf) { console.error('Spellbook-Download fehlgeschlagen'); process.exit(1) }
+if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf)
+const data = JSON.parse(buf.toString('utf8'))
 const variants = data.variants || data
 
 const cards = [], cardIdx = new Map()
