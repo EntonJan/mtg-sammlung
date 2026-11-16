@@ -23,6 +23,9 @@ import WishlistView from './components/WishlistView'
 import SellView from './components/SellView'
 import ScanView from './components/ScanView'
 
+// Menüpunkte, die am Handy unter „Weiteres“ liegen
+const MORE = [['scan', 'Scannen'], ['value', 'Wert'], ['sell', 'Verkaufen'], ['match', 'Was fehlt mir?'], ['import', 'Import']]
+
 export default function App() {
   const [user, setUser] = useState(undefined)
   useEffect(() => onAuthStateChanged(auth, setUser), [])
@@ -55,6 +58,7 @@ function Main({ user }) {
   const [wishlist, setWishlistState] = useState([])
   const [shareMeta, setShareMeta] = useState({})   // { collection: id, wishlist: id }
   const [shareOpen, setShareOpen] = useState(null) // { kind, deckId?, title }
+  const [moreOpen, setMoreOpen] = useState(false)
   const [friendsCfg, setFriendsCfgState] = useState({})
   const [friendReq, setFriendReq] = useState(0)
   const [deNames, setDeNames] = useState({})
@@ -548,6 +552,8 @@ function Main({ user }) {
   useEffect(() => watchFriends(user.uid, (l) => setFriendReq(Object.values(l).filter((f) => f.status === 'in').length)), [user.uid])
   const setFriendsCfg = useCallback((c) => { setFriendsCfgState(c); saveMeta(user.uid, 'friends', c).catch(console.error) }, [user.uid])
 
+  const go = (v) => { setMoreOpen(false); setView(v) }
+
   // ---- Teilen-Links (Nur-Lesen) ----
   const sharesRef = useRef(shareMeta); sharesRef.current = shareMeta
   const wishRef = useRef(wishlist); wishRef.current = wishlist
@@ -673,19 +679,37 @@ function Main({ user }) {
         <button className="btn icon side-toggle" onClick={() => setSideOpen((o) => !o)} aria-label="Decks">☰</button>
         <h1>MTG Sammlung</h1>
         <nav>
-          <button className={view.kind === 'add' ? 'on' : ''} onClick={() => setView({ kind: 'add' })}>Hinzufügen</button>
-          <button className={view.kind === 'scan' ? 'on' : ''} onClick={() => setView({ kind: 'scan' })}><CameraIcon /> Scannen</button>
-          <button className={view.kind === 'wish' ? 'on' : ''} onClick={() => setView({ kind: 'wish' })}>
+          <button className={view.kind === 'add' ? 'on' : ''} onClick={() => go({ kind: 'add' })}>Hinzufügen</button>
+          <button className={`more-item ${view.kind === 'scan' ? 'on' : ''}`} onClick={() => go({ kind: 'scan' })}><CameraIcon /> Scannen</button>
+          <button className={view.kind === 'wish' ? 'on' : ''} onClick={() => go({ kind: 'wish' })}>
             Wunschliste{wishAlarms > 0 && <span className="badge">🔔 {wishAlarms}</span>}
           </button>
-          <button className={view.kind === 'value' ? 'on' : ''} onClick={() => setView({ kind: 'value' })}>Wert</button>
-          <button className={view.kind === 'sell' ? 'on' : ''} onClick={() => setView({ kind: 'sell' })}>Verkaufen</button>
-          <button className={view.kind === 'match' ? 'on' : ''} onClick={() => setView({ kind: 'match' })}>Was fehlt mir?</button>
-          <button className={view.kind === 'friends' ? 'on' : ''} onClick={() => setView({ kind: 'friends' })}>
+          {MORE.filter(([k]) => k !== 'scan').map(([k, label]) => (
+            <button key={k} className={`more-item ${view.kind === k ? 'on' : ''}`} onClick={() => go({ kind: k })}>{label}</button>
+          )).slice(0, 3)}
+          <button className={view.kind === 'friends' ? 'on' : ''} onClick={() => go({ kind: 'friends' })}>
             Freunde{friendReq > 0 && <span className="badge">{friendReq}</span>}
           </button>
-          <button className={view.kind === 'import' ? 'on' : ''} onClick={() => setView({ kind: 'import' })}>Import</button>
+          <button className={`more-item ${view.kind === 'import' ? 'on' : ''}`} onClick={() => go({ kind: 'import' })}>Import</button>
+          <button className={`more-toggle ${moreOpen || MORE.some(([k]) => k === view.kind) ? 'on' : ''}`} onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen}>
+            Weiteres <span className="more-caret">{moreOpen ? '▾' : '▴'}</span>
+          </button>
         </nav>
+        {moreOpen && (
+          <>
+            <div className="more-backdrop" onClick={() => setMoreOpen(false)} />
+            <div className="more-menu" role="menu">
+              <div className="more-head">◆ Weiteres ◆</div>
+              {MORE.map(([k, label]) => (
+                <button key={k} role="menuitem" className={view.kind === k ? 'on' : ''} onClick={() => go({ kind: k })}>
+                  {k === 'scan' && <CameraIcon />}{label}
+                </button>
+              ))}
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setShowSettings(true) }}>Einstellungen</button>
+              <button role="menuitem" onClick={() => signOut(auth)}>Abmelden</button>
+            </div>
+          </>
+        )}
         <div className="user">
           <button className="btn icon small" disabled={!undoInfo.undo} onClick={undo} title="Rückgängig (Strg+Z)">↶</button>
           <button className="btn icon small" disabled={!undoInfo.redo} onClick={redo} title="Wiederholen (Strg+Y)">↷</button>

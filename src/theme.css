@@ -337,3 +337,27 @@ h2 .share-btn { margin-left: 12px; vertical-align: middle; font-family: var(--se
 .ico-line { display: inline-block; vertical-align: -3px; margin-right: 2px; color: var(--accent); }
 nav button:not(.on) .ico-line { color: #b39a62; }
 .btn.primary .ico-line { color: var(--accent-ink); }
+
+/* Menü „Weiteres“ (nur Handy) */
+.more-toggle, .more-menu, .more-backdrop { display: none; }
+@media (max-width: 640px) {
+  nav { overflow: visible; justify-content: space-around; flex-wrap: nowrap; }
+  nav .more-item { display: none; }
+  nav button { flex: 1 1 0; padding: 9px 4px; font-size: 14px; white-space: nowrap; text-align: center; }
+  nav .more-toggle { display: inline-block; }
+  .more-caret { font-size: 11px; color: var(--gold-dim); margin-left: 2px; }
+  .more-backdrop { display: block; position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.45); }
+  .more-menu {
+    display: flex; flex-direction: column; position: fixed; z-index: 31; right: 8px;
+    bottom: calc(56px + var(--safe-bottom, 0px)); min-width: 220px;
+    background: #151412; border: 1px solid var(--gold-dim); outline: 1px solid var(--gold-deep); outline-offset: 3px;
+    padding: 6px; box-shadow: 0 -10px 30px rgba(0,0,0,.6); animation: moreUp .14s ease-out;
+  }
+  .more-menu::before, .more-menu::after { content: ''; position: absolute; width: 12px; height: 12px; pointer-events: none; }
+  .more-menu::before { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .more-menu::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .more-head { font-family: var(--caps); font-size: 11px; letter-spacing: .18em; color: var(--gold-dim); text-align: center; padding: 4px 0 6px; border-bottom: 1px solid var(--gold-deep); margin-bottom: 4px; text-transform: uppercase; }
+  .more-menu button { background: none; border: 0; color: var(--text); font-family: var(--serif); font-size: 17px; text-align: left; padding: 10px 12px; border-radius: 3px; display: flex; align-items: center; gap: 8px; }
+  .more-menu button:hover, .more-menu button.on { background: #1f1c17; color: var(--accent); }
+  @keyframes moreUp { from { transform: translateY(8px); opacity: 0 } to { transform: none; opacity: 1 } }
+}
