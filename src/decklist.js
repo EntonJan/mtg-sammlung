@@ -6,10 +6,10 @@
 //   1 Atraxa, Praetors' Voice *CMDR*
 //   1x Command Tower (cmm) 410 [Land]
 //   1 Lightning Greaves (2XM) 258 *F*
-// Abschnitte: „Commander“, „// Commander“, „Deck“, „Sideboard“/„Maybeboard“ (werden übersprungen)
+// Abschnitte: „Commander“, „// Commander“, „Deck“, „Sideboard“ (→ Sideboard), „Maybeboard“ (übersprungen)
 
 const SECTION = /^(?:\/\/\s*)?(commander|commanders|companion|deck|main|mainboard|sideboard|maybeboard|considering|tokens?)\s*:?\s*(?:\(\d+\))?$/i
-const SKIP_SECTIONS = /sideboard|maybeboard|considering|tokens?/i
+const SKIP_SECTIONS = /maybeboard|considering|tokens?/i
 
 export function parseDecklist(text) {
   const lines = []
@@ -27,7 +27,8 @@ export function parseDecklist(text) {
     // Archidekt-Kategorien [Commander{top}], [Ramp] und ^Tags^
     const cats = [...line.matchAll(/\[([^\]]*)\]/g)].map((m) => m[1])
     if (cats.some((c) => /commander/i.test(c))) commander = true
-    if (cats.some((c) => /maybeboard|sideboard/i.test(c))) continue
+    if (cats.some((c) => /maybeboard/i.test(c))) continue
+    const side = /sideboard/i.test(section) || cats.some((c) => /sideboard/i.test(c))
     const foil = /\*F\*/i.test(line) ? 'foil' : /\*E\*/i.test(line) ? 'etched' : 'normal'
     line = line.replace(/\[[^\]]*\]/g, '').replace(/\^[^^]*\^/g, '').replace(/\*[A-Z]+\*/gi, '').trim()
 
@@ -40,7 +41,7 @@ export function parseDecklist(text) {
     if (sm) { rest = sm[1]; set = sm[2].toLowerCase(); num = sm[3] || null }
     const name = rest.replace(/\s+/g, ' ').trim()
     if (!name || !qty) continue
-    lines.push({ qty, name, set, num, finish: foil, commander, raw })
+    lines.push({ qty, name, set, num, finish: foil, commander: commander && !side, side, raw })
   }
   return lines
 }

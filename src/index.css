@@ -510,3 +510,25 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .tile-avail.none { color: #f0c27a; }
 .mini:disabled { opacity: .3; cursor: default; }
 @media (max-width: 640px) { .avail { display: none; } .row.used .row-sub::after { content: ' · in Deck'; } }
+
+/* Deck: Raster (alle Karten vollständig) */
+.deck-raster { display: flex; flex-direction: column; gap: 18px; margin-top: 12px; }
+.deck-raster-group h3 { font-size: 14px; margin: 0 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.raster-card { position: relative; cursor: grab; }
+.raster-card img { width: 100%; aspect-ratio: 488 / 680; border-radius: 4.75% / 3.5%; display: block; background: var(--panel2); transition: transform .12s; }
+.raster-card:hover img { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,.6); }
+.raster-card.foiled img { box-shadow: 0 0 0 2px #b9a3f5; }
+.raster-qty { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.8); color: var(--accent); font-weight: 700; font-size: 12px; padding: 1px 7px; border-radius: 6px; }
+.raster-card .row-actions { position: absolute; top: 30px; right: 6px; flex-direction: column; opacity: 0; }
+.raster-card:hover .row-actions, .raster-card.open .row-actions { opacity: 1; }
+.raster-card .mini { background: rgba(20,20,24,.9); }
+.raster-card .tag-picker { top: 30px; right: 40px; }
+@media (max-width: 640px) { .raster { grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); } }
+
+/* Sideboard als Ablagezone */
+.side-zone { border: 1px dashed var(--line); border-radius: 8px; padding: 6px 8px; min-height: 70px; }
+.side-zone.over { border-color: var(--accent); background: rgba(217,164,65,.06); }
+.side-empty-hint { color: var(--muted); font-size: 12px; padding: 8px 4px; }
+.deck-stack.side-zone { width: 196px; }
+.mini { font-size: 11px; }

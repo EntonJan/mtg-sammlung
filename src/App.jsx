@@ -232,7 +232,7 @@ function Main({ user }) {
       const d = nd[from]
       const entriesNext = bump(d.entries, id, finish, -qty)
       const k = entryKey(id, finish)
-      nd[from] = { ...d, entries: entriesNext, commanders: entriesNext[k] ? d.commanders : d.commanders.filter((c) => c !== k), pool: entriesNext[k] ? d.pool : (d.pool || []).filter((c) => c !== k) }
+      nd[from] = { ...d, entries: entriesNext, commanders: entriesNext[k] ? d.commanders : d.commanders.filter((c) => c !== k), pool: entriesNext[k] ? d.pool : (d.pool || []).filter((c) => c !== k), side: entriesNext[k] ? d.side : (d.side || []).filter((c) => c !== k) }
       changedDecks.push(from)
     }
     if (to === 'collection') ne = bump(ne, id, finish, qty)
@@ -386,6 +386,7 @@ function Main({ user }) {
       let ents = base.entries
       let ne = s.entries
       const cmds = new Set(base.commanders)
+      const side = new Set(base.side || [])
       let added = 0, moved = 0
       for (const l of ok) {
         let need = l.qty
@@ -403,10 +404,11 @@ function Main({ user }) {
         if (need) {
           ents = bump(ents, l.card.id, l.finish, need)
           if (l.commander) cmds.add(entryKey(l.card.id, l.finish))
+          if (l.side) side.add(entryKey(l.card.id, l.finish))
         }
         added += l.qty
       }
-      commit({ entries: ne, decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds] } }, collectionChanged: moved > 0, changedDecks: [id], label: `Deck-Import „${base.name}“` })
+      commit({ entries: ne, decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds], side: [...side] } }, collectionChanged: moved > 0, changedDecks: [id], label: `Deck-Import „${base.name}“` })
       await flush()
       return { deckId: id, name: base.name, added, moved, missing }
     } finally {

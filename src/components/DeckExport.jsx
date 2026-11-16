@@ -9,7 +9,7 @@ const FORMATS = [
 ]
 
 // Reiter „Export“: Deckliste als Text (kopieren/herunterladen) oder druckbare Liste
-export default function DeckExport({ deck, rows, commanderKeys }) {
+export default function DeckExport({ deck, rows, sideRows = [], commanderKeys }) {
   const [fmt, setFmt] = useState('moxfield')
   const [copied, setCopied] = useState(false)
 
@@ -18,19 +18,22 @@ export default function DeckExport({ deck, rows, commanderKeys }) {
     const rest = rows.filter((r) => !commanderKeys.has(r.key)).sort((a, b) => a.card.name.localeCompare(b.card.name))
     const tags = deck.tags || {}
     const foil = (r) => (r.finish === 'foil' ? ' *F*' : r.finish === 'etched' ? ' *E*' : '')
+    const side = [...sideRows].sort((a, b) => a.card.name.localeCompare(b.card.name))
     if (fmt === 'plain') {
       return [...cmd, ...rest].map((r) => `${r.qty} ${r.card.name}`).join('\n')
+        + (side.length ? `\n\nSideboard\n${side.map((r) => `${r.qty} ${r.card.name}`).join('\n')}` : '')
     }
     if (fmt === 'archidekt') {
       const line = (r, extra = []) => {
         const t = [...extra, ...(tags[tagKey(r.card)] || [])]
         return `${r.qty}x ${r.card.name} (${r.card.set.toLowerCase()}) ${r.card.num}${foil(r)}${t.length ? ` [${t.join(',')}]` : ''}`
       }
-      return [...cmd.map((r) => line(r, ['Commander{top}'])), ...rest.map((r) => line(r))].join('\n')
+      return [...cmd.map((r) => line(r, ['Commander{top}'])), ...rest.map((r) => line(r)), ...side.map((r) => line(r, ['Sideboard{noDeck}']))].join('\n')
     }
     const line = (r) => `${r.qty} ${r.card.name} (${r.card.set}) ${r.card.num}${foil(r)}`
     return (cmd.length ? `Commander\n${cmd.map(line).join('\n')}\n\nDeck\n` : '') + rest.map(line).join('\n')
-  }, [rows, commanderKeys, fmt, deck.tags])
+      + (side.length ? `\n\nSideboard\n${side.map(line).join('\n')}` : '')
+  }, [rows, sideRows, commanderKeys, fmt, deck.tags])
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* egal */ }

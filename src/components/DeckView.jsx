@@ -29,10 +29,23 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   const [builder, setBuilder] = useState(() => { try { return localStorage.getItem('builder') === '1' } catch { return false } })
   const toggleBuilder = () => setBuilder((b) => { try { localStorage.setItem('builder', b ? '0' : '1') } catch { /* egal */ } return !b })
 
-  const rows = useMemo(() => Object.values(deck.entries)
+  const allRows = useMemo(() => Object.values(deck.entries)
     .filter((e) => cards[e.id])
     .map((e) => ({ ...e, key: entryKey(e.id, e.finish), card: cards[e.id], price: unitPrice(cards[e.id], e.finish) }))
     .sort((a, b) => a.card.cmc - b.card.cmc || a.card.name.localeCompare(b.card.name)), [deck.entries, cards])
+
+  // Sideboard: gehört zum Deck (reserviert), zählt aber nicht zu den 100 Karten
+  const sideKeys = useMemo(() => new Set(deck.side || []), [deck.side])
+  const rows = useMemo(() => allRows.filter((r) => !sideKeys.has(r.key)), [allRows, sideKeys])
+  const sideRows = useMemo(() => allRows.filter((r) => sideKeys.has(r.key)), [allRows, sideKeys])
+  const sideCount = sideRows.reduce((t, r) => t + r.qty, 0)
+  const toggleSide = (key) => onUpdate({ side: sideKeys.has(key) ? [...sideKeys].filter((k) => k !== key) : [...sideKeys, key] })
+  // Karte (oder Mehrfachauswahl) ins Sideboard legen – auch direkt aus der Sammlung oder einem anderen Deck
+  const dropToSide = (d) => {
+    const items = d.multi || [d]
+    if (items.some((x) => x.from !== deck.id)) onMove(d, deck.id)
+    onUpdate({ side: [...new Set([...sideKeys, ...items.map((x) => entryKey(x.id, x.finish))])] })
+  }
 
   const cmdKeys = new Set(deck.commanders)
   const poolKeys = new Set(deck.pool || [])
@@ -58,7 +71,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   }, [rest, groupBy, deck])
 
   const count = rows.reduce((s, r) => s + r.qty, 0)
-  const value = rows.reduce((s, r) => s + (r.price ?? 0) * r.qty, 0)
+  const value = allRows.reduce((s, r) => s + (r.price ?? 0) * r.qty, 0)
   // Farbidentität: aktive Commander + alle Pool-Commander (das Deck muss zu jeder Kombination passen)
   const identity = [...new Set([...commanders, ...poolRest].flatMap((r) => r.card.ci))]
 
@@ -91,7 +104,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           <h2 onClick={() => { setName(deck.name); setEditing(true) }} title="Klicken zum Umbenennen">{deck.name}</h2>
         )}
         <div className="deck-stats">
-          <span className={count === 100 ? 'ok' : ''}><b>{count}</b>/100 Karten</span>
+          <span className={count === 100 ? 'ok' : ''}><b>{count}</b>/100 Karten{sideCount > 0 && <span className="muted"> (+{sideCount} Sideboard)</span>}</span>
           <span>Wert <b>{euro(value)}</b></span>
           {identity.length > 0 && <span>Farbidentität <b>{identity.map((c) => COLOR_NAMES[c]).join(', ')}</b></span>}
         </div>
@@ -141,7 +154,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
 
       {tab === 'stats' && <DeckStats rows={rows} />}
       {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} />}
-      {tab === 'export' && <DeckExport deck={deck} rows={rows} commanderKeys={cmdKeys} />}
+      {tab === 'export' && <DeckExport deck={deck} rows={rows} sideRows={sideRows} commanderKeys={cmdKeys} />}
       {tab === 'cats' && <DeckCategories deck={deck} rows={rows} onUpdate={onUpdate} />}
 
       {tab === 'list' && <>
@@ -156,7 +169,8 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       {rows.length > 0 && (
         <div className="seg seg-small" style={{ marginLeft: 8 }}>
           <button className={mode === 'list' ? 'on' : ''} onClick={() => setMode('list')}>Liste</button>
-          <button className={mode === 'grid' ? 'on' : ''} onClick={() => setMode('grid')}>Bilder</button>
+          <button className={mode === 'grid' ? 'on' : ''} onClick={() => setMode('grid')}>Stapel</button>
+          <button className={mode === 'raster' ? 'on' : ''} onClick={() => setMode('raster')}>Raster</button>
         </div>
       )}
       {warnings.map((w) => <p key={w} className="warn">{w}</p>)}
@@ -167,16 +181,19 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         </div>
       )}
 
-      <div className={mode === 'grid' ? 'deck-stacks' : 'deck-cols'}>
+      <div className={mode === 'grid' ? 'deck-stacks' : mode === 'raster' ? 'deck-raster' : 'deck-cols'}>
         {poolRest.length > 0 && (
-          <Group gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} grid={mode === 'grid'} />
+          <Group gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         )}
         {commanders.length > 0 && (
-          <Group label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} />
+          <Group label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         )}
         {groups.map((g) => (
-          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} />
+          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         ))}
+        {rows.length + sideRows.length > 0 && (
+          <Group gk="side" label="Sideboard" rows={sideRows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} onDropHere={dropToSide} />
+        )}
       </div>
       </>}
     </div>
@@ -201,7 +218,16 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   )
 }
 
-function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid }) {
+function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid, raster, toggleSide, sideKeys, onDropHere }) {
+  const [dropOver, setDropOver] = useState(false)
+  // Eigenes Ablageziel (Sideboard): Ziehen hierher legt die Karte ins Sideboard
+  const dropZone = onDropHere ? {
+    onDragOver: (e) => { if (e.dataTransfer.types.includes('application/x-mtg-card')) { e.preventDefault(); e.stopPropagation(); setDropOver(true) } },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropOver(false) },
+    onDrop: (e) => { e.preventDefault(); e.stopPropagation(); setDropOver(false); const d = readDrag(e); if (d) onDropHere(d) },
+  } : {}
+  const zoneCls = onDropHere ? ` side-zone ${dropOver ? 'over' : ''}` : ''
+  const emptyHint = onDropHere && !rows.length && <div className="side-empty-hint">Karten hierher ziehen oder bei einer Karte „SB“ klicken</div>
   const pool = new Set(deck.pool || [])
   const deckId = deck.id
   const tags = deck.tags || {}
@@ -218,6 +244,7 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
         <button className={`mini ${pool.has(r.key) ? 'on' : ''}`} title={pool.has(r.key) ? 'Aus Commander-Pool entfernen' : 'In den Commander-Pool (Würfeln)'}
           onClick={() => togglePool(r.key)}>🎲</button>
       )}
+      <button className={`mini ${sideKeys?.has(r.key) ? 'on' : ''}`} title={sideKeys?.has(r.key) ? 'Zurück ins Hauptdeck' : 'Ins Sideboard'} onClick={() => toggleSide(r.key)}>SB</button>
       <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
       <button className="mini" title="1 Exemplar zurück in die Sammlung"
         onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
@@ -225,11 +252,33 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
   )
   const picker_ = (r) => picker === `${gk}|${r.key}` && <TagPicker deck={deck} card={r.card} onUpdate={onUpdate} onClose={() => setPicker(null)} />
 
+  // Raster: alle Karten vollständig nebeneinander
+  if (raster) {
+    return (
+      <section className={`deck-raster-group${zoneCls}`} {...dropZone}>
+        <h3>{label} <span className="muted">({n})</span></h3>
+        {emptyHint}
+        <div className="raster">
+          {rows.map((r) => (
+            <div key={r.key} className={`raster-card ${r.finish !== 'normal' ? 'foiled' : ''} ${picker === `${gk}|${r.key}` ? 'open' : ''}`}
+              {...dragProps({ id: r.id, finish: r.finish, from: deckId })} onClick={() => onOpen(r.card)}>
+              <img src={r.card.img} alt={r.card.name} loading="lazy" draggable={false} />
+              {r.qty > 1 && <span className="raster-qty">{r.qty}×</span>}
+              {actions(r)}
+              {picker_(r)}
+            </div>
+          ))}
+        </div>
+      </section>
+    )
+  }
+
   // Bilderansicht wie bei Archidekt: Karten als Stapel, nur die Namenszeile sichtbar, beim Überfahren ganz
   if (grid) {
     return (
-      <section className="deck-stack">
+      <section className={`deck-stack${zoneCls}`} {...dropZone}>
         <h3>{label} <span className="muted">({n})</span></h3>
+        {emptyHint}
         <div className="stack">
           {rows.map((r) => (
             <div key={r.key} className={`stack-card ${r.finish !== 'normal' ? 'foiled' : ''} ${picker === `${gk}|${r.key}` ? 'open' : ''}`}
@@ -247,8 +296,9 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
   }
 
   return (
-    <section className="deck-group">
+    <section className={`deck-group${zoneCls}`} {...dropZone}>
       <h3>{label} <span className="muted">({n})</span></h3>
+      {emptyHint}
       {rows.map((r) => (
         <div key={r.key} className="deck-row" {...dragProps({ id: r.id, finish: r.finish, from: deckId })} onClick={() => onOpen(r.card)}>
           <span className="qty">{r.qty}</span>
