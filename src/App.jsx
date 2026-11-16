@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { auth } from './firebase'
 import { Login, Settings } from './components/Auth'
-import { entryKey, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
+import { entryKey, fromItems, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
 import { addToCache, ensureCards, getGermanNames, loadCardCache, loadGermanNames, refreshStalePrices, resolveDeckLines, savePriceSnapshot, setWaitHandler, today } from './scryfall'
 import { groupOf, subtypesOf, unitPrice, wishAlarm } from './util'
 import CollectionView from './components/CollectionView'
@@ -147,6 +147,28 @@ function Main({ user }) {
       if (undoStack.current.length > 50) undoStack.current.shift()
       redoStack.current = []
       syncUndo()
+    }
+    // Deck-Verlauf: Änderungen an Karten mitschreiben (innerhalb von 2 Minuten zusammengefasst)
+    if (nd) {
+      for (const id of changedDecks) {
+        const before = s.decks[id], after = nd[id]
+        if (!before || !after || before.entries === after.entries) continue
+        const keys = new Set([...Object.keys(before.entries), ...Object.keys(after.entries)])
+        const delta = {}
+        for (const k of keys) { const dq = (after.entries[k]?.qty || 0) - (before.entries[k]?.qty || 0); if (dq) delta[k] = dq }
+        if (!Object.keys(delta).length) continue
+        const log = [...(after.log || before.log || [])]
+        const last = log[log.length - 1]
+        const now = Date.now()
+        if (last && now - last.t < 120000) {
+          const merged = {}
+          for (const c of last.ch) { const i = c.lastIndexOf('|'); merged[c.slice(0, i)] = Number(c.slice(i + 1)) }
+          for (const [k, v] of Object.entries(delta)) merged[k] = (merged[k] || 0) + v
+          log[log.length - 1] = { t: now, ch: Object.entries(merged).filter(([, v]) => v).map(([k, v]) => `${k}|${v}`) }
+          if (!log[log.length - 1].ch.length) log.pop()
+        } else log.push({ t: now, ch: Object.entries(delta).map(([k, v]) => `${k}|${v}`) })
+        nd = { ...nd, [id]: { ...after, log: log.slice(-300) } }
+      }
     }
     if (ne) { s.entries = ne; setEntries(ne) }
     if (nd) { s.decks = nd; setDecks(nd) }
@@ -316,6 +338,30 @@ function Main({ user }) {
       label: `${card.name}: ${mode === 'swap' ? 'getauscht' : 'Printing geändert'} → ${card.set.toUpperCase()} #${card.num}`,
     })
   }, [commit, rememberCard])
+
+  // Gemerkte Deck-Version wiederherstellen: Überzähliges zurück in die Sammlung, Fehlendes aus der Sammlung holen
+  const restoreVersion = useCallback((deckId, version) => {
+    const s = S.current
+    const d = s.decks[deckId]
+    if (!d) return []
+    const target = fromItems(version.items)
+    let ents = d.entries, coll = s.entries
+    const missing = []
+    for (const [k, e] of Object.entries(d.entries)) {
+      const want = target[k]?.qty || 0
+      if (e.qty > want) { ents = bump(ents, e.id, e.finish, want - e.qty); coll = bump(coll, e.id, e.finish, e.qty - want) }
+    }
+    for (const [k, e] of Object.entries(target)) {
+      const have = ents[k]?.qty || 0
+      if (e.qty <= have) continue
+      const take = Math.min(e.qty - have, coll[k]?.qty || 0)
+      if (take) { ents = bump(ents, e.id, e.finish, take); coll = bump(coll, e.id, e.finish, -take) }
+      if (e.qty - have - take > 0) missing.push({ ...e, qty: e.qty - have - take })
+    }
+    const nd = { ...d, entries: ents, commanders: (version.commanders || d.commanders).filter((k) => ents[k]), side: (version.side || []).filter((k) => ents[k]) }
+    commit({ entries: coll, decks: { ...s.decks, [deckId]: nd }, collectionChanged: coll !== s.entries, changedDecks: [deckId], label: `Version „${version.name}“ wiederhergestellt` })
+    return missing
+  }, [commit])
 
   const toggleCommander = useCallback((id, key) => {
     const d = S.current.decks[id]
@@ -605,6 +651,7 @@ function Main({ user }) {
               onAddNew={(card, finish, delta = 1) => addScanned(card, finish, deck.id, delta)}
               onImportDeck={importDeck}
               onChangePrinting={(from, card, finish, qty, mode) => changePrinting(deck.id, from, card, finish, qty, mode)}
+              onRestoreVersion={(v) => restoreVersion(deck.id, v)}
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />

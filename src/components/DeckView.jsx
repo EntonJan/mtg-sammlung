@@ -13,6 +13,7 @@ import PrintPicker from './PrintPicker'
 import DeckCombos from './DeckCombos'
 import DeckSuggest from './DeckSuggest'
 import DeckBracket from './DeckBracket'
+import DeckHistory from './DeckHistory'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
@@ -20,7 +21,7 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion }) {
   const [printRow, setPrintRow] = useState(null)
   const [newQuery, setNewQuery] = useState('')
   const [editing, setEditing] = useState(false)
@@ -180,12 +181,13 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       )}
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
+        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['history', 'Verlauf'], ['export', 'Export']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {tab === 'stats' && <><DeckBracket deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} /><DeckStats rows={rows} /></>}
+      {tab === 'history' && <DeckHistory deck={deck} cards={cards} onUpdate={onUpdate} onRestore={onRestoreVersion} />}
       {tab === 'suggest' && <DeckSuggest commanders={commanders.map((r) => r.card)} rows={[...rest, ...poolRest]} ownedByName={ownedByName} deNames={deNames}
         onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'combos' && <DeckCombos deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} owned={owned} deNames={deNames}

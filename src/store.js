@@ -54,6 +54,9 @@ export async function loadDecks(uid) {
       pool: v.pool || null,         // Commander-Pool für Partner-Würfel
       side: v.side || [],           // Sideboard (Einträge-Schlüssel)
       kind: v.kind || 'deck',       // 'deck' oder 'binder' (Tauschordner)
+      log: v.log || [],             // Änderungsprotokoll [{ t, ch: ['id|finish|delta'] }]
+      versions: v.versions || [],   // gemerkte Versionen [{ t, name, items, commanders, side }]
+      shareId: v.shareId || null,   // öffentlicher Teilen-Link
     }
   })
   return decks
@@ -87,12 +90,17 @@ export async function saveAll(uid, { entries, prevChunks, decks, dirtyDecks, sav
       pool: d.pool || null,
       side: d.side || [],
       kind: d.kind || 'deck',
+      log: (d.log || []).slice(-300),
+      versions: (d.versions || []).slice(-20),
+      shareId: d.shareId || null,
       updatedAt: serverTimestamp(),
     })
   }
   await batch.commit()
   return chunks
 }
+
+export { toItems, fromItems }
 
 export function newDeckId() {
   return doc(collection(db, '_')).id

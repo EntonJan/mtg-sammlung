@@ -256,3 +256,19 @@ a:hover { color: #f1d68a; }
 .bracket-list h4 { font-family: var(--caps); font-weight: 500; font-size: 12px; letter-spacing: .08em; color: var(--accent); margin: 0 0 4px; }
 .bracket-list.bad h4 { color: #e08a7a; }
 .bracket-list ul { margin: 0; padding-left: 18px; font-size: 14px; }
+
+/* Deck-Verlauf */
+.hist-save { display: flex; gap: 8px; margin-bottom: 10px; }
+.hist-save input { flex: 1; }
+.hist-version { border: 1px solid var(--gold-deep); background: #161513; padding: 8px 10px; margin-bottom: 6px; border-radius: 4px; }
+.hist-vhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hist-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hist-diff { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 8px; }
+.hist-diff h4, .hist-day h4 { font-family: var(--caps); font-weight: 500; font-size: 12px; letter-spacing: .08em; color: #b39a62; margin: 0 0 4px; }
+.hist-diff ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.plus { color: var(--good); }
+.minus { color: #e08a7a; }
+.hist-missing { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--gold-dim); background: #1d1912; display: flex; gap: 8px; align-items: flex-start; }
+.hist-day { margin-bottom: 10px; }
+.hist-entry { display: flex; gap: 12px; padding: 3px 0; border-bottom: 1px solid #1f1c17; font-size: 14px; }
+.hist-entry > span:last-child { display: flex; flex-wrap: wrap; gap: 4px 14px; }
