@@ -165,7 +165,12 @@ function FriendDetail({ friend, onBack, decks, entries, cards, wishlist }) {
   // Was ich habe: frei + in Ordnern (je Oracle-ID)
   const mine = useMemo(() => {
     const m = {}
-    const add = (e, where) => { const c = cards[e.id]; if (!c) return; const o = (m[c.oracleId] ||= { free: 0, binders: [], price: c.eur }); if (where) { if (!o.binders.includes(where)) o.binders.push(where) } else o.free += e.qty }
+    const add = (e, where) => {
+      const c = cards[e.id]; if (!c) return
+      const o = (m[c.oracleId] ||= { free: 0, binders: [], price: c.eur })
+      m[`n:${c.name.toLowerCase()}`] = o
+      if (where) { if (!o.binders.includes(where)) o.binders.push(where) } else o.free += e.qty
+    }
     Object.values(entries).forEach((e) => add(e))
     Object.values(decks).filter((d) => d.kind === 'binder').forEach((d) => Object.values(d.entries).forEach((e) => add(e, d.name)))
     return m
@@ -173,11 +178,16 @@ function FriendDetail({ friend, onBack, decks, entries, cards, wishlist }) {
 
   const match = useMemo(() => {
     if (!data) return null
-    const give = (data.wish?.rows || []).map((r) => ({ r, have: mine[r.o] })).filter((x) => x.have && (x.have.free || x.have.binders.length))
+    const give = (data.wish?.rows || []).map((r) => ({ r, have: mine[r.o] || mine[`n:${r.n.toLowerCase()}`] })).filter((x) => x.have && (x.have.free || x.have.binders.length))
     const theirs = {}
-    for (const b of data.bins) for (const r of b.rows) (theirs[r.o] ||= { rows: [], where: new Set() }).where.add(`Ordner „${b.name}“`) && theirs[r.o].rows.push(r)
-    for (const r of data.coll?.rows || []) { (theirs[r.o] ||= { rows: [], where: new Set() }).where.add('Sammlung'); theirs[r.o].rows.push(r) }
-    const get = wishlist.map((w) => cards[w.id]).filter(Boolean).map((c) => ({ c, t: theirs[c.oracleId] })).filter((x) => x.t)
+    const put = (r, where) => {
+      const t = theirs[r.o] || theirs[`n:${r.n.toLowerCase()}`] || { rows: [], where: new Set() }
+      theirs[r.o] = theirs[`n:${r.n.toLowerCase()}`] = t
+      t.where.add(where); t.rows.push(r)
+    }
+    for (const b of data.bins) for (const r of b.rows) put(r, `Ordner „${b.name}“`)
+    for (const r of data.coll?.rows || []) put(r, 'Sammlung')
+    const get = wishlist.map((w) => cards[w.id]).filter(Boolean).map((c) => ({ c, t: theirs[c.oracleId] || theirs[`n:${c.name.toLowerCase()}`] })).filter((x) => x.t)
     return { give, get }
   }, [data, mine, wishlist, cards])
 

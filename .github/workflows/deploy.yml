@@ -27,9 +27,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Demo-Version (Beispieldaten)
+        run: npx vite build --config vite.demo.config.mjs
       - name: Combo-Daten (Commander Spellbook)
         run: node --max-old-space-size=6000 scripts/build-combos.mjs dist/data/combos.json
         continue-on-error: true
+      - run: mkdir -p dist/demo/data && cp -r dist/data/. dist/demo/data/ || true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
