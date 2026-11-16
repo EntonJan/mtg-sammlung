@@ -561,6 +561,8 @@ function Main({ user }) {
               onUpdate={(patch) => updateDeck(deck.id, patch)}
               reconcilePreview={(any) => reconcilePreview(deck.id, any)}
               onReconcile={(any) => reconcileApply(deck.id, any)}
+              onAddNew={(card, finish, delta = 1) => addScanned(card, finish, deck.id, delta)}
+              onImportDeck={importDeck}
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />

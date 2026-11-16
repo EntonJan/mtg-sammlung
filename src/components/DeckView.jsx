@@ -7,6 +7,8 @@ import DeckStats from './DeckStats'
 import DeckHand from './DeckHand'
 import DeckExport from './DeckExport'
 import CollectionView from './CollectionView'
+import AddCards from './AddCards'
+import DeckImport from './DeckImport'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
@@ -14,7 +16,8 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck }) {
+  const [newQuery, setNewQuery] = useState('')
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
@@ -153,7 +156,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       )}
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
+        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -161,11 +164,23 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       {tab === 'stats' && <DeckStats rows={rows} />}
       {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} />}
       {tab === 'export' && <DeckExport deck={deck} rows={rows} sideRows={sideRows} commanderKeys={cmdKeys} />}
+      {tab === 'new' && (
+        <div className="deck-new">
+          <p className="muted small">
+            Für Karten, die in deinem echten Deck stecken, aber noch nicht in der App sind: Alles hier wird als <b>neues Exemplar</b> in „{deck.name}“ gelegt
+            und zählt damit automatisch zu deiner Sammlung (dort als „in Deck“). „−“ nimmt ein hier hinzugefügtes Exemplar wieder ganz heraus.
+          </p>
+          <h3>Karte suchen</h3>
+          <AddCards key={newQuery} initialQuery={newQuery} entries={deck.entries} onChange={(c, f, d) => onAddNew(c, f, d)}
+            placeholder="Karte suchen, die neu in dieses Deck + die Sammlung soll (englisch oder deutsch)" />
+          <DeckImport decks={decks} fixedDeck={deck} onImportDeck={onImportDeck} />
+        </div>
+      )}
       {tab === 'cats' && <DeckCategories deck={deck} rows={rows} onUpdate={onUpdate} />}
 
       {tab === 'list' && <>
       <CommanderPool deck={deck} rows={rows} onUpdate={onUpdate} onOpen={onOpen} />
-      <DeckFetch deck={deck} entries={entries} decks={decks} cards={cards} onMove={onMove} deNames={deNames} />
+      <DeckFetch deck={deck} entries={entries} decks={decks} cards={cards} onMove={onMove} deNames={deNames} onNew={(q) => { setNewQuery(q); setTab('new') }} />
       {rows.length > 0 && (
         <div className="seg seg-small">
           <button className={!subOn ? 'on' : ''} onClick={() => setSubOn(false)}>Nur Typen</button>
@@ -189,16 +204,16 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
 
       <div className={mode === 'grid' ? 'deck-stacks' : mode === 'raster' ? 'deck-raster' : 'deck-cols'}>
         {poolRest.length > 0 && (
-          <Group gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
+          <Group onAddNew={onAddNew} gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         )}
         {commanders.length > 0 && (
-          <Group label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
+          <Group onAddNew={onAddNew} label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         )}
         {groups.map((g) => (
-          <Group key={g.k} gk={g.k} label={g.label} rows={g.rows} subs={g.subs} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
+          <Group onAddNew={onAddNew} key={g.k} gk={g.k} label={g.label} rows={g.rows} subs={g.subs} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         ))}
         {rows.length + sideRows.length > 0 && (
-          <Group gk="side" label="Sideboard" rows={sideRows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} onDropHere={dropToSide} />
+          <Group onAddNew={onAddNew} gk="side" label="Sideboard" rows={sideRows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} onDropHere={dropToSide} />
         )}
       </div>
       </>}
@@ -224,7 +239,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   )
 }
 
-function Group({ gk = 'cmd', label, rows, subs, deck, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid, raster, toggleSide, sideKeys, onDropHere }) {
+function Group({ gk = 'cmd', label, rows, subs, deck, onAddNew, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid, raster, toggleSide, sideKeys, onDropHere }) {
   const [dropOver, setDropOver] = useState(false)
   // Eigenes Ablageziel (Sideboard): Ziehen hierher legt die Karte ins Sideboard
   const dropZone = onDropHere ? {
@@ -252,6 +267,7 @@ function Group({ gk = 'cmd', label, rows, subs, deck, cmd, onMove, onToggleComma
       )}
       <button className={`mini ${sideKeys?.has(r.key) ? 'on' : ''}`} title={sideKeys?.has(r.key) ? 'Zurück ins Hauptdeck' : 'Ins Sideboard'} onClick={() => toggleSide(r.key)}>SB</button>
       <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
+      {onAddNew && <button className="mini" title="Weiteres Exemplar neu hinzufügen (Deck + Sammlung)" onClick={() => onAddNew(r.card, r.finish)}>+</button>}
       <button className="mini" title="1 Exemplar zurück in die Sammlung"
         onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
     </span>

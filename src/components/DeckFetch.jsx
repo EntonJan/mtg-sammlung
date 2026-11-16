@@ -3,7 +3,7 @@ import { FINISH_LABEL } from '../util'
 
 // „Karte holen“: eigene Karte suchen und ins Deck legen – aus der Sammlung
 // oder, wenn kein freies Exemplar mehr da ist, aus einem anderen Deck umlegen.
-export default function DeckFetch({ deck, entries, decks, cards, onMove, deNames = {} }) {
+export default function DeckFetch({ deck, entries, decks, cards, onMove, deNames = {}, onNew }) {
   const [q, setQ] = useState('')
 
   // Alle Fundorte je Karte (oracleId): Sammlung + andere Decks
@@ -31,7 +31,10 @@ export default function DeckFetch({ deck, entries, decks, cards, onMove, deNames
 
   return (
     <div className="fetch">
-      <input className="search" placeholder="Karte aus Sammlung oder anderem Deck holen …" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="fetch-bar">
+        <input className="search" placeholder="Karte suchen – aus Sammlung/anderem Deck holen oder neu hinzufügen …" value={q} onChange={(e) => setQ(e.target.value)} />
+        <button className="btn small" onClick={() => onNew(q.trim())} title="Karte, die du noch nicht in der App hast: neu ins Deck und damit in die Sammlung">+ Neue Karte (Deck + Sammlung)</button>
+      </div>
       {hits.length > 0 && (
         <div className="fetch-list">
           {hits.map((h) => (
@@ -56,7 +59,13 @@ export default function DeckFetch({ deck, entries, decks, cards, onMove, deNames
           ))}
         </div>
       )}
-      {q.trim().length >= 2 && !hits.length && <p className="muted small">Diese Karte besitzt du nicht – weder frei noch in einem Deck.</p>}
+      {q.trim().length >= 2 && !hits.length && (
+        <p className="muted small">
+          Diese Karte ist noch nicht in deiner Sammlung.{' '}
+          <button className="btn small primary" onClick={() => onNew(q.trim())}>„{q.trim()}“ diesem Deck und der Sammlung hinzufügen</button>
+        </p>
+      )}
+      {hits.length > 0 && <p className="muted small">Weiteres echtes Exemplar, das noch fehlt? <button className="linklike" onClick={() => onNew(q.trim())}>Neu zu Deck + Sammlung hinzufügen</button></p>}
     </div>
   )
 }

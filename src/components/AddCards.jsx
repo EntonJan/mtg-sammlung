@@ -4,8 +4,9 @@ import { entryKey } from '../store'
 import { euro } from '../util'
 
 // Karten manuell über die Scryfall-Suche hinzufügen
-export default function AddCards({ entries, onChange }) {
-  const [q, setQ] = useState('')
+// Auch im Deck nutzbar: dann zeigt „entries“ die Exemplare im Deck und onChange legt neue Exemplare direkt ins Deck
+export default function AddCards({ entries, onChange, initialQuery = '', placeholder }) {
+  const [q, setQ] = useState(initialQuery)
   const [suggest, setSuggest] = useState([])
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
@@ -32,6 +33,8 @@ export default function AddCards({ entries, onChange }) {
   }
 
   const pick = (name) => { setQ(name); run(`!"${name}"`) }
+  // Vorbelegte Suche (z. B. aus „Karte holen“ im Deck) direkt ausführen
+  useEffect(() => { if (initialQuery.trim()) { setSuggest([]); run(initialQuery.trim()) } }, [initialQuery])
 
   return (
     <div className="add">
@@ -39,7 +42,7 @@ export default function AddCards({ entries, onChange }) {
         <div className="ac">
           <input
             className="search"
-            placeholder="Kartenname (englisch oder deutsch) oder Scryfall-Suche, z. B. t:dragon c:r"
+            placeholder={placeholder || 'Kartenname (englisch oder deutsch) oder Scryfall-Suche, z. B. t:dragon c:r'}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             autoFocus

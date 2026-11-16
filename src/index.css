@@ -541,3 +541,11 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .cats-types { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 14px; font-size: 13px; }
 .cats-types b { color: var(--accent); }
 .cat-cards .ctype { color: var(--muted); font-size: 11px; margin-top: 4px; list-style: none; }
+
+/* Deck: neue Karten */
+.fetch-bar { display: flex; gap: 8px; align-items: center; }
+.fetch-bar .search { flex: 1; }
+.deck-new { margin-top: 10px; }
+.deck-new h3 { font-size: 14px; margin: 14px 0 6px; }
+.deck-new .import-box { margin-top: 18px; max-width: none; }
+.linklike { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; font: inherit; }
