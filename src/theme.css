@@ -168,3 +168,4 @@ body.native header { padding-top: calc(8px + var(--safe-top)); }
   .add-card img { width: 120px; }
   .add-card img:hover { transform: none; }
 }
+.set-icon-ph { display: inline-block; flex: none; }
