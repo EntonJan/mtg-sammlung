@@ -549,3 +549,17 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .deck-new h3 { font-size: 14px; margin: 14px 0 6px; }
 .deck-new .import-box { margin-top: 18px; max-width: none; }
 .linklike { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; font: inherit; }
+
+/* Printing ändern */
+.modal.print-picker { flex-direction: column; width: min(980px, 96vw); max-height: 90vh; overflow: auto; display: flex; }
+.pp-head h2 { margin: 0 0 4px; font-size: 18px; }
+.pp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 10px 0; font-size: 13px; }
+.pp-controls input[type=number] { width: 56px; }
+.pp-controls .search { flex: 1; min-width: 160px; }
+.pp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.pp-card { display: flex; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.pp-card.current { border-color: var(--accent); }
+.pp-card img { width: 70px; border-radius: 4px; align-self: flex-start; }
+.pp-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pp-info b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }

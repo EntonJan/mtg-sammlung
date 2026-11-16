@@ -282,6 +282,36 @@ function Main({ user }) {
     commit({ decks: { ...S.current.decks, [id]: { ...d, ...patch } }, changedDecks: [id], label: `„${d.name}“ geändert` })
   }, [commit])
 
+  // Printing einer Deckkarte ändern: 'fix' schreibt den Eintrag um, 'swap' tauscht mit einem freien Exemplar der Sammlung
+  const changePrinting = useCallback((deckId, { id, finish }, card, newFinish, qty, mode) => {
+    const s = S.current
+    const d = s.decks[deckId]
+    const oldKey = entryKey(id, finish)
+    const newKey = entryKey(card.id, newFinish)
+    const have = d?.entries[oldKey]?.qty || 0
+    if (!d || !have || oldKey === newKey) return
+    qty = Math.min(qty, have)
+    if (mode === 'swap') qty = Math.min(qty, s.entries[newKey]?.qty || 0)
+    if (qty < 1) return
+    rememberCard(card)
+    let ents = bump(d.entries, id, finish, -qty)
+    ents = bump(ents, card.id, newFinish, qty)
+    const gone = !ents[oldKey]
+    const remap = (list) => (list || []).includes(oldKey)
+      ? [...new Set([...(gone ? list.filter((k) => k !== oldKey) : list), newKey])]
+      : list
+    const nd = { ...d, entries: ents, commanders: remap(d.commanders), pool: d.pool ? remap(d.pool) : d.pool, side: remap(d.side || []) }
+    let entries = s.entries
+    if (mode === 'swap') {
+      entries = bump(entries, card.id, newFinish, -qty)
+      entries = bump(entries, id, finish, qty)
+    }
+    commit({
+      entries, decks: { ...s.decks, [deckId]: nd }, changedDecks: [deckId], collectionChanged: mode === 'swap',
+      label: `${card.name}: ${mode === 'swap' ? 'getauscht' : 'Printing geändert'} → ${card.set.toUpperCase()} #${card.num}`,
+    })
+  }, [commit, rememberCard])
+
   const toggleCommander = useCallback((id, key) => {
     const d = S.current.decks[id]
     const has = d.commanders.includes(key)
@@ -563,6 +593,7 @@ function Main({ user }) {
               onReconcile={(any) => reconcileApply(deck.id, any)}
               onAddNew={(card, finish, delta = 1) => addScanned(card, finish, deck.id, delta)}
               onImportDeck={importDeck}
+              onChangePrinting={(from, card, finish, qty, mode) => changePrinting(deck.id, from, card, finish, qty, mode)}
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />

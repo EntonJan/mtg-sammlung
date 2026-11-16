@@ -9,6 +9,7 @@ import DeckExport from './DeckExport'
 import CollectionView from './CollectionView'
 import AddCards from './AddCards'
 import DeckImport from './DeckImport'
+import PrintPicker from './PrintPicker'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
@@ -16,7 +17,8 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting }) {
+  const [printRow, setPrintRow] = useState(null)
   const [newQuery, setNewQuery] = useState('')
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
@@ -204,20 +206,24 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
 
       <div className={mode === 'grid' ? 'deck-stacks' : mode === 'raster' ? 'deck-raster' : 'deck-cols'}>
         {poolRest.length > 0 && (
-          <Group onAddNew={onAddNew} gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
+          <Group onAddNew={onAddNew} onPrint={setPrintRow} gk="pool" label="Commander-Pool (inaktiv)" rows={poolRest} deck={deck} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} togglePool={togglePool} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         )}
         {commanders.length > 0 && (
-          <Group onAddNew={onAddNew} label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
+          <Group onAddNew={onAddNew} onPrint={setPrintRow} label="Commander" rows={commanders} deck={deck} cmd togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         )}
         {groups.map((g) => (
-          <Group onAddNew={onAddNew} key={g.k} gk={g.k} label={g.label} rows={g.rows} subs={g.subs} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
+          <Group onAddNew={onAddNew} onPrint={setPrintRow} key={g.k} gk={g.k} label={g.label} rows={g.rows} subs={g.subs} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} />
         ))}
         {rows.length + sideRows.length > 0 && (
-          <Group onAddNew={onAddNew} gk="side" label="Sideboard" rows={sideRows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} onDropHere={dropToSide} />
+          <Group onAddNew={onAddNew} onPrint={setPrintRow} gk="side" label="Sideboard" rows={sideRows} deck={deck} togglePool={togglePool} onMove={onMove} onToggleCommander={onToggleCommander} onOpen={onOpen} picker={picker} setPicker={setPicker} onUpdate={onUpdate} grid={mode === 'grid'} raster={mode === 'raster'} toggleSide={toggleSide} sideKeys={sideKeys} onDropHere={dropToSide} />
         )}
       </div>
       </>}
     </div>
+    {printRow && (
+      <PrintPicker row={printRow} entries={entries} onClose={() => setPrintRow(null)}
+        onApply={(card, finish, qty, mode) => { onChangePrinting({ id: printRow.id, finish: printRow.finish }, card, finish, qty, mode); setPrintRow(null) }} />
+    )}
     {builder && (
       <aside className="builder-pane">
         <div className="builder-head">
@@ -239,7 +245,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   )
 }
 
-function Group({ gk = 'cmd', label, rows, subs, deck, onAddNew, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid, raster, toggleSide, sideKeys, onDropHere }) {
+function Group({ gk = 'cmd', label, rows, subs, deck, onAddNew, onPrint, cmd, onMove, onToggleCommander, onOpen, picker, setPicker, onUpdate, togglePool, grid, raster, toggleSide, sideKeys, onDropHere }) {
   const [dropOver, setDropOver] = useState(false)
   // Eigenes Ablageziel (Sideboard): Ziehen hierher legt die Karte ins Sideboard
   const dropZone = onDropHere ? {
@@ -267,6 +273,7 @@ function Group({ gk = 'cmd', label, rows, subs, deck, onAddNew, cmd, onMove, onT
       )}
       <button className={`mini ${sideKeys?.has(r.key) ? 'on' : ''}`} title={sideKeys?.has(r.key) ? 'Zurück ins Hauptdeck' : 'Ins Sideboard'} onClick={() => toggleSide(r.key)}>SB</button>
       <button className="mini" title="Kategorien" onClick={() => setPicker(picker === `${gk}|${r.key}` ? null : `${gk}|${r.key}`)}>🏷</button>
+      <button className="mini" title="Printing (Edition/Foil) ändern" onClick={() => onPrint(r)}>⇄</button>
       {onAddNew && <button className="mini" title="Weiteres Exemplar neu hinzufügen (Deck + Sammlung)" onClick={() => onAddNew(r.card, r.finish)}>+</button>}
       <button className="mini" title="1 Exemplar zurück in die Sammlung"
         onClick={() => onMove({ id: r.id, finish: r.finish, from: deckId }, 'collection')}>↩</button>
