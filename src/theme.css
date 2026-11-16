@@ -319,3 +319,13 @@ h2 .share-btn { margin-left: 12px; vertical-align: middle; font-family: var(--se
 .friend-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #1f1c17; }
 .friend-name { cursor: pointer; font-family: var(--title); font-size: 19px; color: #f1e6c8; }
 .friends h2 .btn { vertical-align: middle; margin-right: 8px; font-family: var(--serif); }
+
+/* Spielstärke */
+.power { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--gold-deep); }
+.power-head { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.power-bar, .power-track { display: block; height: 6px; background: #24211b; border-radius: 3px; overflow: hidden; }
+.power-bar { max-width: 360px; margin-top: 6px; height: 8px; }
+.power-bar span, .power-track span { display: block; height: 100%; background: linear-gradient(90deg, #8a7340, var(--accent)); }
+.power-factors { display: flex; flex-direction: column; gap: 5px; margin: 12px 0 6px; }
+.power-f { display: grid; grid-template-columns: 210px 140px 1fr; gap: 10px; align-items: center; font-size: 14px; }
+@media (max-width: 640px) { .power-f { grid-template-columns: 1fr 90px; } .power-f .muted { grid-column: 1 / -1; } }
