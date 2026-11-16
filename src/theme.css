@@ -361,3 +361,11 @@ nav button:not(.on) .ico-line { color: #b39a62; }
   .more-menu button:hover, .more-menu button.on { background: #1f1c17; color: var(--accent); }
   @keyframes moreUp { from { transform: translateY(8px); opacity: 0 } to { transform: none; opacity: 1 } }
 }
+
+/* Freunde & geteilte Ansichten: volle Breite, größere und scharfe Karten */
+.import.friends { max-width: none; }
+.shared.embedded { max-width: none; width: 100%; }
+.shared .raster { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.shared .raster-card img { image-rendering: auto; }
+.friends .stat-card { max-width: 900px; }
+@media (max-width: 640px) { .shared .raster { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }

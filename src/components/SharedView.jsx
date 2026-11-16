@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { loadShare } from '../share'
 import { GROUPS, euro, groupOf } from '../util'
 
+// Scharfe Bilder: Scryfall-„large“ (672 px) statt „normal“, auch auf hochauflösenden Displays
+const sharp = (u) => (u || '').replace('/normal/', '/large/').replace('/small/', '/large/')
+
 const KIND = { deck: 'Deck', binder: 'Ordner', collection: 'Sammlung', wishlist: 'Wunschliste' }
 
 // Öffentliche Nur-Lesen-Ansicht eines geteilten Decks/Ordners/der Sammlung/Wunschliste
@@ -70,7 +73,7 @@ export default function SharedView({ id, embedded }) {
             <div className="raster">
               {g.rows.slice(0, 600).map((r, i) => (
                 <div key={i} className={`raster-card ${r.f !== 'normal' ? 'foiled' : ''}`} title={`${r.n} · ${r.s.toUpperCase()} #${r.c}`}>
-                  <img src={r.i} alt={r.n} loading="lazy" />
+                  <img src={sharp(r.i)} alt={r.n} loading="lazy" decoding="async" />
                   {r.q > 1 && <span className="raster-qty">{r.q}×</span>}
                   {r.p != null && <span className="slot-price">{euro(r.p)}</span>}
                 </div>
