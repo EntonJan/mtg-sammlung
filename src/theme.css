@@ -192,3 +192,13 @@ body.native header { padding-top: calc(8px + var(--safe-top)); }
   .binder-page { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 8px; }
   .binder-slot .row-actions { opacity: 1; }
 }
+
+/* Fenster (Kartendetails, Printing-Auswahl …) liegen über der Menüleiste und halten Abstand zu Status-/Gestenleiste */
+.modal-bg { z-index: 40; }
+.modal { max-height: 100%; }
+body.native .modal-bg { padding-top: calc(10px + var(--safe-top)); padding-bottom: calc(10px + var(--safe-bottom)); }
+@media (max-width: 640px) {
+  .modal-bg { padding: 10px; align-items: stretch; }
+  body.native .modal-bg { padding-top: calc(8px + var(--safe-top)); padding-bottom: calc(8px + var(--safe-bottom)); }
+  .modal { padding-bottom: 24px; }
+}
