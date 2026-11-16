@@ -232,11 +232,11 @@ function Group({ gk = 'cmd', label, rows, deck, cmd, onMove, onToggleCommander, 
         <h3>{label} <span className="muted">({n})</span></h3>
         <div className="stack">
           {rows.map((r) => (
-            <div key={r.key} className={`stack-card ${picker === `${gk}|${r.key}` ? 'open' : ''}`}
+            <div key={r.key} className={`stack-card ${r.finish !== 'normal' ? 'foiled' : ''} ${picker === `${gk}|${r.key}` ? 'open' : ''}`}
+              title={`${r.qty > 1 ? `${r.qty}× ` : ''}${r.card.name}${r.finish !== 'normal' ? ` (${FINISH_LABEL[r.finish]})` : ''}`}
               {...dragProps({ id: r.id, finish: r.finish, from: deckId })} onClick={() => onOpen(r.card)}>
               <img src={r.card.img} alt={r.card.name} loading="lazy" draggable={false} />
               {r.qty > 1 && <span className="stack-qty">{r.qty}×</span>}
-              {r.finish !== 'normal' && <span className="stack-foil">{FINISH_LABEL[r.finish]}</span>}
               {actions(r)}
               {picker_(r)}
             </div>

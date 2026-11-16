@@ -483,9 +483,11 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 /* Platz schaffen, damit die überfahrene Karte die folgenden nicht verdeckt */
 .stack-card:hover ~ .stack-card { transform: translateY(206px); }
 .stack-card:last-child:hover ~ .stack-card { transform: none; }
-.stack-qty, .stack-foil { position: absolute; top: 6px; font-size: 11px; padding: 1px 6px; border-radius: 6px; }
-.stack-qty { left: 6px; background: rgba(0,0,0,.8); color: #fff; }
-.stack-foil { left: 40px; background: linear-gradient(90deg,#8ec5fc,#e0c3fc); color: #222; }
+.deck-stack { padding-left: 12px; }
+/* Anzahl links neben der Namenszeile, damit der Name frei bleibt */
+.stack-qty { position: absolute; top: 7px; left: -14px; font-size: 11px; font-weight: 700; color: var(--accent); }
+/* Foil: schillernder Rand statt Etikett */
+.stack-card.foiled img { box-shadow: 0 0 0 2px #b9a3f5, 0 -1px 3px rgba(0,0,0,.5); }
 .stack-card .row-actions { position: absolute; top: 34px; right: 6px; flex-direction: column; opacity: 0; transition: opacity .1s; }
 .stack-card:hover .row-actions, .stack-card.open .row-actions { opacity: 1; }
 .stack-card .mini { background: rgba(20,20,24,.9); }
