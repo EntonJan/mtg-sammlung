@@ -4,7 +4,7 @@ import { FINISH_LABEL, euro, unitPrice, wishAlarm } from '../util'
 
 
 // Wunschliste mit Zielpreis („Preisalarm“)
-export default function WishlistView({ wishlist, setWishlist, cards, ownedOracles, onOpen }) {
+export default function WishlistView({ wishlist, setWishlist, cards, ownedOracles, onOpen, onShare }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
@@ -36,7 +36,7 @@ export default function WishlistView({ wishlist, setWishlist, cards, ownedOracle
 
   return (
     <div className="import wish">
-      <h2>Wunschliste</h2>
+      <h2>Wunschliste {onShare && <button className="btn small share-btn" onClick={onShare}>Teilen</button>}</h2>
       <div className="stat-tiles">
         <div className="tile-stat"><span className="muted small">Karten</span><b>{items.length}</b></div>
         <div className="tile-stat"><span className="muted small">Aktueller Preis gesamt</span><b>{euro(total)}</b></div>

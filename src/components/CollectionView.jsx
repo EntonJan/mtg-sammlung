@@ -15,7 +15,7 @@ function loadPref(key, fallback) {
 }
 function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* egal */ } }
 
-export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany, deNames = {}, reserved = {} }) {
+export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany, deNames = {}, reserved = {}, onShare }) {
   const [selected, setSelected] = useState(() => new Set())
   const lastIdx = useRef(-1)
   const [f, setF] = useState(() => loadPref('filter', DEFAULT_FILTER))
@@ -275,6 +275,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
         <span><b>{totals.lines.toLocaleString('de-DE')}</b> {f.group ? 'verschiedene' : 'Einträge'}</span>
         <span>Wert <b>{euro(totals.value)}</b></span>
         {totals.used > 0 && <span>davon in Decks <b>{totals.used.toLocaleString('de-DE')}</b></span>}
+        {onShare && <button className="btn small share-btn" onClick={onShare}>Teilen</button>}
       </div>
 
       {selectedRows.length > 0 && (

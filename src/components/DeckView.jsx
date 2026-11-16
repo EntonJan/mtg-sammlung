@@ -22,7 +22,7 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion, onShare }) {
   const [printRow, setPrintRow] = useState(null)
   const [newQuery, setNewQuery] = useState('')
   const [editing, setEditing] = useState(false)
@@ -144,6 +144,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           {identity.length > 0 && <span>Farbidentität <b>{identity.map((c) => COLOR_NAMES[c]).join(', ')}</b></span>}
         </div>
         <button className="btn small" onClick={() => setRecon(reconcilePreview(reconAny))} title="Prüfen, ob Deck-Karten zusätzlich frei in der Sammlung liegen">Mit Sammlung abgleichen</button>
+        <button className={`btn small ${deck.shareId ? 'active' : ''}`} onClick={onShare} title={deck.shareId ? 'Wird geteilt – Link anzeigen' : 'Nur-Lesen-Link erstellen'}>{deck.shareId ? 'Geteilt ✓' : 'Teilen'}</button>
         <button className={`btn small ${builder ? 'active' : ''}`} onClick={toggleBuilder} title="Sammlung daneben einblenden">
           {builder ? 'Deckbau-Modus aus' : 'Deckbau-Modus'}
         </button>

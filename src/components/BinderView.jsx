@@ -5,7 +5,7 @@ import { FINISH_LABEL, cardmarketUrl, euro, unitPrice } from '../util'
 import AddCards from './AddCards'
 
 // Ordner (z. B. Tauschordner): Karten mit Preisen, als Liste teilbar
-export default function BinderView({ deck, cards, onMove, onRename, onDelete, onOpen, onAddNew }) {
+export default function BinderView({ deck, cards, onMove, onRename, onDelete, onOpen, onAddNew, onShare }) {
   const [adding, setAdding] = useState(false)
   const [mode, setModeState] = useState(() => { try { return localStorage.getItem('binderMode') || 'list' } catch { return 'list' } })
   const setMode = (m) => { setModeState(m); try { localStorage.setItem('binderMode', m) } catch { /* egal */ } }
@@ -64,6 +64,7 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
         <button className={`btn small ${adding ? 'active' : 'primary'}`} onClick={() => setAdding((a) => !a)}>
           {adding ? 'Suche schließen' : '+ Neue Karte (Ordner + Sammlung)'}
         </button>
+        <button className={`btn small ${deck.shareId ? 'active' : ''}`} onClick={onShare}>{deck.shareId ? 'Geteilt ✓' : 'Teilen'}</button>
         {confirmDel ? (
           <span className="confirm">
             Alle Karten zurück in die Sammlung und Ordner löschen?

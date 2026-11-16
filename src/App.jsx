@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
+import { deleteShare, newShareId, publishShare, shareRows } from './share'
+import ShareDialog from './components/ShareDialog'
 import { auth } from './firebase'
 import { Login, Settings } from './components/Auth'
 import { entryKey, fromItems, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
@@ -48,6 +50,8 @@ function Main({ user }) {
   const [toast, setToast] = useState('')
   const [sideOpen, setSideOpen] = useState(false)
   const [wishlist, setWishlistState] = useState([])
+  const [shareMeta, setShareMeta] = useState({})   // { collection: id, wishlist: id }
+  const [shareOpen, setShareOpen] = useState(null) // { kind, deckId?, title }
   const [deNames, setDeNames] = useState({})
   const [showSettings, setShowSettings] = useState(false)
 
@@ -75,6 +79,7 @@ function Main({ user }) {
         const [{ entries: ents, chunks }, dks, cache, wish] = await Promise.all([
           loadCollection(user.uid), loadDecks(user.uid), loadCardCache(), loadMeta(user.uid, 'wishlist').catch(() => null),
         ])
+        loadMeta(user.uid, 'shares').then((m) => alive && m && setShareMeta(m)).catch(() => {})
         if (!alive) return
         setWishlistState(wish?.items || [])
         Object.assign(S.current, { entries: ents, decks: dks, chunks })
@@ -308,6 +313,7 @@ function Main({ user }) {
     const d = S.current.decks[id]
     commit({ decks: { ...S.current.decks, [id]: { ...d, ...patch } }, changedDecks: [id], label: `„${d.name}“ geändert` })
   }, [commit])
+  const updateDeckRef = useRef(updateDeck); updateDeckRef.current = updateDeck
 
   // Printing einer Deckkarte ändern: 'fix' schreibt den Eintrag um, 'swap' tauscht mit einem freien Exemplar der Sammlung
   const changePrinting = useCallback((deckId, { id, finish }, card, newFinish, qty, mode) => {
@@ -531,6 +537,74 @@ function Main({ user }) {
     saveMeta(user.uid, 'wishlist', { items }).catch((e) => { console.error(e); setSaveState('error') })
   }, [user.uid, rememberCard])
   const wishAlarms = useMemo(() => wishlist.filter((w) => wishAlarm(w, cards)).length, [wishlist, cards])
+
+  // ---- Teilen-Links (Nur-Lesen) ----
+  const sharesRef = useRef(shareMeta); sharesRef.current = shareMeta
+  const wishRef = useRef(wishlist); wishRef.current = wishlist
+  const cardsRef = useRef(cards); cardsRef.current = cards
+  const buildShare = useCallback((kind, deckId) => {
+    const s = S.current, cs = cardsRef.current
+    if (kind === 'deck' || kind === 'binder') {
+      const d = s.decks[deckId]
+      if (!d) return null
+      const cmd = new Set(d.commanders || []), side = new Set(d.side || [])
+      const zone = (e) => { const k = entryKey(e.id, e.finish); return cmd.has(k) ? 'cmd' : side.has(k) ? 'side' : 'main' }
+      return { kind: d.kind === 'binder' ? 'binder' : 'deck', name: d.name, rows: shareRows(Object.values(d.entries), cs, zone) }
+    }
+    if (kind === 'collection') {
+      const m = {}
+      const add = (e) => { const k = entryKey(e.id, e.finish); m[k] = { ...e, qty: (m[k]?.qty || 0) + e.qty } }
+      Object.values(s.entries).forEach(add)
+      Object.values(s.decks).forEach((d) => Object.values(d.entries).forEach(add))
+      return { kind, name: 'Sammlung', rows: shareRows(Object.values(m), cs) }
+    }
+    if (kind === 'wishlist') return { kind, name: 'Wunschliste', rows: shareRows(wishRef.current.map((w) => ({ id: w.id, finish: w.finish || 'normal', qty: 1 })), cs) }
+    return null
+  }, [])
+  const shareIdOf = (kind, deckId) => (kind === 'deck' || kind === 'binder') ? S.current.decks[deckId]?.shareId : sharesRef.current[kind]
+  const pendingShares = useRef(new Map())
+  const shareTimer = useRef(null)
+  const scheduleShare = useCallback((kind, deckId, delay = 5000) => {
+    const id = (kind === 'deck' || kind === 'binder') ? S.current.decks[deckId]?.shareId : sharesRef.current[kind]
+    if (!id) return
+    pendingShares.current.set(id, { kind, deckId })
+    clearTimeout(shareTimer.current)
+    shareTimer.current = setTimeout(async () => {
+      const jobs = [...pendingShares.current.entries()]
+      pendingShares.current.clear()
+      for (const [sid, j] of jobs) {
+        const payload = buildShare(j.kind, j.deckId)
+        if (payload) await publishShare(user.uid, sid, payload).catch((e) => console.error('Teilen-Link', e))
+      }
+    }, delay)
+  }, [buildShare, user.uid])
+  const createShare = useCallback(async (kind, deckId) => {
+    const id = newShareId()
+    const payload = buildShare(kind, deckId)
+    await publishShare(user.uid, id, payload)
+    if (kind === 'deck' || kind === 'binder') updateDeckRef.current(deckId, { shareId: id })
+    else { const m = { ...sharesRef.current, [kind]: id }; setShareMeta(m); await saveMeta(user.uid, 'shares', m) }
+  }, [buildShare, user.uid])
+  const removeShare = useCallback(async (kind, deckId) => {
+    const id = shareIdOf(kind, deckId)
+    if (id) await deleteShare(id)
+    if (kind === 'deck' || kind === 'binder') updateDeckRef.current(deckId, { shareId: null })
+    else { const m = { ...sharesRef.current }; delete m[kind]; setShareMeta(m); await saveMeta(user.uid, 'shares', m) }
+  }, [user.uid])
+  // Automatisch aktualisieren, wenn sich geteilte Inhalte ändern
+  useEffect(() => { if (shareMeta.wishlist) scheduleShare('wishlist') }, [wishlist]) // eslint-disable-line react-hooks/exhaustive-deps
+  const prevDecks = useRef(decks)
+  useEffect(() => {
+    const before = prevDecks.current; prevDecks.current = decks
+    if (!before || before === decks) return
+    for (const d of Object.values(decks)) if (d.shareId && before[d.id] !== d) scheduleShare(d.kind === 'binder' ? 'binder' : 'deck', d.id)
+    if (shareMeta.collection) scheduleShare('collection', null, 20000)
+  }, [decks]) // eslint-disable-line react-hooks/exhaustive-deps
+  const prevEntries = useRef(entries)
+  useEffect(() => {
+    const before = prevEntries.current; prevEntries.current = entries
+    if (before && before !== entries && shareMeta.collection) scheduleShare('collection', null, 20000)
+  }, [entries]) // eslint-disable-line react-hooks/exhaustive-deps
   const ownedOracles = useMemo(() => {
     const o = new Set()
     const add = (e) => cards[e.id] && o.add(cards[e.id].oracleId)
@@ -624,7 +698,8 @@ function Main({ user }) {
             <div className="center muted">Lade …</div>
           ) : view.kind === 'collection' ? (
             Object.keys(entries).length || Object.keys(decks).length ? (
-              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} decks={decks} onMoveMany={moveMany} deNames={deNames} reserved={reserved} />
+              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} decks={decks} onMoveMany={moveMany} deNames={deNames} reserved={reserved}
+                onShare={!view.cat ? () => setShareOpen({ kind: 'collection', title: 'Sammlung' }) : undefined} />
             ) : (
               <div className="center">
                 <p>Deine Sammlung ist noch leer.</p>
@@ -635,6 +710,7 @@ function Main({ user }) {
             <BinderView
               key={deck.id} deck={deck} cards={cards} onOpen={setOpen} onMove={dropCard}
               onAddNew={(card, finish, delta = 1) => addScanned(card, finish, deck.id, delta)}
+              onShare={() => setShareOpen({ kind: 'binder', deckId: deck.id, title: deck.name })}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
             />
@@ -652,6 +728,7 @@ function Main({ user }) {
               onImportDeck={importDeck}
               onChangePrinting={(from, card, finish, qty, mode) => changePrinting(deck.id, from, card, finish, qty, mode)}
               onRestoreVersion={(v) => restoreVersion(deck.id, v)}
+              onShare={() => setShareOpen({ kind: 'deck', deckId: deck.id, title: deck.name })}
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
@@ -660,7 +737,7 @@ function Main({ user }) {
           ) : view.kind === 'sell' ? (
             <SellView entries={entries} decks={decks} cards={cards} deNames={deNames} onMoveMany={moveMany} onCreateBinder={(n) => createDeck(n, 'binder')} onOpen={setOpen} />
           ) : view.kind === 'wish' ? (
-            <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} />
+            <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} onShare={() => setShareOpen({ kind: 'wishlist', title: 'Wunschliste' })} />
           ) : view.kind === 'value' ? (
             <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
           ) : view.kind === 'match' ? (
@@ -680,6 +757,11 @@ function Main({ user }) {
         />
       )}
       {showSettings && <Settings user={user} onClose={() => setShowSettings(false)} />}
+      {shareOpen && (
+        <ShareDialog title={shareOpen.title} shareId={shareIdOf(shareOpen.kind, shareOpen.deckId)}
+          onCreate={() => createShare(shareOpen.kind, shareOpen.deckId)} onDelete={() => removeShare(shareOpen.kind, shareOpen.deckId)}
+          onClose={() => setShareOpen(null)} />
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   )

@@ -299,3 +299,17 @@ a:hover { color: #f1d68a; }
 .mover img { width: 38px; border-radius: 3px; }
 .mover-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .mover-diff { text-align: right; font-weight: 600; line-height: 1.15; }
+
+/* Teilen */
+.share-btn { margin-left: auto; }
+h2 .share-btn { margin-left: 12px; vertical-align: middle; font-family: var(--serif); }
+.modal.share-modal { flex-direction: column; max-width: 560px; gap: 10px; }
+.share-modal h2 { margin: 0; }
+.share-link { display: flex; gap: 8px; }
+.share-link input { flex: 1; }
+.shared { max-width: 1300px; margin: 0 auto; padding: calc(10px + var(--safe-top, 0px)) 16px 40px; }
+.shared.embedded { padding: 0; }
+.shared-top { display: flex; justify-content: space-between; align-items: center; padding: 6px 0 12px; border-bottom: 3px double var(--gold-dim); margin-bottom: 14px; }
+.shared-brand { font-family: var(--caps); color: var(--accent); letter-spacing: .16em; }
+.shared-bar { display: flex; gap: 10px; align-items: center; margin: 8px 0 12px; flex-wrap: wrap; }
+.shared-bar .search { flex: 1 1 240px; }
