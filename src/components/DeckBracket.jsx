@@ -43,6 +43,7 @@ export default function DeckBracket({ deck, commanders, rows }) {
           <b>Mindest-Bracket nach den offiziellen Regeln</b>
           <ul>{why.map((w) => <li key={w}>{w}</li>)}</ul>
           {res?.bracketTag && <p className="muted small">Commander Spellbook stuft das Deck ein als: <b>{SB_TAG[res.bracketTag] || res.bracketTag}</b></p>}
+          <p className="muted small">Game Changer laut offizieller Liste (Scryfall), Landzerstörung und Extra-Züge anhand des Kartentexts.</p>
         </div>
         <button className="btn small" onClick={run}>Neu prüfen</button>
       </div>

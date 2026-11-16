@@ -35,7 +35,7 @@ export default function DeckCombos({ deck, commanders, rows, owned, deNames = {}
   return (
     <div className="combos">
       <div className="combos-head">
-        <p className="muted small">Daten von <a href="https://commanderspellbook.com" target="_blank" rel="noreferrer">Commander Spellbook</a>. Sideboard zählt nicht mit.</p>
+        <p className="muted small">Daten von <a href="https://commanderspellbook.com" target="_blank" rel="noreferrer">Commander Spellbook</a> (täglich aktualisiert). Sideboard zählt nicht mit.</p>
         <button className="btn small" onClick={run} disabled={busy}>{busy ? 'Suche …' : 'Neu prüfen'}</button>
       </div>
       {error && <p className="error">{error}</p>}
@@ -80,8 +80,7 @@ function Combo({ v, open, toggle, missing, hint, deNames }) {
         {hint && <div className="combo-hint">{hint}</div>}
         <div className="combo-meta muted small">
           {v.manaValueNeeded ? `Mana nötig: ${v.manaValueNeeded} · ` : ''}{v.popularity ? `in ${v.popularity.toLocaleString('de-DE')} Decks · ` : ''}
-          <button className="linklike" onClick={toggle}>{open ? 'Ablauf ausblenden' : 'Ablauf anzeigen'}</button>
-          {' · '}<a href={comboUrl(v.id)} target="_blank" rel="noreferrer">Spellbook ↗</a>
+          <a href={comboUrl(v.id)} target="_blank" rel="noreferrer">Ablauf auf Spellbook ↗</a>
         </div>
         {open && (
           <div className="combo-steps">

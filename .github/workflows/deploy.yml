@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'   # täglich: Combo-Daten von Commander Spellbook auffrischen
 
 permissions:
   contents: read
@@ -25,6 +27,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Combo-Daten (Commander Spellbook)
+        run: node --max-old-space-size=6000 scripts/build-combos.mjs dist/data/combos.json
+        continue-on-error: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
