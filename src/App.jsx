@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { deleteShare, newShareId, publishShare, shareRows } from './share'
 import ShareDialog from './components/ShareDialog'
 import FriendsView from './components/FriendsView'
+import { CameraIcon } from './components/Icons'
 import { watchFriends } from './friends'
 import { auth } from './firebase'
 import { Login, Settings } from './components/Auth'
@@ -673,7 +674,7 @@ function Main({ user }) {
         <h1>MTG Sammlung</h1>
         <nav>
           <button className={view.kind === 'add' ? 'on' : ''} onClick={() => setView({ kind: 'add' })}>Hinzufügen</button>
-          <button className={view.kind === 'scan' ? 'on' : ''} onClick={() => setView({ kind: 'scan' })}>📷 Scannen</button>
+          <button className={view.kind === 'scan' ? 'on' : ''} onClick={() => setView({ kind: 'scan' })}><CameraIcon /> Scannen</button>
           <button className={view.kind === 'wish' ? 'on' : ''} onClick={() => setView({ kind: 'wish' })}>
             Wunschliste{wishAlarms > 0 && <span className="badge">🔔 {wishAlarms}</span>}
           </button>

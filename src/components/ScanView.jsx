@@ -1,3 +1,4 @@
+import { CameraIcon } from './Icons'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { lookup, preloadOcr, printingsOf, recognize } from '../scan'
 import { euro, unitPrice } from '../util'
@@ -123,7 +124,7 @@ export default function ScanView({ decks, onAdd, onUndoAdd }) {
     <div className="scan">
       <div className="scan-controls">
         {camState !== 'on'
-          ? <button className="btn primary" onClick={start} disabled={camState === 'starting'}>{camState === 'starting' ? 'Starte Kamera …' : '📷 Kamera starten'}</button>
+          ? <button className="btn primary" onClick={start} disabled={camState === 'starting'}>{camState === 'starting' ? 'Starte Kamera …' : <><CameraIcon /> Kamera starten</>}</button>
           : <button className="btn" onClick={stop}>Kamera aus</button>}
         <label className="btn file-btn">🖼 Foto wählen
           <input type="file" accept="image/*" capture="environment" onChange={(e) => fromPhoto(e.target.files[0])} />
