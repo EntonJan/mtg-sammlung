@@ -127,3 +127,14 @@ h2, .deck-head h2 { font-family: var(--title); font-weight: 600; letter-spacing:
   }
   .deck-row:hover > .row-actions { opacity: 1; pointer-events: auto; }
 }
+
+/* Android-App: Inhalt nicht unter Statusleiste (oben) und Gestenleiste (unten) legen */
+body.native { --safe-top: max(env(safe-area-inset-top, 0px), 32px); --safe-bottom: max(env(safe-area-inset-bottom, 0px), 18px); }
+body.native header { padding-top: calc(8px + var(--safe-top)); }
+@media (max-width: 900px) {
+  body.native .sidebar { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
+}
+@media (max-width: 640px) {
+  body.native nav { padding-bottom: calc(4px + var(--safe-bottom)); }
+  body.native main { padding-bottom: calc(58px + var(--safe-bottom)); }
+}
