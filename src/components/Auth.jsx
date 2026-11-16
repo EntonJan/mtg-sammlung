@@ -103,8 +103,9 @@ export function Settings({ user, onClose }) {
           <h3>Android-App</h3>
           <p className="small">
             Die App gibt es als APK zum direkten Installieren:{' '}
-            <a href="https://github.com/EntonJan/mtg-sammlung/releases/latest" target="_blank" rel="noreferrer">Download (GitHub)</a>.
-            In der App funktioniert der Google-Login nicht (Google erlaubt das in Apps nicht) – dafür brauchst du ein App-Passwort.
+            <a href="https://github.com/EntonJan/mtg-sammlung/releases/download/android-latest/mtg-sammlung.apk" target="_blank" rel="noreferrer">APK laden</a>.
+            Anmelden geht dort ebenfalls mit Google; ein App-Passwort brauchst du nur, wenn du lieber E-Mail + Passwort nutzt.
+            <br /><a href="https://entonjan.github.io/mtg-sammlung/willkommen.html" target="_blank" rel="noreferrer">Willkommensseite – alles, was die App kann ↗</a> (gut zum Weiterschicken)
           </p>
           {!isNativeApp() && (
             <form className="login-form left" onSubmit={save}>

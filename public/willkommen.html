@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#121211" />
+<title>Willkommen bei MTG Sammlung</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Cormorant+Garamond:wght@600&family=EB+Garamond:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #121211; --panel: #171614; --panel2: #1f1d1a; --line: #3d3527; --text: #e6e0d4; --muted: #8d8576;
+    --gold: #d4b46a; --gold-dim: #8a7340; --gold-deep: #2a251c; --ink: #1a1408;
+    --caps: 'Cinzel', Georgia, serif; --title: 'Cormorant Garamond', Georgia, serif; --serif: 'EB Garamond', Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--serif); font-size: 18px; line-height: 1.55; }
+  a { color: var(--gold); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px 60px; }
+
+  header.top { border-bottom: 3px double var(--gold-dim); padding: 14px 0; text-align: center; }
+  header.top .brand { font-family: var(--caps); letter-spacing: .18em; color: var(--gold); font-size: 15px; }
+
+  .hero { text-align: center; padding: 56px 0 40px; position: relative; }
+  .hero .eyebrow { font-family: var(--caps); letter-spacing: .3em; font-size: 12px; color: var(--gold-dim); }
+  .hero h1 { font-family: var(--caps); font-weight: 500; letter-spacing: .1em; color: var(--gold); font-size: clamp(30px, 6vw, 54px); margin: 14px 0 10px; line-height: 1.1; }
+  .hero p.lead { font-family: var(--title); font-size: clamp(20px, 3vw, 26px); color: #f1e6c8; margin: 0 auto 28px; max-width: 640px; }
+  .orn { display: flex; align-items: center; gap: 14px; color: var(--gold); max-width: 420px; margin: 0 auto; font-size: 13px; }
+  .orn::before, .orn::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold-dim)); }
+  .orn::after { background: linear-gradient(90deg, var(--gold-dim), transparent); }
+
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 26px; border-radius: 3px; text-decoration: none; font-family: var(--caps); letter-spacing: .08em; font-size: 15px; border: 1px solid var(--line); color: var(--text); background: #1c1a17; }
+  .btn:hover { border-color: var(--gold-dim); color: #f1e6c8; }
+  .btn.primary { background: linear-gradient(#dcc07c, #c4a256); border-color: #e6cf8f; color: var(--ink); font-weight: 600; }
+  .btn.primary:hover { background: linear-gradient(#e6cb88, #cdaa5e); color: var(--ink); }
+
+  .frame { position: relative; border: 1px solid var(--gold-deep); background: var(--panel); padding: 26px 28px; margin: 34px 0; }
+  .frame::before, .frame::after { content: ''; position: absolute; width: 18px; height: 18px; }
+  .frame::before { top: -1px; left: -1px; border-top: 2px solid var(--gold); border-left: 2px solid var(--gold); }
+  .frame::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--gold); border-right: 2px solid var(--gold); }
+
+  h2 { font-family: var(--caps); font-weight: 500; letter-spacing: .14em; color: var(--gold); text-align: center; font-size: 20px; margin: 56px 0 6px; }
+  h2 + .orn { margin-bottom: 22px; }
+  h3 { font-family: var(--title); font-weight: 600; font-size: 24px; color: #f1e6c8; margin: 0 0 6px; }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  .steps li { counter-increment: s; display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; }
+  .steps li::before { content: counter(s); font-family: var(--caps); color: var(--gold); border: 1px solid var(--gold-dim); outline: 1px solid var(--gold-deep); outline-offset: 2px; width: 34px; height: 34px; display: grid; place-items: center; margin-top: 2px; }
+  .steps b { color: #f1e6c8; }
+  .muted { color: var(--muted); }
+  .small { font-size: 15px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .card { border: 1px solid var(--gold-deep); background: #161513; padding: 18px 20px; outline: 1px solid #1f1b14; outline-offset: 3px; }
+  .card .ico { font-family: var(--caps); color: var(--gold); font-size: 22px; line-height: 1; margin-bottom: 8px; }
+  .card ul { margin: 6px 0 0; padding-left: 18px; }
+  .card li { margin: 3px 0; }
+  .card li::marker { color: var(--gold-dim); }
+
+  .mana { display: inline-flex; gap: 6px; }
+  .mana i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.4); }
+
+  .tips { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 26px; }
+  .tips p { margin: 0; padding: 8px 0; border-bottom: 1px solid #1f1c17; }
+  .tips b { color: var(--gold); font-weight: 500; }
+
+  footer { text-align: center; border-top: 3px double var(--gold-dim); margin-top: 60px; padding: 22px 0 10px; color: var(--muted); font-size: 15px; }
+  footer .brand { font-family: var(--caps); letter-spacing: .16em; color: var(--gold); display: block; margin-bottom: 6px; }
+
+  @media (max-width: 600px) {
+    html, body { font-size: 17px; }
+    .frame { padding: 20px 18px; }
+    .hero { padding: 40px 0 26px; }
+  }
+</style>
+</head>
+<body>
+<header class="top"><span class="brand">❖ MTG SAMMLUNG ❖</span></header>
+
+<div class="wrap">
+  <section class="hero">
+    <div class="eyebrow">WILLKOMMEN</div>
+    <h1>Deine Karten.<br />Deine Decks.</h1>
+    <p class="lead">Sammlung verwalten, Commander-Decks bauen und den Wert im Blick behalten – auf PC und Handy, immer synchron.</p>
+    <div class="orn">◆</div>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/EntonJan/mtg-sammlung/releases/download/android-latest/mtg-sammlung.apk">⬇ Android-App laden</a>
+      <a class="btn" href="https://entonjan.github.io/mtg-sammlung/">Im Browser öffnen ↗</a>
+    </div>
+    <p class="muted small" style="margin-top:14px">Kostenlos · Anmeldung mit Google · Kartendaten und Preise von Scryfall / Cardmarket</p>
+  </section>
+
+  <h2>LOSLEGEN</h2>
+  <div class="orn">◆</div>
+  <div class="frame">
+    <ol class="steps">
+      <li><div><b>App holen.</b> Am PC einfach <a href="https://entonjan.github.io/mtg-sammlung/">die Seite öffnen</a>. Am Handy die <a href="https://github.com/EntonJan/mtg-sammlung/releases/download/android-latest/mtg-sammlung.apk">APK laden</a>, öffnen und „Aus dieser Quelle installieren“ erlauben. Die App aktualisiert sich danach von selbst.</div></li>
+      <li><div><b>Mit Google anmelden.</b> Auf allen Geräten dasselbe Konto – Sammlung und Decks sind sofort überall gleich.</div></li>
+      <li><div><b>Sammlung einspielen.</b> Unter <i>Import</i> deinen ManaBox-CSV-Export hochladen – oder Karten über <i>Hinzufügen</i> bzw. <i>📷 Scannen</i> erfassen.</div></li>
+      <li><div><b>Decks anlegen.</b> Echte Decks per Liste importieren (Moxfield-/Archidekt-Format): Die Karten landen im Deck und zählen automatisch zur Sammlung.</div></li>
+    </ol>
+  </div>
+
+  <h2>WAS DIE APP KANN</h2>
+  <div class="orn">◆</div>
+  <div class="grid">
+    <div class="card">
+      <div class="ico">❖</div>
+      <h3>Sammlung</h3>
+      <ul>
+        <li>Schnell auch bei tausenden Karten – Liste oder Bilder</li>
+        <li>Nach Typen &amp; Untertypen sortiert, Suche auch auf Deutsch</li>
+        <li>Karten in Decks werden angezeigt: „noch 2 von 3 verfügbar“</li>
+        <li>Wert wird nie doppelt gezählt</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">⚔</div>
+      <h3>Commander-Decks</h3>
+      <ul>
+        <li>Ansicht als Liste, Stapel oder Raster</li>
+        <li>Typen mit Unterkategorien (Ramp, Draw, Removal …)</li>
+        <li>Sideboard, Commander-Pool &amp; Partner-Würfel</li>
+        <li>Printing ändern, neue Karten direkt hinzufügen</li>
+        <li>Per Drag &amp; Drop zwischen Sammlung und Decks</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">✦</div>
+      <h3>Deckbau-Helfer</h3>
+      <ul>
+        <li><b>Vorschläge</b> von EDHREC – mit „besitze ich“-Filter</li>
+        <li><b>Combos</b> im Deck und solche, denen nur eine Karte fehlt</li>
+        <li>Deckbau-Modus: Sammlung daneben, nur passende Farben</li>
+        <li>„Was fehlt mir?“ – welche Decks du fast bauen kannst</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">⚖</div>
+      <h3>Analyse</h3>
+      <ul>
+        <li><b>Bracket-Check</b> nach offiziellen Regeln</li>
+        <li><b>Spielstärke 1–5</b> inkl. Synergie mit dem Commander</li>
+        <li>Statistik: Manakurve, Farben, Kategorien</li>
+        <li>Probehand &amp; 2000 simulierte Starthände</li>
+        <li>Token- und Marker-Liste zum Ausdrucken</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">⌛</div>
+      <h3>Verlauf</h3>
+      <ul>
+        <li>Jede Deck-Änderung wird protokolliert</li>
+        <li>Versionen merken, vergleichen, wiederherstellen</li>
+        <li>Rückgängig / Wiederholen mit Strg + Z / Y</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">€</div>
+      <h3>Wert &amp; Verkaufen</h3>
+      <ul>
+        <li>Aktueller Cardmarket-Wert, täglicher Verlauf</li>
+        <li>Preis-Gewinner &amp; -Verlierer (1 / 7 / 30 Tage)</li>
+        <li>Verkaufsliste mit direkten Cardmarket-Links</li>
+        <li>Ordner (z. B. Tauschordner) im 6 × 10-Seitenraster</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">☆</div>
+      <h3>Wunschliste</h3>
+      <ul>
+        <li>Karten merken, mit Wunschpreis</li>
+        <li>🔔 Hinweis, sobald der Preis darunter fällt</li>
+        <li>Zeigt, wenn du eine Karte schon besitzt</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">⚭</div>
+      <h3>Freunde &amp; Teilen</h3>
+      <ul>
+        <li>Deck, Ordner, Sammlung oder Wunschliste als Nur-Lesen-Link</li>
+        <li>Freunde über Benutzernamen hinzufügen</li>
+        <li><b>Tausch-Abgleich:</b> wer hat, was der andere sucht</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="ico">📷</div>
+      <h3>Scannen &amp; Handy</h3>
+      <ul>
+        <li>Karten mit der Kamera erkennen (Name, Set, Nummer)</li>
+        <li>Android-App mit Menüleiste unten</li>
+        <li>Set-Symbole in Seltenheitsfarbe zum schnellen Erkennen</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>KLEINE KNIFFE</h2>
+  <div class="orn">◆</div>
+  <div class="tips">
+    <p><b>Mehrfachauswahl:</b> In der Sammlung mit Strg / Umschalt mehrere Karten markieren und gemeinsam in ein Deck ziehen.</p>
+    <p><b>Doppelte Karten?</b> „Mit Sammlung abgleichen“ im Deck findet Exemplare, die versehentlich zweimal erfasst sind.</p>
+    <p><b>Vor dem Umbauen:</b> Im Reiter „Verlauf“ eine Version merken – du kannst jederzeit zurück.</p>
+    <p><b>Ehrliche Ansage:</b> Vor der Partie im Reiter „Statistik“ Bracket und Spielstärke checken.</p>
+    <p><b>Deutsche Namen:</b> Die Suche versteht auch „Schnipsen“ statt „Snap“.</p>
+    <p><b>Freunde:</b> Unter „Freunde“ festlegen, was andere sehen – Wunschliste und Tauschordner reichen für den Abgleich.</p>
+  </div>
+
+  <div class="cta" style="margin-top:46px">
+    <a class="btn primary" href="https://github.com/EntonJan/mtg-sammlung/releases/download/android-latest/mtg-sammlung.apk">⬇ Android-App laden</a>
+    <a class="btn" href="https://entonjan.github.io/mtg-sammlung/">Jetzt starten ↗</a>
+  </div>
+
+  <footer>
+    <span class="brand">❖ MTG SAMMLUNG ❖</span>
+    Kartendaten &amp; Bilder: Scryfall · Preise: Cardmarket · Combos: Commander Spellbook · Vorschläge: EDHREC<br />
+    Magic: The Gathering ist eine Marke von Wizards of the Coast. Dieses Projekt ist inoffiziell.
+  </footer>
+</div>
+</body>
+</html>
