@@ -363,7 +363,19 @@ function Main({ user }) {
   }, [commit, flush])
 
   // Bestehendes Deck importieren: Karten neu anlegen und direkt ins Deck legen
-  const importDeck = useCallback(async (targetId, name, lines) => {
+  // Freie Exemplare derselben Karte finden: zuerst gleiche Version, dann (optional) andere Drucke
+  const freeCopiesFor = (ne, card, finish, anyPrinting) => {
+    const same = ne[entryKey(card.id, finish)] ? [ne[entryKey(card.id, finish)]] : []
+    if (!anyPrinting) return same
+    const others = Object.values(ne)
+      .filter((e) => e.id !== card.id && cards[e.id]?.oracleId === card.oracleId)
+      .sort((a, b) => (a.finish !== finish) - (b.finish !== finish))
+    return [...same, ...others]
+  }
+
+  // Bestehendes Deck importieren. Liegen die Karten schon frei in der Sammlung (z. B. aus ManaBox),
+  // werden sie von dort ins Deck verschoben – nur der Rest wird neu angelegt.
+  const importDeck = useCallback(async (targetId, name, lines, fromCollection = true) => {
     setStatus('Suche Karten bei Scryfall …')
     try {
       const { ok, missing } = await resolveDeckLines(lines, (d, t) => setStatus(`Suche Karten … ${d}/${t}`))
@@ -372,20 +384,63 @@ function Main({ user }) {
       const id = targetId || newDeckId()
       const base = s.decks[id] || { id, name, order: Object.keys(s.decks).length, commanders: [], entries: {} }
       let ents = base.entries
+      let ne = s.entries
       const cmds = new Set(base.commanders)
-      let added = 0
+      let added = 0, moved = 0
       for (const l of ok) {
-        ents = bump(ents, l.card.id, l.finish, l.qty)
-        if (l.commander) cmds.add(entryKey(l.card.id, l.finish))
+        let need = l.qty
+        if (fromCollection) {
+          for (const e of freeCopiesFor(ne, l.card, l.finish, true)) {
+            if (!need) break
+            const q = Math.min(need, ne[entryKey(e.id, e.finish)]?.qty || 0)
+            if (!q) continue
+            ne = bump(ne, e.id, e.finish, -q)
+            ents = bump(ents, e.id, e.finish, q)
+            if (l.commander) cmds.add(entryKey(e.id, e.finish))
+            need -= q; moved += q
+          }
+        }
+        if (need) {
+          ents = bump(ents, l.card.id, l.finish, need)
+          if (l.commander) cmds.add(entryKey(l.card.id, l.finish))
+        }
         added += l.qty
       }
-      commit({ decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds] } }, changedDecks: [id], label: `Deck-Import „${base.name}“` })
+      commit({ entries: ne, decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds] } }, collectionChanged: moved > 0, changedDecks: [id], label: `Deck-Import „${base.name}“` })
       await flush()
-      return { deckId: id, name: base.name, added, missing }
+      return { deckId: id, name: base.name, added, moved, missing }
     } finally {
       setStatus('')
     }
-  }, [commit, flush])
+  }, [commit, flush, cards]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Doppelt gezählte Karten bereinigen: Deck-Karten, die zusätzlich noch frei in der Sammlung liegen
+  const reconcilePreview = useCallback((deckId, anyPrinting) => {
+    const s = S.current
+    let ne = s.entries
+    const list = []
+    for (const e of Object.values(s.decks[deckId]?.entries || {})) {
+      const card = cards[e.id]; if (!card) continue
+      let need = e.qty
+      for (const f of freeCopiesFor(ne, card, e.finish, anyPrinting)) {
+        if (!need) break
+        const q = Math.min(need, ne[entryKey(f.id, f.finish)]?.qty || 0)
+        if (!q) continue
+        ne = bump(ne, f.id, f.finish, -q)
+        list.push({ id: f.id, finish: f.finish, qty: q })
+        need -= q
+      }
+    }
+    const value = list.reduce((t, x) => t + (unitPrice(cards[x.id], x.finish) ?? 0) * x.qty, 0)
+    return { list, count: list.reduce((t, x) => t + x.qty, 0), value, entries: ne }
+  }, [cards]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const reconcileApply = useCallback((deckId, anyPrinting) => {
+    const p = reconcilePreview(deckId, anyPrinting)
+    if (!p.count) return
+    commit({ entries: p.entries, collectionChanged: true, label: `${p.count} doppelte Karten aus der Sammlung entfernt` })
+    notify(`${p.count} doppelt gezählte Karten aus der Sammlung entfernt`)
+  }, [reconcilePreview, commit])
 
   const setWishlist = useCallback((items, newCards = []) => {
     newCards.forEach(rememberCard)
@@ -491,6 +546,8 @@ function Main({ user }) {
               onDelete={() => deleteDeck(deck.id)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}
               onUpdate={(patch) => updateDeck(deck.id, patch)}
+              reconcilePreview={(any) => reconcilePreview(deck.id, any)}
+              onReconcile={(any) => reconcileApply(deck.id, any)}
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />

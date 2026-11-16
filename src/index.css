@@ -466,3 +466,5 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .cm-link { color: #9cc3f2; }
 .sell .row .btn { padding: 4px 8px; font-size: 12px; }
 @media (max-width: 640px) { .sell .row .row-sub { display: none; } }
+
+.recon { display: flex; flex-direction: column; gap: 8px; background: #3a2a14; border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 4px 0 10px; font-size: 14px; }

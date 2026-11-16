@@ -7,6 +7,7 @@ import { parseDecklist } from '../decklist'
 export default function DeckImport({ decks, onImportDeck }) {
   const [name, setName] = useState('')
   const [target, setTarget] = useState('')
+  const [fromColl, setFromColl] = useState(true)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
@@ -21,7 +22,7 @@ export default function DeckImport({ decks, onImportDeck }) {
     setError('')
     setResult(null)
     try {
-      const res = await onImportDeck(target || null, name.trim() || cmd[0] || 'Importiertes Deck', lines)
+      const res = await onImportDeck(target || null, name.trim() || cmd[0] || 'Importiertes Deck', lines, fromColl)
       if (res.deckId) setTarget(res.deckId)
       setResult(res)
       setText(res.missing.map((l) => l.raw).join('\n'))
@@ -37,8 +38,7 @@ export default function DeckImport({ decks, onImportDeck }) {
     <div className="import-box">
       <h2>Bestehendes Deck importieren</h2>
       <p className="muted small">
-        Für Decks, die nicht in ManaBox erfasst sind. Die Karten kommen zusätzlich in deinen Bestand und liegen direkt
-        im Deck. Nimmst du sie später heraus, landen sie in der Sammlung.
+        Die Karten liegen danach direkt im Deck. Nimmst du sie später heraus, landen sie in der Sammlung.
         Einfach die Deckliste einfügen – z. B. aus Archidekt/Moxfield „Export → Text“:
         <code> 1 Sol Ring</code>, <code>1x Sol Ring (C21) 263</code>, <code>1 Atraxa, Praetors&apos; Voice *CMDR*</code>.
       </p>
@@ -64,13 +64,17 @@ export default function DeckImport({ decks, onImportDeck }) {
           {!target && count !== 100 && <span className="muted"> (Commander-Decks haben 100 Karten)</span>}
         </p>
       )}
+      <label className="check-line small">
+        <input type="checkbox" checked={fromColl} onChange={(e) => setFromColl(e.target.checked)} />
+        <span>Karten, die schon frei in der Sammlung liegen, von dort ins Deck verschieben (empfohlen, wenn das Deck auch in ManaBox erfasst ist) – nur fehlende werden neu angelegt</span>
+      </label>
       <button className="btn primary" disabled={busy || !lines.length} onClick={run}>
         {busy ? 'Importiere …' : target ? 'Karten ins Deck importieren' : 'Deck anlegen'}
       </button>
       {error && <p className="error">{error}</p>}
       {result && (
         <div className="small">
-          <p className="ok-text">✓ {result.added} Karten in „{result.name}“ importiert.</p>
+          <p className="ok-text">✓ {result.added} Karten in „{result.name}“ importiert{result.moved ? ` – davon ${result.moved} aus der Sammlung verschoben, ${result.added - result.moved} neu` : ''}.</p>
           {result.missing.length > 0 && (
             <div className="warn">
               Nicht gefunden ({result.missing.length}) – Schreibweise korrigieren und nur diese Zeilen nochmal importieren

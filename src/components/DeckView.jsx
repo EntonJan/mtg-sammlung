@@ -14,11 +14,13 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
   const [over, setOver] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [recon, setRecon] = useState(null)
+  const [reconAny, setReconAny] = useState(false)
   const [tab, setTab] = useState('list')
   const [groupBy, setGroupBy] = useState('type')
   const [picker, setPicker] = useState(null)
@@ -91,6 +93,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           <span>Wert <b>{euro(value)}</b></span>
           {identity.length > 0 && <span>Farbidentität <b>{identity.map((c) => COLOR_NAMES[c]).join(', ')}</b></span>}
         </div>
+        <button className="btn small" onClick={() => setRecon(reconcilePreview(reconAny))} title="Prüfen, ob Deck-Karten zusätzlich frei in der Sammlung liegen">Mit Sammlung abgleichen</button>
         <button className={`btn small ${builder ? 'active' : ''}`} onClick={toggleBuilder} title="Sammlung daneben einblenden">
           {builder ? 'Deckbau-Modus aus' : 'Deckbau-Modus'}
         </button>
@@ -104,6 +107,29 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           <button className="btn ghost small danger" onClick={() => setConfirmDel(true)}>Deck auflösen</button>
         )}
       </div>
+
+      {recon && (
+        <div className="recon">
+          {recon.count ? (
+            <>
+              <span>
+                <b>{recon.count} Karten</b> ({euro(recon.value)}) aus diesem Deck liegen <b>zusätzlich frei in der Sammlung</b> –
+                vermutlich doppelt gezählt (z. B. Deck importiert, obwohl die Karten schon im ManaBox-Export standen).
+              </span>
+              <label className="check-line small">
+                <input type="checkbox" checked={reconAny} onChange={(e) => { setReconAny(e.target.checked); setRecon(reconcilePreview(e.target.checked)) }} />
+                auch andere Druckversionen derselben Karte berücksichtigen
+              </label>
+              <span className="hand-actions">
+                <button className="btn small danger" onClick={() => { onReconcile(reconAny); setRecon(null) }}>Aus der Sammlung entfernen</button>
+                <button className="btn small ghost" onClick={() => setRecon(null)}>Abbrechen</button>
+              </span>
+            </>
+          ) : (
+            <span>Keine doppelten Karten gefunden ✓ <button className="btn small ghost" onClick={() => setRecon(null)}>OK</button></span>
+          )}
+        </div>
+      )}
 
       <div className="deck-tabs">
         {[['list', 'Liste'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (

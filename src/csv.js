@@ -14,7 +14,8 @@ export function parseManaBox(text) {
     const id = r['Scryfall ID']?.trim()
     const qty = Number(r['Quantity'] || 0)
     if (!id || !qty) continue
-    const finish = ['foil', 'etched'].includes(r['Foil']) ? r['Foil'] : 'normal'
+    // Proxys (in ManaBox markiert) bekommen eine eigene „Ausführung“ ohne Marktwert
+    const finish = r['Proxy'] === 'true' ? 'proxy' : ['foil', 'etched'].includes(r['Foil']) ? r['Foil'] : 'normal'
     const k = entryKey(id, finish)
     entries[k] = { id, finish, qty: (entries[k]?.qty || 0) + qty }
     const b = (r['Binder Name'] || '').trim() || 'Ohne Ordner'

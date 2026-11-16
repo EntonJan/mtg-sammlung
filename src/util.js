@@ -21,10 +21,11 @@ export const RARITIES = [
   ['special', 'Special'],
 ]
 
-export const FINISH_LABEL = { normal: '', foil: 'Foil', etched: 'Etched' }
+export const FINISH_LABEL = { normal: '', foil: 'Foil', etched: 'Etched', proxy: 'Proxy' }
 
 export function unitPrice(card, finish) {
   if (!card) return null
+  if (finish === 'proxy') return 0
   if (finish === 'normal') return card.eur ?? card.eurFoil
   return card.eurFoil ?? card.eur
 }

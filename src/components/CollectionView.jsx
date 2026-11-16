@@ -209,6 +209,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
               <option value="normal">Normal</option>
               <option value="foil">Foil</option>
               <option value="etched">Etched</option>
+              <option value="proxy">Proxy</option>
             </select>
           </label>
           <label>Manawert
