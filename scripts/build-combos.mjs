@@ -1,6 +1,12 @@
 // Lädt die Commander-Spellbook-Bulkdaten und schreibt eine kompakte combos.json für die App.
 // (Die Spellbook-API erlaubt keine Browser-Anfragen von fremden Seiten – deshalb bauen wir die Daten hier vor.)
-import { gunzipSync } from 'node:zlib'
+import { createGunzip } from 'node:zlib'
+import { Readable } from 'node:stream'
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+const { parser } = require('stream-json')
+const { pick } = require('stream-json/filters/Pick')
+const { streamArray } = require('stream-json/streamers/StreamArray')
 import { mkdirSync, writeFileSync } from 'node:fs'
 
 const out = process.argv[2] || 'dist/data/combos.json'
@@ -10,17 +16,18 @@ const URLS = [
   'https://backend.commanderspellbook.com/variants.json.gz',
   'https://backend.commanderspellbook.com/variants.json',
 ]
-let buf = null
+let res = null, gz = false
 for (const url of URLS) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'mtg-sammlung/1.0 (github.com/EntonJan/mtg-sammlung)' } }).catch((e) => ({ ok: false, status: e.message }))
-  console.log(url, res.status)
-  if (res.ok) { buf = Buffer.from(await res.arrayBuffer()); break }
+  const r = await fetch(url, { headers: { 'User-Agent': 'mtg-sammlung/1.0 (github.com/EntonJan/mtg-sammlung)' } }).catch((e) => ({ ok: false, status: e.message }))
+  console.log(url, r.status)
+  if (r.ok) { res = r; gz = url.endsWith('.gz'); break }
 }
-if (!buf) { console.error('Spellbook-Download fehlgeschlagen'); process.exit(1) }
-if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf)
-const data = JSON.parse(buf.toString('utf8'))
-const variants = data.variants || data
-
+if (!res) { console.error('Spellbook-Download fehlgeschlagen'); process.exit(1) }
+// Die Datei ist mehrere hundert MB groß → als Strom verarbeiten statt komplett einzulesen
+let src = Readable.fromWeb(res.body)
+if (gz && !(res.headers.get('content-encoding') || '').includes('gzip')) src = src.pipe(createGunzip())
+const stream = src.pipe(parser()).pipe(pick({ filter: 'variants' })).pipe(streamArray())
+const data = { timestamp: new Date().toISOString() }
 const cards = [], cardIdx = new Map()
 const feats = [], featIdx = new Map()
 const cardOf = (c) => {
@@ -31,7 +38,7 @@ const cardOf = (c) => {
 const featOf = (f) => { if (!featIdx.has(f.name)) { featIdx.set(f.name, feats.length); feats.push(f.name) } return featIdx.get(f.name) }
 
 const combos = []
-for (const v of variants) {
+for await (const { value: v } of stream) {
   if (v.status && v.status !== 'OK' && v.status !== 'E') continue
   if (v.legalities && v.legalities.commander === false) continue
   if (!v.uses?.length) continue
