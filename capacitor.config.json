@@ -2,7 +2,11 @@
   "appId": "de.entonjan.mtgsammlung",
   "appName": "MTG Sammlung",
   "webDir": "dist",
+  "server": {
+    "url": "https://entonjan.github.io/mtg-sammlung/",
+    "errorPath": "offline.html"
+  },
   "android": {
-    "backgroundColor": "#121214"
+    "backgroundColor": "#121211"
   }
 }
