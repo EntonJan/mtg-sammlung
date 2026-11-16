@@ -8,6 +8,8 @@ export default function ValueView({ uid, entries, decks, cards, onOpen }) {
   const [history, setHistory] = useState(null)
   const [snaps, setSnaps] = useState(null)
   const [range, setRange] = useState(7)
+  const [by, setBy] = useState('eur')
+  const [minVal, setMinVal] = useState(0.5)
 
   useEffect(() => {
     loadHistory(uid).then(setHistory).catch(() => setHistory({}))
@@ -51,9 +53,13 @@ export default function ValueView({ uid, entries, decks, cards, onOpen }) {
       if (before == null || after == null || before === after) continue
       list.push({ e, c, before, after, diff: (after - before) * e.qty, pct: ((after - before) / before) * 100 })
     }
-    list.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
-    return { base, days, list }
-  }, [snaps, owned, cards, range])
+    const relevant = list.filter((m) => Math.max(m.before, m.after) >= minVal)
+    const key = by === 'pct' ? (m) => m.pct : (m) => m.diff
+    const up = relevant.filter((m) => m.after > m.before).sort((a, b) => key(b) - key(a))
+    const down = relevant.filter((m) => m.after < m.before).sort((a, b) => key(a) - key(b))
+    const sum = (l) => l.reduce((t, m) => t + m.diff, 0)
+    return { base, days, list, up, down, gain: sum(up), loss: sum(down) }
+  }, [snaps, owned, cards, range, by, minVal])
 
   const points = useMemo(() => Object.entries(history || {}).sort(([a], [b]) => a.localeCompare(b)), [history])
   const todayStr = new Date().toLocaleDateString('sv-SE')
@@ -79,7 +85,7 @@ export default function ValueView({ uid, entries, decks, cards, onOpen }) {
 
       <section className="stat-card">
         <div className="cat-top">
-          <h3>Größte Preissprünge</h3>
+          <h3>Preis-Gewinner &amp; -Verlierer</h3>
           <div className="seg seg-small">
             {[[1, '1 Tag'], [7, '7 Tage'], [30, '30 Tage']].map(([n, l]) => (
               <button key={n} className={range === n ? 'on' : ''} onClick={() => setRange(n)}>{l}</button>
@@ -92,21 +98,22 @@ export default function ValueView({ uid, entries, decks, cards, onOpen }) {
           <p className="muted small">Keine Preisänderungen seit {movers.base.split('-').reverse().join('.')}.</p>
         ) : (
           <>
-            <p className="muted small">Vergleich mit {movers.base.split('-').reverse().join('.')} · Wertänderung × deine Anzahl</p>
-            <table className="match-table">
-              <thead><tr><th>Karte</th><th>vorher</th><th>jetzt</th><th>Änderung</th><th>× Anzahl</th></tr></thead>
-              <tbody>
-                {movers.list.slice(0, 25).map((m) => (
-                  <tr key={`${m.e.id}|${m.e.finish}`} className={m.diff > 0 ? 'have' : 'missing'} onClick={() => onOpen(m.c)} style={{ cursor: 'pointer' }}>
-                    <td>{m.c.name} <span className="muted small">{m.c.set}{m.e.finish !== 'normal' ? ` ${FINISH_LABEL[m.e.finish]}` : ''}</span></td>
-                    <td>{euro(m.before)}</td>
-                    <td>{euro(m.after)}</td>
-                    <td className={m.diff > 0 ? 'ok-text' : 'error'}>{m.pct > 0 ? '+' : ''}{m.pct.toFixed(0)} %</td>
-                    <td className={m.diff > 0 ? 'ok-text' : 'error'}>{m.diff > 0 ? '+' : ''}{euro(m.diff)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="movers-bar">
+              <span className="muted small">Vergleich mit {movers.base.split('-').reverse().join('.')}</span>
+              <div className="seg seg-small">
+                <button className={by === 'eur' ? 'on' : ''} onClick={() => setBy('eur')}>nach €</button>
+                <button className={by === 'pct' ? 'on' : ''} onClick={() => setBy('pct')}>nach %</button>
+              </div>
+              <label className="muted small">ab Kartenwert
+                <select value={minVal} onChange={(e) => setMinVal(Number(e.target.value))}>
+                  {[0, 0.5, 1, 2, 5, 10].map((v) => <option key={v} value={v}>{v ? euro(v) : 'alle'}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="movers">
+              <MoverList title="Gewinner" sum={movers.gain} list={movers.up} onOpen={onOpen} />
+              <MoverList title="Verlierer" sum={movers.loss} list={movers.down} onOpen={onOpen} />
+            </div>
           </>
         )}
       </section>
@@ -123,6 +130,25 @@ export default function ValueView({ uid, entries, decks, cards, onOpen }) {
           ))}
         </section>
       )}
+    </div>
+  )
+}
+
+function MoverList({ title, sum, list, onOpen }) {
+  const up = sum >= 0
+  return (
+    <div className="mover-col">
+      <h4 className={up ? 'ok-text' : 'error'}>{title} <span className="muted small">({list.length})</span> <span className="mover-sum">{up ? '+' : ''}{euro(sum)}</span></h4>
+      {!list.length && <p className="muted small">Keine.</p>}
+      {list.slice(0, 20).map((m) => (
+        <div key={`${m.e.id}|${m.e.finish}`} className="mover" onClick={() => onOpen(m.c)}>
+          <img src={m.c.thumb || m.c.img} alt="" loading="lazy" />
+          <span className="mover-name">{m.c.name}<span className="muted small"> {m.c.set.toUpperCase()}{m.e.finish !== 'normal' ? ` · ${FINISH_LABEL[m.e.finish]}` : ''}{m.e.qty > 1 ? ` · ${m.e.qty}×` : ''}</span>
+            <span className="muted small">{euro(m.before)} → {euro(m.after)}</span>
+          </span>
+          <span className={`mover-diff ${m.diff > 0 ? 'ok-text' : 'error'}`}>{m.pct > 0 ? '+' : ''}{m.pct.toFixed(0)} %<br /><small>{m.diff > 0 ? '+' : ''}{euro(m.diff)}</small></span>
+        </div>
+      ))}
     </div>
   )
 }
