@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { dragProps, readDrag } from '../drag'
 import { entryKey } from '../store'
 import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../util'
@@ -10,6 +10,7 @@ import CollectionView from './CollectionView'
 import AddCards from './AddCards'
 import DeckImport from './DeckImport'
 import PrintPicker from './PrintPicker'
+import DeckCombos from './DeckCombos'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
@@ -46,6 +47,17 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   const rows = useMemo(() => allRows.filter((r) => !sideKeys.has(r.key)), [allRows, sideKeys])
   const sideRows = useMemo(() => allRows.filter((r) => sideKeys.has(r.key)), [allRows, sideKeys])
   const sideCount = sideRows.reduce((t, r) => t + r.qty, 0)
+  // Besitz je Oracle-ID: freie Exemplare in der Sammlung + Decks/Ordner, in denen die Karte steckt
+  const ownedIndex = useMemo(() => {
+    const idx = {}
+    const get = (oid) => (idx[oid] ||= { free: 0, decks: [], pick: null })
+    for (const e of Object.values(entries)) { const c = cards[e.id]; if (c) { const o = get(c.oracleId); o.free += e.qty; o.pick ||= { id: e.id, finish: e.finish } } }
+    for (const d of Object.values(decks)) {
+      for (const e of Object.values(d.entries)) { const c = cards[e.id]; if (c && !get(c.oracleId).decks.includes(d.name)) get(c.oracleId).decks.push(d.name) }
+    }
+    return idx
+  }, [entries, decks, cards])
+  const owned = useCallback((oid) => ownedIndex[oid] || { free: 0, decks: [] }, [ownedIndex])
   const toggleSide = (key) => onUpdate({ side: sideKeys.has(key) ? [...sideKeys].filter((k) => k !== key) : [...sideKeys, key] })
   // Karte (oder Mehrfachauswahl) ins Sideboard legen – auch direkt aus der Sammlung oder einem anderen Deck
   const dropToSide = (d) => {
@@ -158,12 +170,14 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       )}
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
+        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['combos', 'Combos'], ['hand', 'Probehand'], ['export', 'Export']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {tab === 'stats' && <DeckStats rows={rows} />}
+      {tab === 'combos' && <DeckCombos deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} owned={owned} deNames={deNames}
+        onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} />}
       {tab === 'export' && <DeckExport deck={deck} rows={rows} sideRows={sideRows} commanderKeys={cmdKeys} />}
       {tab === 'new' && (
