@@ -329,3 +329,7 @@ h2 .share-btn { margin-left: 12px; vertical-align: middle; font-family: var(--se
 .power-factors { display: flex; flex-direction: column; gap: 5px; margin: 12px 0 6px; }
 .power-f { display: grid; grid-template-columns: 210px 140px 1fr; gap: 10px; align-items: center; font-size: 14px; }
 @media (max-width: 640px) { .power-f { grid-template-columns: 1fr 90px; } .power-f .muted { grid-column: 1 / -1; } }
+.power-bar { position: relative; }
+.power-bar i { position: absolute; top: 0; bottom: 0; width: 1px; background: #121211; z-index: 1; }
+.power-scale { display: flex; justify-content: space-between; max-width: 360px; margin-top: 2px; }
+.power-edge { color: #e0a05a; }

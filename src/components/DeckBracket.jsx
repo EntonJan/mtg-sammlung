@@ -36,9 +36,18 @@ function powerOf(deck, commanders, rows, combos, edh) {
   add('Combos (3+ Karten)', multi * 0.35, 1, `${multi} im Deck`)
   if (syn != null) add('Synergie mit dem Commander', syn >= 0.3 ? 1.5 : syn >= 0.2 ? 1.1 : syn >= 0.12 ? 0.7 : syn >= 0.06 ? 0.3 : 0, 1.5, `Ø ${Math.round(syn * 100)} % Synergie (EDHREC, ${known} Karten erkannt)`)
   else add('Synergie mit dem Commander', 0, 1.5, edh === undefined ? 'wird geladen …' : 'keine EDHREC-Daten')
-  const score = Math.round(f.reduce((t, x) => t + x.pts, 0) * 10) / 10
-  const plays = score >= 7.5 ? 4 : score >= 4.5 ? 3 : score >= 2.5 ? 2 : 1
-  return { score, plays, f }
+  // Rohpunkte (0–10) auf die Bracket-Skala 1–5 abbilden: 2,5 → 2 · 4,5 → 3 · 7,5 → 4 · 10 → 5
+  const raw = f.reduce((t, x) => t + x.pts, 0)
+  const pts = [[0, 1], [2.5, 2], [4.5, 3], [7.5, 4], [10, 5]]
+  let score = 5
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]
+    if (raw <= x1) { score = y0 + ((raw - x0) / (x1 - x0)) * (y1 - y0); break }
+  }
+  score = Math.round(score * 10) / 10
+  const plays = Math.min(4, Math.floor(score))
+  const edge = plays < 4 && score - plays >= 0.6
+  return { score, plays, edge, f }
 }
 
 const NAMES = { 1: 'Exhibition', 2: 'Core', 3: 'Upgraded', 4: 'Optimized', 5: 'cEDH' }
@@ -102,17 +111,22 @@ export default function DeckBracket({ deck, commanders, rows }) {
       <div className="power">
         <div className="power-head">
           <div className={`bracket-badge b${eff}`}>
-            <span className="bracket-num">{eff === 1 ? '1–2' : eff}</span>
-            <span className="bracket-name">spielt sich wie</span>
+            <span className="bracket-num">{power.score.toLocaleString('de-DE', { minimumFractionDigits: 1 })}</span>
+            <span className="bracket-name">Spielstärke · Bracket {eff === 1 ? '1–2' : eff}</span>
           </div>
           <div className="bracket-why">
-            <b>Spielstärke-Einschätzung: {power.score.toLocaleString('de-DE')} / 10</b>
+            <b>Spielstärke: {power.score.toLocaleString('de-DE', { minimumFractionDigits: 1 })} von 5 – spielt sich wie Bracket {eff === 1 ? '1–2' : eff}</b>
             <p className="muted small">
               {eff > min
                 ? `Formal reicht Bracket ${min === 2 ? '1–2' : min}, aber Tempo, Ressourcen und Synergie sprechen eher für Bracket ${eff}. Für faire Partien lieber so ansagen.`
                 : 'Passt zum Mindest-Bracket – die Spielstärke liegt nicht höher als die Regeln vorgeben.'}
+              {power.edge && eff === power.plays && <> <b className="power-edge">Starkes Bracket {eff} – an der Grenze zu Bracket {eff + 1}.</b></>}
             </p>
-            <div className="power-bar"><span style={{ width: `${power.score * 10}%` }} /></div>
+            <div className="power-bar">
+              {[2, 3, 4].map((b) => <i key={b} style={{ left: `${((b - 1) / 4) * 100}%` }} />)}
+              <span style={{ width: `${((power.score - 1) / 4) * 100}%` }} />
+            </div>
+            <div className="power-scale muted small"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
           </div>
         </div>
         <div className="power-factors">
