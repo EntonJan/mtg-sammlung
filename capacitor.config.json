@@ -8,5 +8,13 @@
   },
   "android": {
     "backgroundColor": "#121211"
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": [
+        "google.com"
+      ]
+    }
   }
 }

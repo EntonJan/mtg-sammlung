@@ -1,0 +1,38 @@
+{
+  "project_info": {
+    "project_number": "313103394143",
+    "project_id": "mtg-sammlung",
+    "storage_bucket": "mtg-sammlung.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:313103394143:android:9285333be4d33428e7c2ea",
+        "android_client_info": { "package_name": "de.entonjan.mtgsammlung" }
+      },
+      "oauth_client": [
+        {
+          "client_id": "313103394143-h1assadjgrdf7o3sda7leb8vct0a34en.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.entonjan.mtgsammlung",
+            "certificate_hash": "93587b7c302768f58a5ac7646685d356b0693c91"
+          }
+        },
+        {
+          "client_id": "313103394143-e0uj2nr9o9pspukqf8ghct0ho8sl2jid.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [ { "current_key": "AIzaSyBwOF7zhIWjdh7uIlbqkNX5vpV6hlOq2xA" } ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            { "client_id": "313103394143-e0uj2nr9o9pspukqf8ghct0ho8sl2jid.apps.googleusercontent.com", "client_type": 3 }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

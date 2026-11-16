@@ -1,13 +1,21 @@
 import { useState } from 'react'
 import {
-  EmailAuthProvider, linkWithCredential, reauthenticateWithPopup, sendPasswordResetEmail,
-  signInWithEmailAndPassword, signInWithPopup, updatePassword,
+  EmailAuthProvider, GoogleAuthProvider, linkWithCredential, reauthenticateWithPopup, sendPasswordResetEmail,
+  signInWithCredential, signInWithEmailAndPassword, signInWithPopup, updatePassword,
 } from 'firebase/auth'
 import { auth, googleProvider } from '../firebase'
 import { isNativeApp } from '../util'
 
 // In der Android-App (Capacitor-WebView) blockt Google den Login per Popup →
-// dort nur E-Mail + Passwort. Das Passwort legt man einmal im Browser fest.
+// dort läuft die Google-Anmeldung nativ über Android und wird an Firebase (Web) übergeben.
+async function googleSignIn() {
+  if (!isNativeApp()) return signInWithPopup(auth, googleProvider)
+  const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication')
+  const res = await FirebaseAuthentication.signInWithGoogle()
+  const token = res.credential?.idToken
+  if (!token) throw new Error('Google-Anmeldung abgebrochen.')
+  return signInWithCredential(auth, GoogleAuthProvider.credential(token, res.credential?.accessToken))
+}
 
 const MSG = {
   'auth/invalid-credential': 'E-Mail oder Passwort falsch.',
@@ -20,7 +28,6 @@ const MSG = {
 const msg = (e) => MSG[e.code] || e.message
 
 export function Login() {
-  const native = isNativeApp()
   const [email, setEmail] = useState('')
   const [pw, setPw] = useState('')
   const [err, setErr] = useState('')
@@ -42,24 +49,16 @@ export function Login() {
     <div className="center login">
       <h1>MTG Sammlung</h1>
       <p className="muted">Deine Karten. Deine Decks. Ohne Ruckeln.</p>
-      {!native && (
-        <button className="btn primary big" onClick={() => signInWithPopup(auth, googleProvider).catch((x) => setErr(msg(x)))}>
-          Mit Google anmelden
-        </button>
-      )}
+      <button className="btn primary big" onClick={() => { setErr(''); googleSignIn().catch((x) => setErr(msg(x))) }}>
+        Mit Google anmelden
+      </button>
       <form className="login-form" onSubmit={submit}>
-        {!native && <span className="muted small">oder mit E-Mail und App-Passwort</span>}
+        <span className="muted small">oder mit E-Mail und App-Passwort</span>
         <input type="email" autoComplete="username" placeholder="E-Mail (dein Google-Konto)" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input type="password" autoComplete="current-password" placeholder="Passwort" value={pw} onChange={(e) => setPw(e.target.value)} />
-        <button className={`btn ${native ? 'primary big' : ''}`} disabled={busy}>{busy ? 'Anmelden …' : 'Anmelden'}</button>
+        <button className="btn" disabled={busy}>{busy ? 'Anmelden …' : 'Anmelden'}</button>
         <button type="button" className="btn ghost small" onClick={reset}>Passwort vergessen?</button>
       </form>
-      {native && (
-        <p className="muted small" style={{ maxWidth: 340 }}>
-          Noch kein Passwort? Öffne die App einmal im Browser (entonjan.github.io/mtg-sammlung), melde dich mit Google an
-          und lege oben unter ⚙ ein App-Passwort fest.
-        </p>
-      )}
       {err && <p className="error">{err}</p>}
       {info && <p className="ok-text">{info}</p>}
     </div>
