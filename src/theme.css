@@ -174,3 +174,21 @@ body.native header { padding-top: calc(8px + var(--safe-top)); }
 .add-info .set-line > span > span { display: block; }
 .set-icon.rar-rare { filter: invert(68%) sepia(48%) saturate(420%) hue-rotate(5deg) brightness(.97); }
 .add-card img.set-icon, .pp-card img.set-icon { width: 26px; height: 26px; border-radius: 0; align-self: center; cursor: default; transform: none !important; box-shadow: none !important; }
+
+/* Ordner: Rasterseite 6 × 10 wie im Sammelordner */
+.binder-page { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; padding: 14px; margin: 8px 0; border: 1px solid var(--gold-deep); background: #151412; outline: 1px solid #1f1b14; outline-offset: 3px; }
+.binder-slot { position: relative; aspect-ratio: 488 / 680; cursor: pointer; }
+.binder-slot img { width: 100%; height: 100%; border-radius: 4.75% / 3.5%; display: block; background: var(--panel2); outline: 1px solid var(--gold-deep); outline-offset: 2px; transition: transform .12s; }
+.binder-slot:hover img { transform: translateY(-3px); outline-color: var(--gold-dim); box-shadow: 0 8px 20px rgba(0,0,0,.6); }
+.binder-slot.foiled img { box-shadow: 0 0 0 1px #c9b0f0; }
+.binder-slot.empty { border: 1px dashed #2a251c; border-radius: 4.75% / 3.5%; cursor: default; }
+.binder-slot .raster-qty { position: absolute; top: 6px; left: 6px; font-size: 12px; padding: 1px 7px; }
+.slot-price { position: absolute; bottom: 6px; right: 6px; background: rgba(14,13,12,.88); color: var(--accent); font-size: 12px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--gold-deep); }
+.binder-slot .row-actions { position: absolute; top: 6px; right: 6px; display: flex; flex-direction: column; gap: 3px; opacity: 0; transition: opacity .12s; }
+.binder-slot:hover .row-actions { opacity: 1; }
+.binder-slot .mini { background: rgba(20,19,17,.92); text-decoration: none; text-align: center; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 8px 0; }
+@media (max-width: 640px) {
+  .binder-page { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 8px; }
+  .binder-slot .row-actions { opacity: 1; }
+}
