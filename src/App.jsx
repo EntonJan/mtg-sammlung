@@ -375,7 +375,7 @@ function Main({ user }) {
 
   // Bestehendes Deck importieren. Liegen die Karten schon frei in der Sammlung (z. B. aus ManaBox),
   // werden sie von dort ins Deck verschoben – nur der Rest wird neu angelegt.
-  const importDeck = useCallback(async (targetId, name, lines, fromCollection = true) => {
+  const importDeck = useCallback(async (targetId, name, lines, fromCollection = false) => {
     setStatus('Suche Karten bei Scryfall …')
     try {
       const { ok, missing } = await resolveDeckLines(lines, (d, t) => setStatus(`Suche Karten … ${d}/${t}`))
@@ -456,11 +456,22 @@ function Main({ user }) {
     return o
   }, [entries, decks, cards])
 
-  const freeCount = useMemo(() => Object.values(entries || {}).reduce((s, e) => s + e.qty, 0), [entries])
+  // Reservierungen: welche Exemplare stecken in welchen Decks/Ordnern
+  const reserved = useMemo(() => {
+    const m = {}
+    for (const d of Object.values(decks)) {
+      for (const [k, e] of Object.entries(d.entries)) (m[k] ||= []).push({ deckId: d.id, name: d.name, qty: e.qty })
+    }
+    return m
+  }, [decks])
+
+  // Sidebar „Sammlung“: alle Karten, die du besitzt (frei + in Decks)
+  const freeCount = useMemo(() => [...Object.values(entries || {}), ...Object.values(decks).flatMap((d) => Object.values(d.entries))].reduce((s, e) => s + e.qty, 0), [entries, decks])
   // Anzahl freier Karten je Kategorie und je Untertyp (für die Sidebar)
   const { catCounts, subCounts } = useMemo(() => {
     const catCounts = {}, subCounts = {}
-    for (const e of Object.values(entries || {})) {
+    const all = [...Object.values(entries || {}), ...Object.values(decks).flatMap((d) => Object.values(d.entries))]
+    for (const e of all) {
       const c = cards[e.id]
       if (!c) continue
       const g = groupOf(c.type)
@@ -469,7 +480,7 @@ function Main({ user }) {
       for (const st of subtypesOf(c.type)) m[st] = (m[st] || 0) + e.qty
     }
     return { catCounts, subCounts }
-  }, [entries, cards])
+  }, [entries, decks, cards])
   const deckStats = useMemo(() => {
     const out = {}
     for (const d of Object.values(decks)) {
@@ -525,7 +536,7 @@ function Main({ user }) {
             <div className="center muted">Lade …</div>
           ) : view.kind === 'collection' ? (
             Object.keys(entries).length || Object.keys(decks).length ? (
-              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} decks={decks} onMoveMany={moveMany} deNames={deNames} />
+              <CollectionView entries={entries} cards={cards} onOpen={setOpen} cat={view.cat} sub={view.sub} decks={decks} onMoveMany={moveMany} deNames={deNames} reserved={reserved} />
             ) : (
               <div className="center">
                 <p>Deine Sammlung ist noch leer.</p>
@@ -541,7 +552,7 @@ function Main({ user }) {
           ) : deck ? (
             <DeckView
               key={deck.id}
-              deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={dropCard} onMoveMany={moveMany} deNames={deNames}
+              deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={dropCard} onMoveMany={moveMany} deNames={deNames} reserved={reserved}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}

@@ -497,3 +497,16 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
   .stack-card + .stack-card { margin-top: -156px; }
   .stack-card:hover ~ .stack-card { transform: translateY(156px); }
 }
+
+/* Verfügbarkeit (Karten in Decks) */
+.row.used { opacity: .45; cursor: default; }
+.row.used:hover { opacity: .7; }
+.tile.used img { filter: grayscale(.9) brightness(.6); }
+.tile.used { cursor: default; }
+.avail { font-size: 11px; white-space: nowrap; padding: 1px 7px; border-radius: 8px; }
+.avail.part { background: #2f3a4a; color: #b8cde6; }
+.avail.none { background: #3a2a14; color: #f0c27a; }
+.tile-avail { font-size: 11px; color: #b8cde6; }
+.tile-avail.none { color: #f0c27a; }
+.mini:disabled { opacity: .3; cursor: default; }
+@media (max-width: 640px) { .avail { display: none; } .row.used .row-sub::after { content: ' · in Deck'; } }

@@ -10,7 +10,7 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
   const [error, setError] = useState('')
   const [mode, setMode] = useState('replace')
   const [busy, setBusy] = useState(false)
-  const [subtract, setSubtract] = useState(true)
+  const [subtract, setSubtract] = useState(false)
   const [separate, setSeparate] = useState([])
 
   const current = Object.values(entries).reduce((s, e) => s + e.qty, 0)
@@ -66,7 +66,7 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
           </p>
           <label className="radio">
             <input type="radio" checked={mode === 'replace'} onChange={() => setMode('replace')} />
-            <span><b>Sammlung ersetzen</b> – die App übernimmt genau den Stand aus ManaBox (empfohlen, wenn du in ManaBox scannst).</span>
+            <span><b>Sammlung ersetzen</b> – die freien Karten entsprechen danach genau ManaBox. Deine Decks bleiben unverändert.</span>
           </label>
           <label className="radio">
             <input type="radio" checked={mode === 'add'} onChange={() => setMode('add')} />
@@ -87,7 +87,7 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
           {mode === 'replace' && hasDecks && (
             <label className="check-line">
               <input type="checkbox" checked={subtract} onChange={(e) => setSubtract(e.target.checked)} />
-              <span>Karten, die schon in Decks liegen, abziehen (sonst wären sie doppelt, falls du sie in ManaBox nicht ausgebucht hast)</span>
+              <span>Meine Decks sind auch in ManaBox erfasst – deren Karten nicht doppelt zählen (normalerweise aus: Decks importierst du separat)</span>
             </label>
           )}
           <button className="btn primary" disabled={busy} onClick={run}>

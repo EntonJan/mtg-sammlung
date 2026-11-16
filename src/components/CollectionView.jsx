@@ -7,7 +7,7 @@ import { dragProps } from '../drag'
 const DEFAULT_FILTER = {
   name: '', text: '', type: '', rarity: '', set: '',
   colors: [], colorMode: 'any', cmcMin: '', cmcMax: '', minPrice: '',
-  finish: '', sort: 'name', dir: 'asc', group: true, german: false,
+  finish: '', sort: 'name', dir: 'asc', group: true, german: false, onlyFree: false,
 }
 
 function loadPref(key, fallback) {
@@ -15,7 +15,7 @@ function loadPref(key, fallback) {
 }
 function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* egal */ } }
 
-export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany, deNames = {} }) {
+export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany, deNames = {}, reserved = {} }) {
   const [selected, setSelected] = useState(() => new Set())
   const lastIdx = useRef(-1)
   const [f, setF] = useState(() => loadPref('filter', DEFAULT_FILTER))
@@ -31,15 +31,22 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
     setF((p) => ({ ...p, colors: p.colors.includes(c) ? p.colors.filter((x) => x !== c) : [...p.colors, c] }))
 
   // Alle Einträge mit Kartendaten verbinden
+  // Sammlung = alles, was du besitzt: freie Exemplare + in Decks/Ordnern reservierte
   const rows = useMemo(() => {
+    const keys = new Set([...Object.keys(entries), ...Object.keys(reserved)])
     const list = []
-    for (const e of Object.values(entries)) {
-      const c = cards[e.id]
-      if (!c || e.qty <= 0) continue
-      list.push({ ...e, card: c, price: unitPrice(c, e.finish) })
+    for (const k of keys) {
+      const [id, finish] = k.split('|')
+      const c = cards[id]
+      if (!c) continue
+      const free = entries[k]?.qty || 0
+      const res = reserved[k] || []
+      const used = res.reduce((t, x) => t + x.qty, 0)
+      if (free + used <= 0) continue
+      list.push({ id, finish, qty: free + used, free, used, usedIn: res, card: c, price: unitPrice(c, finish) })
     }
     return list
-  }, [entries, cards])
+  }, [entries, cards, reserved])
 
   const sets = useMemo(() => {
     const m = new Map()
@@ -55,8 +62,10 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
     const pmin = df.minPrice === '' ? 0 : Number(df.minPrice)
     const sel = df.colors
 
-    let out = rows.filter(({ card: c, finish, price }) => {
+    let out = rows.filter((r) => {
+      const { card: c, finish, price } = r
       if (cat && groupOf(c.type) !== cat) return false
+      if (df.onlyFree && !r.free) return false
       if (identity && !c.ci.every((x) => identity.includes(x))) return false
       if (sub && !subtypesOf(c.type).includes(sub)) return false
       if (name && !c.name.toLowerCase().includes(name) && !(deNames[c.oracleId] || '').toLowerCase().includes(name)) return false
@@ -90,12 +99,17 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
         const k = r.card.oracleId || r.card.name
         const g = m.get(k)
         if (g) {
+          g.free += r.free
+          g.used += r.used
+          g.usedIn = [...g.usedIn, ...r.usedIn]
+          // Zum Ziehen eine Version nehmen, von der noch etwas frei ist
+          if (!g.repFree && r.free) { g.id = r.id; g.finish = r.finish; g.repFree = true }
           g.qty += r.qty
           g.value += (r.price ?? 0) * r.qty
           g.printings += 1
           if ((r.price ?? 0) > (g.price ?? 0)) { g.price = r.price }
         } else {
-          m.set(k, { ...r, key: k, value: (r.price ?? 0) * r.qty, printings: 1 })
+          m.set(k, { ...r, key: k, value: (r.price ?? 0) * r.qty, printings: 1, repFree: r.free > 0 })
         }
       }
       out = [...m.values()]
@@ -117,9 +131,9 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
   }, [rows, df, cat, sub, identity, deNames])
 
   const totals = useMemo(() => {
-    let qty = 0, value = 0
-    for (const r of filtered) { qty += r.qty; value += r.value }
-    return { qty, value, lines: filtered.length }
+    let qty = 0, value = 0, used = 0
+    for (const r of filtered) { qty += r.qty; value += r.value; used += r.used }
+    return { qty, value, used, lines: filtered.length }
   }, [filtered])
 
   // Mehrfachauswahl: Strg/Cmd+Klick einzeln, Shift+Klick Bereich, normaler Klick öffnet Details
@@ -138,8 +152,8 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
       onOpen(r.card)
     }
   }
-  const selectedRows = filtered.filter((r) => selected.has(r.key))
-  const payloadFor = (r) => (selected.has(r.key) && selectedRows.length > 1
+  const selectedRows = filtered.filter((r) => selected.has(r.key) && r.free > 0)
+  const payloadFor = (r) => (!r.free ? null : selected.has(r.key) && selectedRows.length > 1
     ? { multi: selectedRows.map((x) => ({ id: x.id, finish: x.finish, qty: 1, from: 'collection' })) }
     : { id: r.id, finish: r.finish, from: 'collection' })
   const moveSelected = (to) => {
@@ -244,6 +258,10 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
             Gleiche Karten zusammenfassen
           </label>
           <label className="check">
+            <input type="checkbox" checked={f.onlyFree} onChange={(e) => set('onlyFree', e.target.checked)} />
+            Nur verfügbare (nicht in Decks)
+          </label>
+          <label className="check">
             <input type="checkbox" checked={f.german} onChange={(e) => set('german', e.target.checked)} />
             Deutsche Namen anzeigen
           </label>
@@ -256,6 +274,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
         <span><b>{totals.qty.toLocaleString('de-DE')}</b> Karten</span>
         <span><b>{totals.lines.toLocaleString('de-DE')}</b> {f.group ? 'verschiedene' : 'Einträge'}</span>
         <span>Wert <b>{euro(totals.value)}</b></span>
+        {totals.used > 0 && <span>davon in Decks <b>{totals.used.toLocaleString('de-DE')}</b></span>}
       </div>
 
       {selectedRows.length > 0 && (
@@ -296,7 +315,7 @@ function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNa
           return (
             <div
               key={r.key}
-              className={`row ${selected.has(r.key) ? 'sel' : ''}`}
+              className={`row ${selected.has(r.key) ? 'sel' : ''} ${!r.free ? 'used' : ''}`}
               style={{ transform: `translateY(${vi.start}px)`, height: vi.size }}
               onClick={(e) => onRowClick(e, r, vi.index)}
               {...dragProps(payloadFor(r))}
@@ -313,11 +332,12 @@ function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNa
                   {r.printings > 1 ? ` · ${r.printings} Versionen` : ` · ${c.set} #${c.num}`}
                 </span>
               </span>
+              <Avail r={r} />
               <Mana cost={c.cost} />
               <span className={`rar rar-${c.rarity}`} title={c.rarity}>●</span>
               <span className="price">{euro(r.price)}</span>
               {onQuickAdd && (
-                <button className="mini add-mini" title="1 Exemplar ins Deck"
+                <button className="mini add-mini" title="1 Exemplar ins Deck" disabled={!r.free}
                   onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
               )}
             </div>
@@ -362,13 +382,13 @@ function VirtualGrid({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
             style={{ transform: `translateY(${vi.start}px)`, height: rowH, gridTemplateColumns: `repeat(${cols}, 1fr)` }}
           >
             {items.slice(vi.index * cols, vi.index * cols + cols).map((r, j) => (
-              <div key={r.key} className={`tile ${selected.has(r.key) ? 'sel' : ''}`} onClick={(e) => onRowClick(e, r, vi.index * cols + j)} {...dragProps(payloadFor(r))}>
+              <div key={r.key} className={`tile ${selected.has(r.key) ? 'sel' : ''} ${!r.free ? 'used' : ''}`} title={availText(r)} onClick={(e) => onRowClick(e, r, vi.index * cols + j)} {...dragProps(payloadFor(r))}>
                 <img src={r.card.img} alt={r.card.name} loading="lazy" draggable={false} />
                 <span className="tile-badge">{r.qty}×</span>
                 {r.finish === 'foil' && r.printings === 1 && <span className="tile-foil">Foil</span>}
-                <span className="tile-price">{euro(r.price)}</span>
+                <span className="tile-price">{euro(r.price)}{r.used > 0 && <span className={`tile-avail ${r.free ? '' : 'none'}`}> · {r.free}/{r.qty} frei</span>}</span>
                 {onQuickAdd && (
-                  <button className="mini tile-add" title="1 Exemplar ins Deck"
+                  <button className="mini tile-add" title="1 Exemplar ins Deck" disabled={!r.free}
                     onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
                 )}
               </div>
@@ -378,5 +398,22 @@ function VirtualGrid({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
       </div>
       {!items.length && <p className="empty">Keine Karten gefunden.</p>}
     </div>
+  )
+}
+
+// Verfügbarkeit: „2 von 3 verfügbar“ bzw. „in Yshtola“
+function availText(r) {
+  if (!r.used) return ''
+  const where = [...new Set(r.usedIn.map((x) => x.name))].join(', ')
+  return r.free ? `${r.free} von ${r.qty} verfügbar · ${r.used} in ${where}` : `alle in ${where}`
+}
+
+function Avail({ r }) {
+  if (!r.used) return null
+  const where = [...new Set(r.usedIn.map((x) => x.name))]
+  return (
+    <span className={`avail ${r.free ? 'part' : 'none'}`} title={availText(r)}>
+      {r.free ? `noch ${r.free} von ${r.qty} verfügbar` : `in ${where.length > 1 ? `${where.length} Decks` : where[0]}`}
+    </span>
   )
 }

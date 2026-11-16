@@ -2,6 +2,7 @@
 const TYPE = 'application/x-mtg-card'
 
 export function dragProps(payload) {
+  if (!payload) return { draggable: false }
   return {
     draggable: true,
     onDragStart: (e) => {
