@@ -12,6 +12,7 @@ import DeckImport from './DeckImport'
 import PrintPicker from './PrintPicker'
 import DeckCombos from './DeckCombos'
 import DeckSuggest from './DeckSuggest'
+import DeckBracket from './DeckBracket'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
@@ -184,7 +185,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         ))}
       </div>
 
-      {tab === 'stats' && <DeckStats rows={rows} />}
+      {tab === 'stats' && <><DeckBracket deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} /><DeckStats rows={rows} /></>}
       {tab === 'suggest' && <DeckSuggest commanders={commanders.map((r) => r.card)} rows={[...rest, ...poolRest]} ownedByName={ownedByName} deNames={deNames}
         onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'combos' && <DeckCombos deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} owned={owned} deNames={deNames}

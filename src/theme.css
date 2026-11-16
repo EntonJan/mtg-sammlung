@@ -242,3 +242,17 @@ a:hover { color: #f1d68a; }
 .sugg-own { margin-top: 5px; font-size: 13px; text-align: center; color: var(--muted); }
 .raster-card.sugg.have .sugg-own .btn { width: 100%; }
 .raster-card.sugg.indeck .sugg-own { color: #d9b45a; }
+
+/* Bracket-Check */
+.bracket { border: 1px solid var(--gold-deep); background: #161513; padding: 12px 14px; margin: 10px 0 16px; border-radius: 4px; }
+.bracket-head { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.bracket-badge { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 110px; padding: 10px 12px; border: 1px solid var(--gold-dim); outline: 1px solid var(--gold-deep); outline-offset: 3px; }
+.bracket-num { font-family: var(--caps); font-size: 34px; color: var(--accent); line-height: 1; }
+.bracket-name { font-family: var(--caps); font-size: 11px; letter-spacing: .1em; color: #b39a62; margin-top: 6px; text-align: center; }
+.bracket-badge.b4 .bracket-num { color: #e08a5a; }
+.bracket-why { flex: 1 1 300px; }
+.bracket-why ul { margin: 4px 0; padding-left: 18px; }
+.bracket-lists { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+.bracket-list h4 { font-family: var(--caps); font-weight: 500; font-size: 12px; letter-spacing: .08em; color: var(--accent); margin: 0 0 4px; }
+.bracket-list.bad h4 { color: #e08a7a; }
+.bracket-list ul { margin: 0; padding-left: 18px; font-size: 14px; }
