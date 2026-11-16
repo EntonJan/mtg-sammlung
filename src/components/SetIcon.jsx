@@ -15,7 +15,8 @@ export default function SetIcon({ set, rarity = 'common', size = 22, title }) {
   }, [])
   if (!set) return null
   if (!map) return <span className="set-icon-ph" style={{ width: size, height: size }} />
-  const url = map[set] || `https://svgs.scryfall.io/sets/${set}.svg`
+  const code = set.toLowerCase()
+  const url = map[code] || `https://svgs.scryfall.io/sets/${code}.svg`
   if (failed === url) return <span className="set-icon-ph" style={{ width: size, height: size }} />
   return (
     <img className={`set-icon rar-${rarity}`} src={url} alt="" title={title || set.toUpperCase()}
