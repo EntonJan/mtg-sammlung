@@ -301,3 +301,44 @@ export function getSetIcons() {
   }
   return setIconsP
 }
+
+// Token/Embleme, die Karten erzeugen (Scryfall all_parts) – je Karten-ID dauerhaft gecacht
+const TOK_KEY = 'tokens-v1'
+let tokCache = null
+async function collectionRaw(ids) {
+  const out = []
+  for (let i = 0; i < ids.length; i += 75) {
+    const res = await sfFetch(`${API}/cards/collection`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifiers: ids.slice(i, i + 75).map((id) => ({ id })) }),
+    })
+    if (!res.ok) throw new Error(`Scryfall-Fehler ${res.status}`)
+    out.push(...(await res.json()).data)
+  }
+  return out
+}
+export async function getTokens(cardIds) {
+  if (!tokCache) tokCache = (await get(TOK_KEY)) || { parts: {}, tokens: {} }
+  const todo = [...new Set(cardIds)].filter((id) => !tokCache.parts[id])
+  if (todo.length) {
+    for (const c of await collectionRaw(todo)) {
+      tokCache.parts[c.id] = (c.all_parts || [])
+        .filter((p) => p.component === 'token' || /emblem/i.test(p.type_line || ''))
+        .filter((p) => p.id !== c.id)
+        .map((p) => p.id)
+    }
+    for (const id of todo) tokCache.parts[id] ||= []
+    const tokIds = [...new Set(todo.flatMap((id) => tokCache.parts[id]))].filter((id) => !tokCache.tokens[id])
+    for (const t of await collectionRaw(tokIds)) {
+      const face = t.card_faces?.[0] || {}
+      tokCache.tokens[t.id] = {
+        id: t.id, name: t.name, type: t.type_line, oracleId: t.oracle_id,
+        pt: t.power != null ? `${t.power}/${t.toughness}` : face.power != null ? `${face.power}/${face.toughness}` : '',
+        text: t.oracle_text || face.oracle_text || '', colors: t.colors || face.colors || [],
+        img: (t.image_uris || face.image_uris || {}).normal || '',
+      }
+    }
+    await set(TOK_KEY, tokCache)
+  }
+  return { parts: tokCache.parts, tokens: tokCache.tokens }
+}

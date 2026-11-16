@@ -272,3 +272,18 @@ a:hover { color: #f1d68a; }
 .hist-day { margin-bottom: 10px; }
 .hist-entry { display: flex; gap: 12px; padding: 3px 0; border-bottom: 1px solid #1f1c17; font-size: 14px; }
 .hist-entry > span:last-child { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+
+/* Token */
+.token-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.raster-card.token { cursor: default; }
+.token-info { display: flex; flex-direction: column; margin-top: 4px; font-size: 14px; line-height: 1.25; }
+.marker-list { display: flex; flex-direction: column; gap: 4px; }
+.marker { padding: 4px 0; border-bottom: 1px solid #1f1c17; }
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; display: grid; grid-template-columns: repeat(3, 63mm); gap: 0; }
+  .print-area .raster-card { width: 63mm; break-inside: avoid; }
+  .print-area img { width: 63mm; height: 88mm; outline: none; border-radius: 0; }
+  .print-area .token-info { display: none; }
+}
