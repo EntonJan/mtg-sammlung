@@ -522,7 +522,12 @@ function Main({ user }) {
     const out = {}
     for (const d of Object.values(decks)) {
       let count = 0, value = 0
-      for (const e of Object.values(d.entries)) { count += e.qty; value += (unitPrice(cards[e.id], e.finish) ?? 0) * e.qty }
+      const side = new Set(d.side || [])
+      for (const e of Object.values(d.entries)) {
+        // Sideboard zählt nicht zu den Karten im Hauptdeck (Wert schon)
+        if (!side.has(entryKey(e.id, e.finish))) count += e.qty
+        value += (unitPrice(cards[e.id], e.finish) ?? 0) * e.qty
+      }
       out[d.id] = { count, value }
     }
     return out
@@ -583,6 +588,7 @@ function Main({ user }) {
           ) : deck?.kind === 'binder' ? (
             <BinderView
               key={deck.id} deck={deck} cards={cards} onOpen={setOpen} onMove={dropCard}
+              onAddNew={(card, finish, delta = 1) => addScanned(card, finish, deck.id, delta)}
               onRename={(name) => updateDeck(deck.id, { name })}
               onDelete={() => deleteDeck(deck.id)}
             />

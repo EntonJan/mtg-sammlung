@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react'
 import { dragProps, readDrag } from '../drag'
 import { entryKey } from '../store'
 import { FINISH_LABEL, cardmarketUrl, euro, unitPrice } from '../util'
+import AddCards from './AddCards'
 
 // Ordner (z. B. Tauschordner): Karten mit Preisen, als Liste teilbar
-export default function BinderView({ deck, cards, onMove, onRename, onDelete, onOpen }) {
+export default function BinderView({ deck, cards, onMove, onRename, onDelete, onOpen, onAddNew }) {
+  const [adding, setAdding] = useState(false)
   const [over, setOver] = useState(false)
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
@@ -47,6 +49,9 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
           <span><b>{count}</b> Karten</span>
           <span>Wert <b>{euro(value)}</b></span>
         </div>
+        <button className={`btn small ${adding ? 'active' : 'primary'}`} onClick={() => setAdding((a) => !a)}>
+          {adding ? 'Suche schließen' : '+ Neue Karte (Ordner + Sammlung)'}
+        </button>
         {confirmDel ? (
           <span className="confirm">
             Alle Karten zurück in die Sammlung und Ordner löschen?
@@ -58,6 +63,16 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
         )}
       </div>
 
+      {adding && (
+        <div className="deck-new">
+          <p className="muted small">
+            Gesuchte Karten kommen als <b>neues Exemplar</b> direkt in „{deck.name}“ und zählen damit automatisch zu deiner Sammlung.
+            „−“ nimmt ein hier hinzugefügtes Exemplar wieder ganz heraus.
+          </p>
+          <AddCards entries={deck.entries} onChange={(c, f, d) => onAddNew(c, f, d)}
+            placeholder="Karte suchen, die neu in diesen Ordner + die Sammlung soll (englisch oder deutsch)" />
+        </div>
+      )}
       <div className="hand-actions">
         <button className="btn primary" onClick={() => copy(true)} disabled={!rows.length}>{copied === 'prices' ? 'Kopiert ✓' : 'Liste mit Preisen kopieren'}</button>
         <button className="btn" onClick={() => copy(false)} disabled={!rows.length}>{copied === 'plain' ? 'Kopiert ✓' : 'Als Importliste kopieren'}</button>
