@@ -53,13 +53,16 @@ export default function PullView({ entries, decks, cards, deNames = {}, onRemove
       const now = (byName[norm(l.name)] || byName[norm(l.name.split(' // ')[0])] || []).reduce((t, x) => t + x.qty, 0)
       const done = Math.max(0, (snap[l.name]?.owned || 0) - now)
       const left = Math.max(0, l.qty - done)
-      return { ...l, all, left, card: snap[l.name]?.card }
+      const have = all.reduce((t, x) => t + x.qty, 0)
+      return { ...l, all, left, have, card: snap[l.name]?.card }
     })
   }, [list, byName, inclDecks, snap]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const found = rows.filter((r) => r.card)
   const missing = rows.filter((r) => !r.card)
   const open = found.filter((r) => r.left > 0)
+  // Es wird nie mehr ausgetragen als auf der Liste steht – nur so viele, wie noch offen UND vorhanden sind
+  const toTake = open.reduce((t, r) => t + Math.min(r.left, r.have), 0)
 
   const take = (r, x, q = 1) => {
     onRemove([{ id: x.id, finish: x.finish, qty: q, from: x.from, price: x.price }], asSale)
@@ -103,9 +106,9 @@ export default function PullView({ entries, decks, cards, deNames = {}, onRemove
         <span className="muted">· noch offen: <b>{open.reduce((s, r) => s + r.left, 0)}</b></span>
         <label className="check-line small"><input type="checkbox" checked={inclDecks} onChange={(e) => setInclDecks(e.target.checked)} /> auch Karten aus Decks zeigen</label>
         <label className="check-line small"><input type="checkbox" checked={asSale} onChange={(e) => setAsSale(e.target.checked)} /> als verkauft protokollieren (Trendpreis)</label>
-        <button className="btn primary small" disabled={!open.length} onClick={takeAll}>Alle vorgeschlagenen austragen</button>
+        <button className="btn primary small" disabled={!toTake} onClick={takeAll}>{toTake ? `Genau die Listenmenge austragen (${toTake} Karten)` : 'Nichts mehr offen'}</button>
       </div>
-      <p className="muted small">Vorschlag pro Karte: erst freie Exemplare, dann Ordner – normal vor Foil, günstigste zuerst. Ausgetragen heißt: aus der Sammlung entfernt. Rückgängig mit Strg+Z.</p>
+      <p className="muted small">Es wird immer nur die Anzahl ausgetragen, die auf der Liste steht – hast du eine Karte 5×, die Liste will 1×, bleiben 4 in deiner Sammlung. Reihenfolge: erst freie Exemplare, dann Ordner – normal vor Foil, günstigste zuerst. Ausgetragen heißt: aus der Sammlung entfernt. Rückgängig mit Strg+Z.</p>
 
       <div className="pull-list">
         {found.map((r) => (
@@ -115,7 +118,9 @@ export default function PullView({ entries, decks, cards, deNames = {}, onRemove
               <div className="pull-name">
                 <b>{r.name}</b>
                 {deNames[r.card.oracleId] && <span className="muted small"> · {deNames[r.card.oracleId]}</span>}
-                <span className={`pull-count ${r.left === 0 ? 'ok-text' : ''}`}>{r.left === 0 ? '✓ erledigt' : `noch ${r.left} von ${r.qty}`}</span>
+                <span className={`pull-count ${r.left === 0 ? 'ok-text' : ''}`}>
+                  {r.left === 0 ? '✓ erledigt' : <>gesucht <b>{r.qty}</b> · noch offen <b>{r.left}</b> · du hast <b>{r.have}</b>{r.have > r.left && <span className="muted"> → {r.have - r.left} bleiben</span>}</>}
+                </span>
               </div>
               <div className="pull-where">
                 {r.all.map((x) => (
