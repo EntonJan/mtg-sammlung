@@ -88,11 +88,13 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
         className="side-new"
         onSubmit={(e) => { e.preventDefault(); if (newName.trim()) { const id = onCreate(newName.trim(), newKind === 'binder' ? 'binder' : undefined); setNewName(''); go({ kind: 'deck', id }) } }}
       >
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newKind === 'binder' ? '+ Neuer Ordner' : '+ Neues Deck'} />
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newKind === 'binder' ? '+ Neuer Ordner' : '+ Neues Deck'} enterKeyHint="done" />
         <select value={newKind} onChange={(e) => setNewKind(e.target.value)} title="Deck oder Ordner (z. B. Tauschordner)">
           <option value="deck">Deck</option>
           <option value="binder">Ordner</option>
         </select>
+        {/* Sichtbarer Knopf: Handy-Tastaturen senden „Enter“ nicht zuverlässig */}
+        <button type="submit" className="btn small primary side-new-btn" disabled={!newName.trim()} aria-label="Anlegen">Anlegen</button>
       </form>
     </aside>
   )

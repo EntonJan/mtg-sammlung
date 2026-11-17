@@ -423,3 +423,7 @@ nav button:not(.on) .ico-line { color: #b39a62; }
 .pull-chip.binder { border-color: #4a3f25; }
 .pull-chip.deck { border-style: dashed; }
 .pull-chip:disabled { cursor: default; opacity: .6; }
+.side-new { flex-wrap: wrap; }
+.side-new input { flex: 1 1 120px; min-width: 0; }
+.side-new-btn { flex: 1 1 100%; }
+.side-new-btn:disabled { opacity: .45; }
