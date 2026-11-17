@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { deleteShare, newShareId, publishShare, shareRows } from './share'
 import ShareDialog from './components/ShareDialog'
 import FriendsView from './components/FriendsView'
+import PullView from './components/PullView'
 import { CameraIcon } from './components/Icons'
 import { loadProfile, saveProfileShares, watchFriends } from './friends'
 import { auth } from './firebase'
@@ -24,7 +25,7 @@ import SellView from './components/SellView'
 import ScanView from './components/ScanView'
 
 // Menüpunkte, die am Handy unter „Weiteres“ liegen
-const MORE = [['scan', 'Scannen'], ['value', 'Wert'], ['sell', 'Verkaufen'], ['match', 'Was fehlt mir?'], ['import', 'Import']]
+const MORE = [['scan', 'Scannen'], ['value', 'Wert'], ['sell', 'Verkaufen'], ['match', 'Was fehlt mir?'], ['pull', 'Raussuchen'], ['import', 'Import']]
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -617,6 +618,36 @@ function Main({ user }) {
       return next
     })
   }, [commit, user.uid])
+  // Exemplare austragen (aus Sammlung, Ordnern oder Decks) – optional als Verkauf protokollieren
+  const removeCopies = useCallback((list, asSale) => {
+    const s = S.current
+    let ne = s.entries
+    const nd = { ...s.decks }
+    const changed = new Set()
+    const log = []
+    for (const x of list) {
+      if (x.from === 'collection') {
+        const q = Math.min(x.qty, ne[entryKey(x.id, x.finish)]?.qty || 0)
+        if (!q) continue
+        ne = bump(ne, x.id, x.finish, -q); x.qty = q
+      } else {
+        const d = nd[x.from]
+        const q = Math.min(x.qty, d?.entries[entryKey(x.id, x.finish)]?.qty || 0)
+        if (!q) continue
+        const ents = bump(d.entries, x.id, x.finish, -q)
+        const k = entryKey(x.id, x.finish)
+        const clean = (l) => (ents[k] || !l ? l : l.filter((y) => y !== k))
+        nd[x.from] = { ...d, entries: ents, commanders: clean(d.commanders), pool: clean(d.pool), side: clean(d.side || []) }
+        changed.add(x.from); x.qty = q
+      }
+      const c = cardsRef.current[x.id]
+      if (asSale) log.push({ t: Date.now(), id: x.id, name: c?.name || '?', set: c?.set || '', finish: x.finish, qty: x.qty, price: x.price ?? null })
+    }
+    const n = list.reduce((t, x) => t + x.qty, 0)
+    if (!n) return
+    commit({ entries: ne, decks: nd, collectionChanged: ne !== s.entries, changedDecks: [...changed], label: `${n} Karte(n) ausgetragen` })
+    if (log.length) setSales((prev) => { const next = [...prev, ...log].slice(-2000); saveMeta(user.uid, 'sales', { items: next }).catch(console.error); return next })
+  }, [commit, user.uid])
   const removeSale = useCallback((it) => setSales((prev) => {
     const next = prev.filter((x) => !(x.t === it.t && x.id === it.id && x.finish === it.finish))
     saveMeta(user.uid, 'sales', { items: next }).catch(console.error)
@@ -759,6 +790,7 @@ function Main({ user }) {
           <button className={view.kind === 'friends' ? 'on' : ''} onClick={() => go({ kind: 'friends' })}>
             Freunde{friendReq > 0 && <span className="badge">{friendReq}</span>}
           </button>
+          <button className={`more-item ${view.kind === 'pull' ? 'on' : ''}`} onClick={() => go({ kind: 'pull' })}>Raussuchen</button>
           <button className={`more-item ${view.kind === 'import' ? 'on' : ''}`} onClick={() => go({ kind: 'import' })}>Import</button>
           <button className={`more-toggle ${moreOpen || MORE.some(([k]) => k === view.kind) ? 'on' : ''}`} onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen}>
             Weiteres <span className="more-caret">{moreOpen ? '▾' : '▴'}</span>
@@ -848,6 +880,8 @@ function Main({ user }) {
             <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} onShare={() => setShareOpen({ kind: 'wishlist', title: 'Wunschliste' })} />
           ) : view.kind === 'value' ? (
             <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
+          ) : view.kind === 'pull' ? (
+            <PullView entries={entries} decks={decks} cards={cards} deNames={deNames} onRemove={removeCopies} onOpen={setOpen} />
           ) : view.kind === 'friends' ? (
             <FriendsView uid={user.uid} decks={decks} entries={entries} cards={cards} wishlist={wishlist} shareMeta={shareMeta}
               profile={profile} setProfile={setProfile}
