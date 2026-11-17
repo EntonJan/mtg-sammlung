@@ -11,12 +11,13 @@ export default function DeckStats({ rows }) {
     const pips = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }
     const produces = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }
     const types = {}
-    let lands = 0, spells = 0, cmcSum = 0, total = 0
+    let lands = 0, mdfc = 0, spells = 0, cmcSum = 0, total = 0
     for (const r of rows) {
       const c = r.card
       total += r.qty
       const g = groupOf(c.type)
       types[g] = (types[g] || 0) + r.qty
+      if (g === 'MDFC') mdfc += r.qty
       if (g === 'Land') {
         lands += r.qty
         // Welche Farben das Land erzeugt: {G} im Regeltext oder Landtyp (Forest, Plains …)
@@ -36,7 +37,7 @@ export default function DeckStats({ rows }) {
       }
     }
     const top = [...rows].sort((a, b) => (b.price ?? 0) - (a.price ?? 0)).slice(0, 8)
-    return { curve, pips, produces, types, lands, spells, total, avg: spells ? cmcSum / spells : 0, top }
+    return { curve, pips, produces, types, lands, mdfc, spells, total, avg: spells ? cmcSum / spells : 0, top }
   }, [rows])
 
   if (!rows.length) return <p className="muted">Noch keine Karten im Deck.</p>
@@ -50,7 +51,7 @@ export default function DeckStats({ rows }) {
     <div className="stats">
       <div className="stat-tiles">
         <Tile label="Karten" value={s.total} />
-        <Tile label="Länder" value={`${s.lands} (${Math.round((s.lands / s.total) * 100)} %)`} hint="Commander: meist 35–38" />
+        <Tile label="Länder" value={`${s.lands}${s.mdfc ? ` + ${s.mdfc} MDFC` : ''} (${Math.round((s.lands / s.total) * 100)} %)`} hint={s.mdfc ? 'MDFCs zählen als halbes Land · Commander: meist 35–38' : 'Commander: meist 35–38'} />
         <Tile label="Ø Manawert" value={s.avg.toFixed(2).replace('.', ',')} hint="ohne Länder" />
         <Tile label="Zauber" value={s.spells} />
       </div>

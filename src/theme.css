@@ -394,3 +394,10 @@ nav button:not(.on) .ico-line { color: #b39a62; }
   color: #1a1612;
 }
 .mana-sym { font-size: 10.5px; }
+
+/* Decks von Freunden */
+.friend-decks { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+.friend-deck { text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; background: #161513; border: 1px solid var(--gold-deep); outline: 1px solid #1f1b14; outline-offset: 3px; color: var(--text); cursor: pointer; font-family: var(--serif); }
+.friend-deck b { font-family: var(--title); font-size: 20px; color: #f1e6c8; font-weight: 600; }
+.friend-deck:hover { border-color: var(--gold-dim); }
+.settings .chk { display: flex; gap: 8px; align-items: center; }

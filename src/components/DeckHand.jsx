@@ -12,7 +12,8 @@ function shuffle(arr) {
   return a
 }
 
-const isLand = (c) => groupOf(c.type) === 'Land'
+// MDFCs (Zauber / Land) zählen in der Starthand als spielbares Land
+const isLand = (c) => ['Land', 'MDFC'].includes(groupOf(c.type))
 
 // Reiter „Probehand“: Starthand ziehen, Mulligan, weiterziehen + Simulation über viele Hände
 export default function DeckHand({ deck, rows, commanderKeys, onOpen }) {

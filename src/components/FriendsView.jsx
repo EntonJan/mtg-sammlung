@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { NAME_RE, acceptRequest, claimName, findUser, loadProfile, removeFriend, saveProfileShares, sendRequest, watchFriends } from '../friends'
+import { NAME_RE, acceptRequest, claimName, findUser, loadProfile, removeFriend, sendRequest, watchFriends } from '../friends'
 import { loadShare } from '../share'
 import { euro } from '../util'
 import SharedView from './SharedView'
 
 // Freunde: Benutzername, Freigaben, Anfragen, Tausch-Abgleich
-export default function FriendsView({ uid, decks, entries, cards, wishlist, shareMeta, friendsCfg, setFriendsCfg, ensureShare, onCount }) {
-  const [profile, setProfile] = useState(undefined)
+export default function FriendsView({ uid, decks, entries, cards, wishlist, shareMeta, friendsCfg, setFriendsCfg, ensureShare, onCount, profile, setProfile }) {
   const [list, setList] = useState({})
   const [name, setName] = useState('')
   const [add, setAdd] = useState('')
@@ -15,22 +14,10 @@ export default function FriendsView({ uid, decks, entries, cards, wishlist, shar
   const [busy, setBusy] = useState(false)
   const [sel, setSel] = useState(null)
 
-  useEffect(() => { loadProfile(uid).then(setProfile).catch(() => setProfile(null)) }, [uid])
   useEffect(() => watchFriends(uid, setList), [uid])
   useEffect(() => { onCount?.(Object.values(list).filter((f) => f.status === 'in').length) }, [list, onCount])
 
-  // Freigaben im Profil aktuell halten (welche Teilen-Links Freunde sehen dürfen)
   const binders = useMemo(() => Object.values(decks).filter((d) => d.kind === 'binder'), [decks])
-  const wanted = useMemo(() => ({
-    wishlist: friendsCfg.wishlist ? shareMeta.wishlist || null : null,
-    collection: friendsCfg.collection ? shareMeta.collection || null : null,
-    binders: friendsCfg.binders ? binders.filter((b) => b.shareId).map((b) => ({ id: b.shareId, name: b.name })) : [],
-  }), [friendsCfg, shareMeta, binders])
-  useEffect(() => {
-    if (!profile?.name) return
-    if (JSON.stringify(profile.shares || {}) === JSON.stringify(wanted)) return
-    saveProfileShares(uid, wanted).then(() => setProfile((p) => ({ ...p, shares: wanted }))).catch(console.error)
-  }, [wanted, profile, uid])
 
   const run = async (fn) => { setBusy(true); setErr(''); setMsg(''); try { await fn() } catch (e) { if (e.code) console.error(e); setErr(e.message?.includes('permission') ? 'Keine Berechtigung – die Firebase-Regeln für Freunde fehlen noch.' : e.message) } finally { setBusy(false) } }
 
@@ -85,6 +72,7 @@ export default function FriendsView({ uid, decks, entries, cards, wishlist, shar
         <h3>Was deine Freunde sehen dürfen</h3>
         <label className="chk"><input type="checkbox" checked={!!friendsCfg.wishlist} onChange={() => toggle('wishlist')} disabled={busy} /> Wunschliste</label>
         <label className="chk"><input type="checkbox" checked={!!friendsCfg.binders} onChange={() => toggle('binders')} disabled={busy} /> Ordner (z. B. Tauschordner){binders.length ? ` – ${binders.map((b) => b.name).join(', ')}` : ' – noch keine Ordner'}</label>
+        <label className="chk"><input type="checkbox" checked={friendsCfg.decks !== false} onChange={() => setFriendsCfg({ ...friendsCfg, decks: friendsCfg.decks === false })} disabled={busy} /> Decks (alle, nur lesen)</label>
         <label className="chk"><input type="checkbox" checked={!!friendsCfg.collection} onChange={() => toggle('collection')} disabled={busy} /> Gesamte Sammlung</label>
         <p className="muted small">Freigaben laufen über Nur-Lesen-Links. Für den Tausch-Abgleich braucht ihr beide mindestens die Wunschliste und Ordner oder Sammlung.</p>
       </section>
@@ -144,6 +132,7 @@ function FriendDetail({ friend, onBack, decks, entries, cards, wishlist }) {
   const [prof, setProf] = useState(undefined)
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('match')
+  const [openDeck, setOpenDeck] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -192,12 +181,12 @@ function FriendDetail({ friend, onBack, decks, entries, cards, wishlist }) {
   }, [data, mine, wishlist, cards])
 
   const sh = prof?.shares || {}
-  const tabs = [['match', 'Tausch-Abgleich'], ...(sh.wishlist ? [['wish', 'Wunschliste']] : []), ...(sh.binders || []).map((b) => [`b:${b.id}`, `📁 ${b.name}`]), ...(sh.collection ? [['coll', 'Sammlung']] : [])]
+  const tabs = [['match', 'Tausch-Abgleich'], ...((sh.decks || []).length ? [['decks', `Decks (${sh.decks.length})`]] : []), ...(sh.wishlist ? [['wish', 'Wunschliste']] : []), ...(sh.binders || []).map((b) => [`b:${b.id}`, `📁 ${b.name}`]), ...(sh.collection ? [['coll', 'Sammlung']] : [])]
 
   return (
     <div className="import friends">
       <h2><button className="btn small" onClick={onBack}>‹ Zurück</button> {friend.name}</h2>
-      <div className="deck-tabs">{tabs.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
+      <div className="deck-tabs">{tabs.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); setOpenDeck(null) }}>{l}</button>)}</div>
       {prof === undefined || (!data && prof) ? <p className="muted">Lade …</p> : !prof ? <p className="muted">Profil nicht gefunden.</p> : null}
       {tab === 'match' && match && <>
         {!sh.wishlist && !sh.collection && !(sh.binders || []).length && <p className="muted">{friend.name} hat noch nichts freigegeben.</p>}
@@ -226,6 +215,16 @@ function FriendDetail({ friend, onBack, decks, entries, cards, wishlist }) {
           ))}
         </section>
       </>}
+      {tab === 'decks' && (openDeck
+        ? <><button className="btn small" onClick={() => setOpenDeck(null)}>‹ Alle Decks</button><SharedView key={openDeck} id={openDeck} embedded /></>
+        : <div className="friend-decks">
+            {(sh.decks || []).map((d) => (
+              <button key={d.id} className="friend-deck" onClick={() => setOpenDeck(d.id)}>
+                <b>{d.name}</b>
+                {d.cmd && <span className="muted small">{d.cmd}</span>}
+              </button>
+            ))}
+          </div>)}
       {tab === 'wish' && sh.wishlist && <SharedView id={sh.wishlist} embedded />}
       {tab === 'coll' && sh.collection && <SharedView id={sh.collection} embedded />}
       {tab.startsWith('b:') && <SharedView id={tab.slice(2)} embedded />}

@@ -57,6 +57,7 @@ export async function loadDecks(uid) {
       log: v.log || [],             // Änderungsprotokoll [{ t, ch: ['id|finish|delta'] }]
       versions: v.versions || [],   // gemerkte Versionen [{ t, name, items, commanders, side }]
       shareId: v.shareId || null,   // öffentlicher Teilen-Link
+      autoShare: !!v.autoShare,     // Link wurde nur für „Freunde sehen meine Decks“ angelegt
     }
   })
   return decks
@@ -93,6 +94,7 @@ export async function saveAll(uid, { entries, prevChunks, decks, dirtyDecks, sav
       log: (d.log || []).slice(-300),
       versions: (d.versions || []).slice(-20),
       shareId: d.shareId || null,
+      autoShare: !!d.autoShare,
       updatedAt: serverTimestamp(),
     })
   }

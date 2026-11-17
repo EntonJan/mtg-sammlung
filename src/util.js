@@ -48,14 +48,17 @@ export const GROUPS = [
   ['Sorcery', 'Hexereien'],
   ['Artifact', 'Artefakte'],
   ['Enchantment', 'Verzauberungen'],
+  ['MDFC', 'MDFC (Zauber / Land)'],
   ['Land', 'Länder'],
   ['Other', 'Sonstige'],
 ]
 
 export function groupOf(type = '') {
-  const front = type.split(' // ')[0]
+  const [front, back = ''] = type.split(' // ')
   if (front.includes('Land')) return 'Land'
-  for (const [k] of GROUPS) if (front.includes(k)) return k
+  // Modale doppelseitige Karten: Zauber vorne, Land hinten (z. B. Sea Gate Restoration)
+  if (back.includes('Land')) return 'MDFC'
+  for (const [k] of GROUPS) if (k !== 'MDFC' && front.includes(k)) return k
   return 'Other'
 }
 

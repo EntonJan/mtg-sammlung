@@ -66,8 +66,8 @@ export function Login() {
 }
 
 // Einstellungen: App-Passwort festlegen/ändern (verknüpft E-Mail+Passwort mit dem Google-Konto)
-export function Settings({ user, onClose }) {
-  const hasPw = user.providerData.some((p) => p.providerId === 'password')
+export function Settings({ user, onClose, friendsCfg = {}, setFriendsCfg }) {
+  const hasPw = (user.providerData || []).some((p) => p.providerId === 'password')
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
   const [err, setErr] = useState('')
@@ -100,7 +100,13 @@ export function Settings({ user, onClose }) {
           <h2>Einstellungen</h2>
           <p className="muted small">Angemeldet als {user.email}</p>
 
-          <h3>Android-App</h3>
+          <h3>Freunde</h3>
+        <label className="chk">
+          <input type="checkbox" checked={friendsCfg.decks !== false} onChange={() => setFriendsCfg?.({ ...friendsCfg, decks: friendsCfg.decks === false })} />
+          {' '}Freunde dürfen meine Decks sehen
+        </label>
+        <p className="muted small">Ist das aus, sehen Freunde deine Decks nicht mehr. Decks, die du selbst per „Teilen“-Link freigegeben hast, bleiben erreichbar.</p>
+        <h3>Android-App</h3>
           <p className="small">
             Die App gibt es als APK zum direkten Installieren:{' '}
             <a href="https://github.com/EntonJan/mtg-sammlung/releases/download/android-latest/mtg-sammlung.apk" target="_blank" rel="noreferrer">APK laden</a>.

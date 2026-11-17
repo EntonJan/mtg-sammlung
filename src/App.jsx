@@ -4,7 +4,7 @@ import { deleteShare, newShareId, publishShare, shareRows } from './share'
 import ShareDialog from './components/ShareDialog'
 import FriendsView from './components/FriendsView'
 import { CameraIcon } from './components/Icons'
-import { watchFriends } from './friends'
+import { loadProfile, saveProfileShares, watchFriends } from './friends'
 import { auth } from './firebase'
 import { Login, Settings } from './components/Auth'
 import { entryKey, fromItems, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
@@ -60,7 +60,7 @@ function Main({ user }) {
   const [shareOpen, setShareOpen] = useState(null) // { kind, deckId?, title }
   const [moreOpen, setMoreOpen] = useState(false)
   const [sales, setSales] = useState([])  // Verkaufsprotokoll
-  const [friendsCfg, setFriendsCfgState] = useState({})
+  const [friendsCfg, setFriendsCfgState] = useState(null) // null = noch nicht geladen
   const [friendReq, setFriendReq] = useState(0)
   const [deNames, setDeNames] = useState({})
   const [showSettings, setShowSettings] = useState(false)
@@ -90,7 +90,7 @@ function Main({ user }) {
           loadCollection(user.uid), loadDecks(user.uid), loadCardCache(), loadMeta(user.uid, 'wishlist').catch(() => null),
         ])
         loadMeta(user.uid, 'shares').then((m) => alive && m && setShareMeta(m)).catch(() => {})
-        loadMeta(user.uid, 'friends').then((m) => alive && m && setFriendsCfgState(m)).catch(() => {})
+        loadMeta(user.uid, 'friends').then((m) => alive && setFriendsCfgState(m || {})).catch(() => alive && setFriendsCfgState({}))
         loadMeta(user.uid, 'sales').then((m) => alive && m?.items && setSales(m.items)).catch(() => {})
         if (!alive) return
         setWishlistState(wish?.items || [])
@@ -550,6 +550,45 @@ function Main({ user }) {
   }, [user.uid, rememberCard])
   const wishAlarms = useMemo(() => wishlist.filter((w) => wishAlarm(w, cards)).length, [wishlist, cards])
 
+  // ---- Freunde: Profil und Freigaben (was Freunde sehen dürfen) ----
+  const [profile, setProfile] = useState(undefined)
+  useEffect(() => { loadProfile(user.uid).then((p) => setProfile(p)).catch(() => setProfile(null)) }, [user.uid])
+  const fc = useMemo(() => friendsCfg || {}, [friendsCfg])
+  const decksForFriends = fc.decks !== false
+  const autoBusy = useRef(new Set())
+  useEffect(() => {
+    if (!profile?.name || !friendsCfg || !entries) return
+    const list = Object.values(decks).filter((d) => d.kind !== 'binder')
+    ;(async () => {
+      for (const d of list) {
+        if (autoBusy.current.has(d.id)) continue
+        if (decksForFriends && !d.shareId) {
+          autoBusy.current.add(d.id)
+          await createShare('deck', d.id, { autoShare: true }).catch(console.error)
+          autoBusy.current.delete(d.id)
+        } else if (!decksForFriends && d.shareId && d.autoShare) {
+          autoBusy.current.add(d.id)
+          await removeShare('deck', d.id).catch(console.error)
+          autoBusy.current.delete(d.id)
+        }
+      }
+    })()
+  }, [profile?.name, decksForFriends, decks, friendsCfg, entries]) // eslint-disable-line react-hooks/exhaustive-deps
+  const wantedShares = useMemo(() => ({
+    wishlist: fc.wishlist ? shareMeta.wishlist || null : null,
+    collection: fc.collection ? shareMeta.collection || null : null,
+    binders: fc.binders ? Object.values(decks).filter((d) => d.kind === 'binder' && d.shareId).map((b) => ({ id: b.shareId, name: b.name })) : [],
+    decks: decksForFriends ? Object.values(decks).filter((d) => d.kind !== 'binder' && d.shareId).sort((a, b) => a.order - b.order).map((d) => ({
+      id: d.shareId, name: d.name,
+      cmd: (d.commanders || []).map((k) => cards[k.split('|')[0]]?.name).filter(Boolean).join(' + '),
+    })) : [],
+  }), [fc, shareMeta, decks, cards, decksForFriends])
+  useEffect(() => {
+    if (!profile?.name || !friendsCfg) return
+    if (JSON.stringify(profile.shares || {}) === JSON.stringify(wantedShares)) return
+    saveProfileShares(user.uid, wantedShares).then(() => setProfile((p) => ({ ...p, shares: wantedShares }))).catch(console.error)
+  }, [wantedShares, profile, user.uid, friendsCfg])
+
   // Offene Freundschaftsanfragen für das Abzeichen im Menü
   useEffect(() => watchFriends(user.uid, (l) => setFriendReq(Object.values(l).filter((f) => f.status === 'in').length)), [user.uid])
   const setFriendsCfg = useCallback((c) => { setFriendsCfgState(c); saveMeta(user.uid, 'friends', c).catch(console.error) }, [user.uid])
@@ -624,18 +663,18 @@ function Main({ user }) {
       }
     }, delay)
   }, [buildShare, user.uid])
-  const createShare = useCallback(async (kind, deckId) => {
+  const createShare = useCallback(async (kind, deckId, extra = {}) => {
     const id = newShareId()
     const payload = buildShare(kind, deckId)
     await publishShare(user.uid, id, payload)
-    if (kind === 'deck' || kind === 'binder') updateDeckRef.current(deckId, { shareId: id })
+    if (kind === 'deck' || kind === 'binder') updateDeckRef.current(deckId, { shareId: id, autoShare: false, ...extra })
     else { const m = { ...sharesRef.current, [kind]: id }; sharesRef.current = m; setShareMeta(m); await saveMeta(user.uid, 'shares', m) }
     return id
   }, [buildShare, user.uid])
   const removeShare = useCallback(async (kind, deckId) => {
     const id = shareIdOf(kind, deckId)
     if (id) await deleteShare(id)
-    if (kind === 'deck' || kind === 'binder') updateDeckRef.current(deckId, { shareId: null })
+    if (kind === 'deck' || kind === 'binder') updateDeckRef.current(deckId, { shareId: null, autoShare: false })
     else { const m = { ...sharesRef.current }; delete m[kind]; setShareMeta(m); await saveMeta(user.uid, 'shares', m) }
   }, [user.uid])
   // Automatisch aktualisieren, wenn sich geteilte Inhalte ändern
@@ -811,7 +850,8 @@ function Main({ user }) {
             <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
           ) : view.kind === 'friends' ? (
             <FriendsView uid={user.uid} decks={decks} entries={entries} cards={cards} wishlist={wishlist} shareMeta={shareMeta}
-              friendsCfg={friendsCfg} setFriendsCfg={setFriendsCfg} ensureShare={createShare} onCount={setFriendReq} />
+              profile={profile} setProfile={setProfile}
+              friendsCfg={fc} setFriendsCfg={setFriendsCfg} ensureShare={createShare} onCount={setFriendReq} />
           ) : view.kind === 'match' ? (
             <MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} wishlist={wishlist} setWishlist={setWishlist} />
           ) : view.kind === 'import' ? (
@@ -828,7 +868,7 @@ function Main({ user }) {
           onChange={changeQty} onMove={moveCard} onClose={() => setOpen(null)}
         />
       )}
-      {showSettings && <Settings user={user} onClose={() => setShowSettings(false)} />}
+      {showSettings && <Settings user={user} onClose={() => setShowSettings(false)} friendsCfg={fc} setFriendsCfg={setFriendsCfg} />}
       {shareOpen && (
         <ShareDialog title={shareOpen.title} shareId={shareIdOf(shareOpen.kind, shareOpen.deckId)}
           onCreate={() => createShare(shareOpen.kind, shareOpen.deckId)} onDelete={() => removeShare(shareOpen.kind, shareOpen.deckId)}

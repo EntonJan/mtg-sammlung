@@ -29,7 +29,16 @@ export default function DeckSuggest({ commanders, rows, ownedByName, onTake, deN
     return () => { alive = false }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const inDeck = useMemo(() => new Set([...commanders.map((c) => c.name), ...rows.map((r) => r.card.name)].map((n) => n.toLowerCase())), [commanders, rows])
+  // Doppelseitige Karten: voller Name „A // B“ und jede Seite einzeln zählen als „im Deck“
+  const inDeck = useMemo(() => {
+    const s = new Set()
+    for (const n of [...commanders.map((c) => c.name), ...rows.map((r) => r.card.name)]) {
+      const l = n.toLowerCase()
+      s.add(l)
+      for (const part of l.split(' // ')) s.add(part.trim())
+    }
+    return s
+  }, [commanders, rows])
 
   const lists = useMemo(() => {
     if (!data) return []
@@ -37,7 +46,7 @@ export default function DeckSuggest({ commanders, rows, ownedByName, onTake, deN
       ...l,
       label: LABELS[l.tag] || l.header,
       cards: l.cards
-        .filter((c) => !inDeck.has(c.name.toLowerCase()))
+        .filter((c) => { const l = c.name.toLowerCase(); return !inDeck.has(l) && !l.split(' // ').some((x) => inDeck.has(x.trim())) })
         .map((c) => ({ ...c, own: ownedByName(c.name) }))
         .filter((c) => filter === 'all' || (filter === 'owned' ? c.own.free > 0 || c.own.decks.length : filter === 'free' ? c.own.free > 0 : !c.own.free && !c.own.decks.length)),
     })).filter((l) => l.cards.length)
