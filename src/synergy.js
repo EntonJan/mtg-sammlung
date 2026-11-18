@@ -99,8 +99,8 @@ const EVENTS = [
   // Proliferate profitiert von Markern, legt aber selbst keine neuen Arten – daher nur „profitiert“
   { key: 'counter', label: 'Marker', pay: /whenever (?:one or more )?(?:\+1\/\+1 )?counters? (?:are|is) put|with (?:a|one or more) \+1\/\+1 counters? on (?:it|them)|for each \+1\/\+1 counter|\bproliferate\b|counters? would be put|double the number of (?:each kind of )?counters|for each counter on/i, prod: /\bput (?:a|an|one|two|three|x|\d+|that many|its) (?:\+1\/\+1|loyalty|poison|oil|charge|shield) counters?|enters with (?:a|an|one|two|three|x|\d+) (?:\+1\/\+1|oil|charge|shield) counters?|\bmodified\b|\bpoison counters?\b|\btoxic \d|\binfect\b/i },
   { key: 'sac', label: 'Opfern & Sterben', pay: /whenever you sacrifice|whenever (?:a|another) (?:nontoken )?creature (?:you control )?dies|whenever a permanent you control is put into a graveyard/i, prod: /\bsacrifice (?:a|an|another) (?:creature|artifact|permanent)|\bsacrifice x\b/i },
-  { key: 'gy', label: 'Friedhof', pay: /from your graveyard|\bflashback\b|\bescape\b|\bunearth\b|cards? in your graveyard/i, prod: /\bmills? (?:a|one|two|three|x|\d+|that many) cards?|\bsurveil\b|discard (?:a|one|two|\w+) cards?/i },
-  { key: 'discard', label: 'Abwerfen', pay: /whenever you discard|\bmadness\b/i, prod: /\bdiscard (?:a|one|two|x|\w+) cards?|\bcycling\b|\bconnive/i },
+  { key: 'gy', label: 'Friedhof', pay: /(?:card|cards|spells?) from your graveyard|cards? in your graveyard/i, prod: /\bmills? (?:a|one|two|three|x|\d+|that many) cards?|\bsurveil\b|discard (?:a|one|two|three|x|\d+|that many) cards?/i },
+  { key: 'discard', label: 'Abwerfen', pay: /whenever you discard|\bmadness\b/i, prod: /\bdiscard (?:a|one|two|three|x|\d+|that many) cards?|(?<!land)cycling\b|\bconnive/i },
   { key: 'landfall', label: 'Landfall', pay: /\blandfall\b|whenever a land (?:you control )?enters/i, prod: /search your library for (?:a|an|up to \w+)[^.]*lands?[^.]*onto the battlefield|you may play (?:an|two) additional lands?|put a land card from your hand onto the battlefield/i },
   { key: 'etb', label: 'Eintritts-Effekte & Blinken', pay: /exile (?:another )?(?:target |up to \w+ (?:other )?target )?(?:creatures?|permanents?|nonland permanents?)[^.]*you control[^.]*return (?:it|that card|them|those cards) to the battlefield/i, prod: /\bwhen [^.]* enters(?: the battlefield)?,/i },
   { key: 'cast2', label: 'Viele Zauber pro Zug', pay: /whenever you cast your second spell|\bstorm\b|\bmagecraft\b|\bprowess\b/i, prod: /\bcopy target (?:instant|sorcery)|\b(?:instant|sorcery)\b/i, prodType: true },
@@ -114,7 +114,7 @@ export function analyzeSynergy(cards) {
   // cards: [{ key, card, qty, isCommander }]
   const items = cards.filter((x) => !/Basic Land/.test(x.card.type))
   const info = items.map((x) => {
-    const text = (x.card.text || '').replace(new RegExp(x.card.name.split(' // ')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'CARDNAME')
+    const text = (x.card.text || '').replace(/\([^)]*\)/g, '').replace(new RegExp(x.card.name.split(' // ')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'CARDNAME')
     const filters = []
     for (const re of FILTER_PATTERNS) {
       for (const m of text.matchAll(re)) {
