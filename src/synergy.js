@@ -17,6 +17,8 @@ const subtypesOf = (t) => { const f = front(t); const i = f.indexOf('—'); retu
 function parseFilter(phrase) {
   const raw = phrase.replace(/\(.*?\)/g, ' ')
   const low = raw.toLowerCase()
+  // Karten der Gegner sind keine Synergie mit dem eigenen Deck
+  if (/opponent|you don't control|target\b/.test(low)) return null
   const f = { include: [], exclude: [], subtypes: [], spell: /\bspells?\b/.test(low) }
   for (const t of TYPES) {
     if (new RegExp(`\\bnon-?${t}`).test(low)) f.exclude.push(t)
@@ -36,8 +38,9 @@ function parseFilter(phrase) {
   f.subtypes = [...new Set(f.subtypes)]
   // „Kreaturen, die du kontrollierst“ oder „Länder“ allein wären zu allgemein (fast jede Karte)
   // Suche nach Grundlandtypen (Forest, Island …) ist keine echte Synergie
-  if (f.subtypes.length && f.subtypes.every((x) => /^(Forests?|Islands?|Swamps?|Mountains?|Plains)$/.test(x)) && !f.include.filter((t) => t !== 'land').length) return null
-  const onlyBroad = f.include.length === 1 && ['creature', 'land'].includes(f.include[0]) && !f.subtypes.length && f.cmcMin == null && f.cmcMax == null && !f.colors && !f.legendary && !f.historic && !f.multi && !f.colorless && !f.exclude.length
+  if (f.subtypes.length && f.subtypes.every((x) => /^(Forests?|Islands?|Swamps?|Mountains?|Plains?)$/.test(x)) && !f.include.filter((t) => t !== 'land').length) return null
+  // „Kreaturen“, „Länder“, „Kreaturen oder Planeswalker“ allein treffen fast das halbe Deck – keine echte Synergie
+  const onlyBroad = f.include.length >= 1 && f.include.every((t) => ['creature', 'land', 'planeswalker'].includes(t)) && !f.subtypes.length && f.cmcMin == null && f.cmcMax == null && !f.colors && !f.legendary && !f.historic && !f.multi && !f.colorless && !f.exclude.length
   if (onlyBroad) return null
   const specific = f.include.length || f.exclude.length || f.subtypes.length || f.cmcMin != null || f.cmcMax != null || f.historic || f.legendary || f.multi || f.colorless || f.colors
   return specific ? f : null
@@ -141,6 +144,11 @@ export function analyzeSynergy(cards) {
       const e = EVENTS.find((x) => x.key === ev)
       for (const b of info) if (b !== a && b.prods.includes(ev)) add(a.key, b.key, e.label)
     }
+  }
+
+  // „Viele Zauber pro Zug“ und eine Spontanzauber/Hexerei-Bedingung beschreiben bei einem Paar denselben Effekt – nur einmal zählen
+  for (const [k, reasons] of edges) {
+    if (reasons.includes('Viele Zauber pro Zug') && reasons.some((r) => /Spontanzauber|Hexerei/.test(r))) edges.set(k, reasons.filter((r) => r !== 'Viele Zauber pro Zug'))
   }
 
   // pro Karte: Partner mit Richtung und Stärke
