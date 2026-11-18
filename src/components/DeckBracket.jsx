@@ -12,7 +12,7 @@ const INFO = {
   'Interaktion': 'Karten mit „Removal“ oder „Board Wipe“. Volle Punkte ab 12.',
   'Tutoren': 'Karten, die eine beliebige Karte aus der Bibliothek suchen (nicht nur Länder). Je Tutor 0,35 Punkte.',
   'Combos (3+ Karten)': 'Combos aus 3 oder mehr Karten, die komplett im Deck stecken (Commander Spellbook). Zwei-Karten-Combos zählen schon beim Mindest-Bracket.',
-  'Interne Synergie': 'Wie stark die Karten untereinander zusammenspielen – aus dem Reiter „Synergie“: Anteil der Nicht-Länder mit mindestens einer erkannten Verbindung. Volle Punkte ab 80 %.',
+  'Interne Synergie': 'Wie stark die Karten untereinander zusammenspielen – aus dem Reiter „Synergie“: Anteil der Nicht-Länder, die stark vernetzt sind: mindestens ein Partner mit hoher Synergie (2+ verbundene Teileffekte) oder mindestens 3 verschiedene Partner. Länder zählen nicht mit. Volle Punkte ab 60 %.',
   'Passung zum Commander': 'Wie gut das Deck auf genau diesen Commander zugeschnitten ist – aus EDHREC-Daten: 40 % Abdeckung (Anteil deiner Karten, die EDHREC für diesen Commander empfiehlt), 30 % Spielquote (wie oft diese Karten in Decks mit dem Commander stecken) und 30 % Synergie-Karten (Anteil mit deutlich überdurchschnittlicher Synergie). Allrounder wie Signets zählen damit auch mit, wenn sie typisch für den Commander sind.',
 }
 
@@ -63,7 +63,8 @@ function powerOf(deck, commanders, rows, combos, edh) {
   // Rohpunkte (0–10) auf die Bracket-Skala 1–5 abbilden: 2,5 → 2 · 4,5 → 3 · 7,5 → 4 · 10 → 5
   // Interne Synergie: wie stark die Karten untereinander vernetzt sind (Reiter „Synergie“)
   const syn = analyzeSynergy([...commanders.map((c) => ({ key: c.id, card: c, qty: 1, isCommander: true })), ...rows.map((r) => ({ key: r.key || r.card.id, card: r.card, qty: r.qty }))])
-  add('Interne Synergie', syn.share >= 0.8 ? 1 : syn.share >= 0.65 ? 0.7 : syn.share >= 0.5 ? 0.4 : syn.share >= 0.35 ? 0.2 : 0, 1, `${Math.round(syn.share * 100)} % der Karten vernetzt · ${syn.mutual} beidseitige Paare`)
+  const st = syn.strongShare
+  add('Interne Synergie', st >= 0.6 ? 1 : st >= 0.45 ? 0.7 : st >= 0.3 ? 0.4 : st >= 0.15 ? 0.2 : 0, 1, `${Math.round(st * 100)} % stark vernetzt · ${syn.high} Paare mit hoher Synergie`)
   const raw = f.reduce((t, x) => t + x.pts, 0)
   const pts = [[0, 1], [2.5, 2], [4.5, 3], [7.5, 4], [10, 5]]
   let score = 5

@@ -46,6 +46,9 @@ function parseFilter(phrase) {
 function matches(f, c) {
   const t = front(c.type).toLowerCase()
   if (f.spell && /\bland\b/.test(t)) return false
+  // Länder passen nur, wenn die Bedingung wirklich Länder meint („lands“, „Gates“, „Desert“, Artefakt-Länder bei „artifact“) –
+  // nicht über farblos/legendär/Manawert, die fast jedes Land erfüllen würde
+  if (/\bland\b/.test(t) && !f.include.some((x) => t.includes(x)) && !(f.subtypes.length && f.subtypes.some((s) => subtypesOf(c.type).includes(s)))) return false
   if (f.exclude.some((x) => t.includes(x))) return false
   if (f.include.length && !f.include.some((x) => t.includes(x))) return false
   if (f.subtypes.length && !f.subtypes.some((s) => subtypesOf(c.type).includes(s) || front(c.type).includes(s))) return false
@@ -178,11 +181,14 @@ export function analyzeSynergy(cards) {
   }
   const nonland = list.filter((x) => !/\bLand\b/.test(front(x.card.type)))
   const connected = nonland.filter((x) => x.partners.length > 0)
+  // stark vernetzt: mind. ein Partner mit hoher Synergie (2+ Teileffekte) oder mind. 3 verschiedene Partner
+  const strong = nonland.filter((x) => x.high > 0 || x.partners.length >= 3)
   return {
     cards: list,
     themes: [...themes.values()].map((t) => ({ ...t, payoffs: [...t.payoffs], sources: [...t.sources] })).sort((a, b) => b.sources.length + b.payoffs.length - a.sources.length - a.payoffs.length),
     loners: nonland.filter((x) => !x.partners.length && !x.isCommander),
     share: nonland.length ? connected.length / nonland.length : 0,
+    strongShare: nonland.length ? strong.length / nonland.length : 0,
     high: list.reduce((t, c) => t + c.high, 0) / 2,
     mutual: [...edges.keys()].filter((k) => { const [a, b] = k.split('>'); return a < b && edges.has(`${b}>${a}`) }).length,
   }
