@@ -718,3 +718,12 @@ nav { flex: 0 1 auto; min-width: 0; }
 .pt-att.blocked { opacity: .5; text-decoration: line-through; }
 .pt-att-actions { display: flex; gap: 8px; }
 @media (max-width: 640px) { .user .set-btn { display: none; } .user { gap: 6px; } }
+/* mittlere Breite: Scannen ebenfalls ins Menü „Weiteres“, damit nichts abgeschnitten wird */
+@media (min-width: 641px) and (max-width: 1050px) {
+  nav .nav-sec-m { display: none; }
+  .more-menu .mm-m { display: flex; }
+  header h1 { font-size: 14px; letter-spacing: .06em; }
+  nav button { padding: 6px 7px; }
+}
+header nav { flex-shrink: 1; }
+header .user { flex: none; }
