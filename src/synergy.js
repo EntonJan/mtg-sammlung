@@ -103,6 +103,10 @@ const EVENTS = [
   { key: 'cast2', label: 'Viele Zauber pro Zug', pay: /whenever you cast your second spell|\bstorm\b|\bmagecraft\b|\bprowess\b/i, prod: /\bcopy target (?:instant|sorcery)|\b(?:instant|sorcery)\b/i, prodType: true },
 ]
 
+// Stufen nach Deck-Punkten: unter 10 schwach, 10–19 gut, ab 20 stark vernetzt
+export const TIER_LIMITS = { gut: 10, stark: 20 }
+export const tierOf = (pts) => (pts >= TIER_LIMITS.stark ? 'stark' : pts >= TIER_LIMITS.gut ? 'gut' : 'schwach')
+
 export function analyzeSynergy(cards) {
   // cards: [{ key, card, qty, isCommander }]
   const items = cards.filter((x) => !/Basic Land/.test(x.card.type))
@@ -158,7 +162,8 @@ export function analyzeSynergy(cards) {
     const partners = [...x.partners.values()].map((p) => {
       const gets = [...new Set(p.gets)], gives = [...new Set(p.gives)]
       const weight = gets.length + gives.length
-      return { ...p, gets, gives, weight, high: weight >= 2 }
+      // Punkte: normale Synergie 1, hohe Synergie (2+ Teileffekte) 2
+      return { ...p, gets, gives, weight, high: weight >= 2, points: weight >= 2 ? 2 : 1, cmd: !!per[p.key].isCommander }
     }).sort((p, q) => q.weight - p.weight || (q.both - p.both) || per[p.key].card.name.localeCompare(per[q.key].card.name))
     // Teileffekte der Karte: worauf sie reagiert (gets) und was sie liefert (gives), mit Anzahl Partner
     const fm = new Map()
@@ -167,8 +172,12 @@ export function analyzeSynergy(cards) {
       for (const r of p.gives) { const k = 'v|' + r; fm.set(k, { label: r, dir: 'gives', count: (fm.get(k)?.count || 0) + 1 }) }
     }
     const facets = [...fm.values()].sort((a, b) => (a.dir === b.dir ? b.count - a.count : a.dir === 'gets' ? -1 : 1))
-    return { ...x, partners, facets, high: partners.filter((p) => p.high).length, score: partners.reduce((t, p) => t + p.weight, 0) }
-  }).sort((a, b) => (b.isCommander - a.isCommander) || b.score - a.score)
+    // Deck-Punkte: nur Verbindungen zu anderen Deckkarten (ohne Commander), Commander-Punkte getrennt
+    const deckPoints = partners.filter((p) => !p.cmd).reduce((t, p) => t + p.points, 0)
+    const cmdPoints = partners.filter((p) => p.cmd).reduce((t, p) => t + p.points, 0)
+    const tier = x.isCommander ? null : tierOf(deckPoints)
+    return { ...x, partners, facets, high: partners.filter((p) => p.high).length, deckPoints, cmdPoints, tier, score: partners.reduce((t, p) => t + p.points, 0) }
+  }).sort((a, b) => (b.isCommander - a.isCommander) || b.deckPoints - a.deckPoints || b.score - a.score)
 
   // Themen: Begründung → beteiligte Karten
   const themes = new Map()
@@ -181,14 +190,26 @@ export function analyzeSynergy(cards) {
   }
   const nonland = list.filter((x) => !/\bLand\b/.test(front(x.card.type)))
   const connected = nonland.filter((x) => x.partners.length > 0)
-  // stark vernetzt: mind. 10 Partner mit hoher Synergie (2+ Teileffekte) oder mind. 7 Partner mit normaler Synergie
-  const strong = nonland.filter((x) => x.high >= 10 || x.partners.length - x.high >= 7)
+  // Deck-Synergie: wie gut die Karten (ohne Commander) untereinander harmonieren – stark zählt voll, gut halb
+  const pool = nonland.filter((x) => !x.isCommander)
+  const tiers = { stark: 0, gut: 0, schwach: 0 }
+  for (const x of pool) tiers[x.tier]++
+  const deckScore = pool.length ? (tiers.stark + tiers.gut * 0.5) / pool.length : 0
+  // Commander-Synergie: wie viele Deckkarten mit dem Commander verbunden sind (hohe Synergie voll, normale halb)
+  const commanders = list.filter((x) => x.isCommander).map((c) => {
+    const ps = c.partners.filter((p) => !p.cmd && pool.some((y) => y.key === p.key))
+    return { key: c.key, name: c.card.name, linked: ps.length, high: ps.filter((p) => p.high).length, points: ps.reduce((t, p) => t + p.points, 0) }
+  })
+  let cmdLinked = 0, cmdHigh = 0
+  for (const x of pool) { const ps = x.partners.filter((p) => p.cmd); if (ps.length) { cmdLinked++; if (ps.some((p) => p.high)) cmdHigh++ } }
+  const cmdScore = pool.length ? (cmdHigh + (cmdLinked - cmdHigh) * 0.5) / pool.length : 0
   return {
     cards: list,
     themes: [...themes.values()].map((t) => ({ ...t, payoffs: [...t.payoffs], sources: [...t.sources] })).sort((a, b) => b.sources.length + b.payoffs.length - a.sources.length - a.payoffs.length),
     loners: nonland.filter((x) => !x.partners.length && !x.isCommander),
     share: nonland.length ? connected.length / nonland.length : 0,
-    strongShare: nonland.length ? strong.length / nonland.length : 0,
+    tiers, deckScore, pool: pool.length,
+    commanders, cmdScore, cmdLinked, cmdHigh,
     high: list.reduce((t, c) => t + c.high, 0) / 2,
     mutual: [...edges.keys()].filter((k) => { const [a, b] = k.split('>'); return a < b && edges.has(`${b}>${a}`) }).length,
   }

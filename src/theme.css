@@ -470,5 +470,15 @@ nav button:not(.on) .ico-line { color: #b39a62; }
 .syn-facet { font-size: 12.5px; padding: 1px 7px; border-radius: 10px; border: 1px dashed var(--gold-deep); color: var(--muted); }
 .syn-facet.gets { border-style: solid; }
 .syn-facet b { color: var(--accent); font-weight: 600; margin-left: 2px; }
+.syn-tiers { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.syn-tier-btn { padding: 4px 10px; background: #1a1916; border: 1px solid var(--line); color: var(--text); font-family: var(--serif); cursor: pointer; }
+.syn-tier-btn.on { border-color: var(--accent); color: var(--accent); }
+.syn-tier { font-family: var(--caps); font-size: 11.5px; letter-spacing: .04em; padding: 0 7px; border-radius: 3px; border: 1px solid var(--line); text-transform: uppercase; }
+.syn-tier.stark { color: #14120e; background: var(--accent); border-color: var(--accent); }
+.syn-tier.gut { color: var(--accent); border-color: var(--gold-dim); }
+.syn-tier.schwach { color: var(--muted); }
+.syn-tier.cmd { color: var(--accent); border-color: var(--gold-deep); text-transform: none; }
+.syn-cmdpts { font-size: 12.5px; color: var(--muted); }
+.syn-stats .stat-tile span { display: inline-flex; align-items: center; }
 .syn-loners { display: flex; flex-wrap: wrap; gap: 6px; }
 .syn-loners .chip { cursor: pointer; }

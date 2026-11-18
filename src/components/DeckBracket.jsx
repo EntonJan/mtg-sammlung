@@ -12,8 +12,9 @@ const INFO = {
   'Interaktion': 'Karten mit „Removal“ oder „Board Wipe“. Volle Punkte ab 12.',
   'Tutoren': 'Karten, die eine beliebige Karte aus der Bibliothek suchen (nicht nur Länder). Je Tutor 0,35 Punkte.',
   'Combos (3+ Karten)': 'Combos aus 3 oder mehr Karten, die komplett im Deck stecken (Commander Spellbook). Zwei-Karten-Combos zählen schon beim Mindest-Bracket.',
-  'Interne Synergie': 'Wie stark die Karten untereinander zusammenspielen – aus dem Reiter „Synergie“: Anteil der Nicht-Länder, die stark vernetzt sind: mindestens 10 Partner mit hoher Synergie (2+ verbundene Teileffekte) oder mindestens 7 Partner mit normaler Synergie. Länder zählen nicht mit. Volle Punkte ab 60 %.',
-  'Passung zum Commander': 'Wie gut das Deck auf genau diesen Commander zugeschnitten ist – aus EDHREC-Daten: 40 % Abdeckung (Anteil deiner Karten, die EDHREC für diesen Commander empfiehlt), 30 % Spielquote (wie oft diese Karten in Decks mit dem Commander stecken) und 30 % Synergie-Karten (Anteil mit deutlich überdurchschnittlicher Synergie). Allrounder wie Signets zählen damit auch mit, wenn sie typisch für den Commander sind.',
+  'Deck-Synergie': 'Wie gut die Karten untereinander harmonieren – ohne den Commander (Reiter „Synergie“). Jede Verbindung zu einer anderen Deckkarte bringt 1 Punkt, eine hohe Synergie (2+ verbundene Teileffekte) 2 Punkte. Unter 10 Punkten ist eine Karte schwach, 10–19 gut, ab 20 stark vernetzt. Stark zählt voll, gut halb; Länder zählen nicht mit. Volle Punkte ab 50 %.',
+  'Commander-Synergie': 'Wie gut der Commander in dieses Deck passt – nach Kartentext (Reiter „Synergie“): Anteil der Nicht-Länder, die mit dem Commander verbunden sind. Hohe Synergie zählt voll, normale halb. Volle Punkte ab 50 %.',
+  'Passung zum Commander': 'Wie typisch das Deck für diesen Commander ist – aus EDHREC-Daten: 40 % Abdeckung (Anteil deiner Karten, die EDHREC für diesen Commander empfiehlt), 30 % Spielquote (wie oft diese Karten in Decks mit dem Commander stecken) und 30 % Synergie-Karten (Anteil mit deutlich überdurchschnittlicher Synergie). Allrounder wie Signets zählen damit auch mit, wenn sie typisch für den Commander sind.',
 }
 
 const FAST_MANA = /^(Sol Ring|Mana Crypt|Mana Vault|Chrome Mox|Mox Diamond|Mox Opal|Mox Amber|Jeweled Lotus|Lotus Petal|Grim Monolith|Ancient Tomb|Dark Ritual|Cabal Ritual|Simian Spirit Guide|Elvish Spirit Guide|Mana Drain|Arcane Signet|Fellwar Stone|Talisman of .*|.* Signet|Birds of Paradise|Llanowar Elves|Elvish Mystic|Fyndhorn Elves|Avacyn's Pilgrim|Noble Hierarch|Deathrite Shaman|Carpet of Flowers|Utopia Sprawl|Wild Growth)$/
@@ -58,13 +59,14 @@ function powerOf(deck, commanders, rows, combos, edh) {
   add('Interaktion', inter >= 12 ? 1.5 : inter >= 9 ? 1 : inter >= 6 ? 0.5 : 0, 1.5, `${inter} Removal/Board Wipes`)
   add('Tutoren', tutors * 0.35, 1, `${tutors} Tutoren`)
   add('Combos (3+ Karten)', multi * 0.35, 1, `${multi} im Deck`)
-  if (fit != null) add('Passung zum Commander', fit >= 0.75 ? 1 : fit >= 0.6 ? 0.75 : fit >= 0.45 ? 0.5 : fit >= 0.3 ? 0.2 : 0, 1, detail)
-  else add('Passung zum Commander', 0, 1, edh === undefined ? 'wird geladen …' : known ? 'zu wenige Karten erkannt' : 'keine EDHREC-Daten')
+  if (fit != null) add('Passung zum Commander', 0.75 * (fit >= 0.75 ? 1 : fit >= 0.6 ? 0.75 : fit >= 0.45 ? 0.5 : fit >= 0.3 ? 0.2 : 0), 0.75, detail)
+  else add('Passung zum Commander', 0, 0.75, edh === undefined ? 'wird geladen …' : known ? 'zu wenige Karten erkannt' : 'keine EDHREC-Daten')
   // Rohpunkte (0–10) auf die Bracket-Skala 1–5 abbilden: 2,5 → 2 · 4,5 → 3 · 7,5 → 4 · 10 → 5
   // Interne Synergie: wie stark die Karten untereinander vernetzt sind (Reiter „Synergie“)
   const syn = analyzeSynergy([...commanders.map((c) => ({ key: c.id, card: c, qty: 1, isCommander: true })), ...rows.map((r) => ({ key: r.key || r.card.id, card: r.card, qty: r.qty }))])
-  const st = syn.strongShare
-  add('Interne Synergie', st >= 0.6 ? 1 : st >= 0.45 ? 0.7 : st >= 0.3 ? 0.4 : st >= 0.15 ? 0.2 : 0, 1, `${Math.round(st * 100)} % stark vernetzt · ${syn.high} Paare mit hoher Synergie`)
+  const step = (v) => (v >= 0.5 ? 1 : v >= 0.35 ? 0.7 : v >= 0.2 ? 0.4 : v >= 0.1 ? 0.2 : 0)
+  add('Deck-Synergie', step(syn.deckScore), 1, `${Math.round(syn.deckScore * 100)} % · ${syn.tiers.stark} stark, ${syn.tiers.gut} gut, ${syn.tiers.schwach} schwach vernetzt`)
+  add('Commander-Synergie', 0.75 * step(syn.cmdScore), 0.75, `${Math.round(syn.cmdScore * 100)} % · ${syn.cmdLinked} von ${syn.pool} Karten verbunden, ${syn.cmdHigh} davon hoch`)
   const raw = f.reduce((t, x) => t + x.pts, 0)
   const pts = [[0, 1], [2.5, 2], [4.5, 3], [7.5, 4], [10, 5]]
   let score = 5
