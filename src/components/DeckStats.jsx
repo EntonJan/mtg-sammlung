@@ -11,13 +11,22 @@ export default function DeckStats({ rows }) {
     const pips = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }
     const produces = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }
     const types = {}
+    const mdfcBy = {} // je Typ: davon MDFC
     let lands = 0, mdfc = 0, spells = 0, cmcSum = 0, total = 0
     for (const r of rows) {
       const c = r.card
       total += r.qty
       const g = groupOf(c.type)
-      types[g] = (types[g] || 0) + r.qty
-      if (g === 'MDFC') mdfc += r.qty
+      if (g === 'MDFC') {
+        // MDFC zählt bei beiden Seiten mit: Typ der Vorderseite UND Land
+        const front = groupOf(c.type.split(' // ')[0])
+        mdfc += r.qty
+        types[front] = (types[front] || 0) + r.qty
+        types.Land = (types.Land || 0) + r.qty
+        mdfcBy[front] = (mdfcBy[front] || 0) + r.qty
+        mdfcBy.Land = (mdfcBy.Land || 0) + r.qty
+        lands += r.qty
+      } else types[g] = (types[g] || 0) + r.qty
       if (g === 'Land') {
         lands += r.qty
         // Welche Farben das Land erzeugt: {G} im Regeltext oder Landtyp (Forest, Plains …)
@@ -37,7 +46,7 @@ export default function DeckStats({ rows }) {
       }
     }
     const top = [...rows].sort((a, b) => (b.price ?? 0) - (a.price ?? 0)).slice(0, 8)
-    return { curve, pips, produces, types, lands, mdfc, spells, total, avg: spells ? cmcSum / spells : 0, top }
+    return { curve, pips, produces, types, mdfcBy, lands, mdfc, spells, total, avg: spells ? cmcSum / spells : 0, top }
   }, [rows])
 
   if (!rows.length) return <p className="muted">Noch keine Karten im Deck.</p>
@@ -51,7 +60,7 @@ export default function DeckStats({ rows }) {
     <div className="stats">
       <div className="stat-tiles">
         <Tile label="Karten" value={s.total} />
-        <Tile label="Länder" value={`${s.lands}${s.mdfc ? ` + ${s.mdfc} MDFC` : ''} (${Math.round((s.lands / s.total) * 100)} %)`} hint={s.mdfc ? 'MDFCs zählen als halbes Land · Commander: meist 35–38' : 'Commander: meist 35–38'} />
+        <Tile label="Länder" value={`${s.lands}${s.mdfc ? ` (davon ${s.mdfc} MDFC)` : ''}`} hint={`${Math.round((s.lands / s.total) * 100)} % · Commander: meist 35–38`} />
         <Tile label="Ø Manawert" value={s.avg.toFixed(2).replace('.', ',')} hint="ohne Länder" />
         <Tile label="Zauber" value={s.spells} />
       </div>
@@ -95,11 +104,12 @@ export default function DeckStats({ rows }) {
 
       <section className="stat-card">
         <h3>Kartentypen</h3>
+        {s.mdfc > 0 && <p className="muted small">MDFCs zählen bei ihrer Vorderseite und als Land – die Summe liegt daher über der Kartenzahl.</p>}
         {typeList.map(([k, label]) => (
           <div key={k} className="hbar">
             <span className="hbar-label">{label}</span>
             <span className="hbar-track"><span style={{ width: `${(s.types[k] / maxType) * 100}%` }} /></span>
-            <span className="hbar-n">{s.types[k]}</span>
+            <span className="hbar-n">{s.types[k]}{s.mdfcBy[k] ? <span className="muted small"> (davon {s.mdfcBy[k]} MDFC)</span> : null}</span>
           </div>
         ))}
       </section>
