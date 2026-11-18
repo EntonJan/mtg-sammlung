@@ -15,6 +15,7 @@ import DeckSuggest from './DeckSuggest'
 import DeckBracket from './DeckBracket'
 import DeckHistory from './DeckHistory'
 import DeckTokens from './DeckTokens'
+import DeckSynergy from './DeckSynergy'
 import DeckFetch from './DeckFetch'
 import CommanderPool from './CommanderPool'
 import DeckCategories, { TagPicker } from './DeckCategories'
@@ -183,12 +184,13 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       )}
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['tokens', 'Token'], ['history', 'Verlauf'], ['export', 'Export']].map(([k, l]) => (
+        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['synergy', 'Synergie'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['tokens', 'Token'], ['history', 'Verlauf'], ['export', 'Export']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {tab === 'stats' && <><DeckBracket deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} /><DeckStats rows={rows} identity={[...new Set(commanders.flatMap((r) => r.card.ci || []))]} /></>}
+      {tab === 'synergy' && <DeckSynergy commanders={commanders} rows={[...rest, ...poolRest]} onOpen={onOpen} />}
       {tab === 'tokens' && <DeckTokens rows={[...commanders, ...rest, ...poolRest]} />}
       {tab === 'history' && <DeckHistory deck={deck} cards={cards} onUpdate={onUpdate} onRestore={onRestoreVersion} />}
       {tab === 'suggest' && <DeckSuggest commanders={commanders.map((r) => r.card)} rows={[...rest, ...poolRest]} ownedByName={ownedByName} deNames={deNames}
