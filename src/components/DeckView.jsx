@@ -188,7 +188,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         ))}
       </div>
 
-      {tab === 'stats' && <><DeckBracket deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} /><DeckStats rows={rows} /></>}
+      {tab === 'stats' && <><DeckBracket deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} /><DeckStats rows={rows} identity={[...new Set(commanders.flatMap((r) => r.card.ci || []))]} /></>}
       {tab === 'tokens' && <DeckTokens rows={[...commanders, ...rest, ...poolRest]} />}
       {tab === 'history' && <DeckHistory deck={deck} cards={cards} onUpdate={onUpdate} onRestore={onRestoreVersion} />}
       {tab === 'suggest' && <DeckSuggest commanders={commanders.map((r) => r.card)} rows={[...rest, ...poolRest]} ownedByName={ownedByName} deNames={deNames}

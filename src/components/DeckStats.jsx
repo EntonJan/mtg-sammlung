@@ -1,3 +1,4 @@
+import Info from './Info'
 import { useMemo } from 'react'
 import { COLOR_NAMES, GROUPS, groupOf, manaSymbols, euro } from '../util'
 
@@ -5,7 +6,7 @@ const LAND_TYPE = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'For
 const PIP_COLOR = { W: '#f8f3d6', U: '#a9d6f5', B: '#bfb3b0', R: '#f4a68a', G: '#9ed3a8', C: '#d5d0cc' }
 
 // Statistiken eines Decks: Manakurve, Farben, Typen, Länder, teuerste Karten
-export default function DeckStats({ rows }) {
+export default function DeckStats({ rows, identity }) {
   const s = useMemo(() => {
     const curve = Array(8).fill(0) // 0..6, 7+
     const pips = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }
@@ -35,6 +36,8 @@ export default function DeckStats({ rows }) {
           if ((c.text || '').includes(`{${col}}`) || (LAND_TYPE[col] && c.type.includes(LAND_TYPE[col]))) made.add(col)
         }
         if (/any color/i.test(c.text || '')) ['W', 'U', 'B', 'R', 'G'].forEach((col) => made.add(col))
+        // Im Deck zählen nur Farben, die der Commander erlaubt (Command Tower, Exotic Orchard, City of Brass …)
+        if (identity?.length) for (const col of [...made]) if (col !== 'C' && !identity.includes(col)) made.delete(col)
         made.forEach((col) => { produces[col] += r.qty })
         continue
       }
@@ -47,7 +50,7 @@ export default function DeckStats({ rows }) {
     }
     const top = [...rows].sort((a, b) => (b.price ?? 0) - (a.price ?? 0)).slice(0, 8)
     return { curve, pips, produces, types, mdfcBy, lands, mdfc, spells, total, avg: spells ? cmcSum / spells : 0, top }
-  }, [rows])
+  }, [rows, identity])
 
   if (!rows.length) return <p className="muted">Noch keine Karten im Deck.</p>
 
@@ -89,7 +92,7 @@ export default function DeckStats({ rows }) {
           ))}
         </div>
         <table className="pip-table">
-          <thead><tr><th></th><th>Symbole</th><th>Länder, die sie erzeugen</th></tr></thead>
+          <thead><tr><th></th><th>Symbole</th><th>Länder, die sie erzeugen <Info>Zählt Länder, deren Regeltext oder Landtyp die Farbe erzeugt. Länder mit „Mana einer beliebigen Farbe“ (Command Tower, City of Brass …) zählen nur für die Farben deines Commanders.</Info></th></tr></thead>
           <tbody>
             {Object.keys(s.pips).filter((c) => s.pips[c] || s.produces[c]).map((c) => (
               <tr key={c}>

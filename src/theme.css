@@ -428,3 +428,17 @@ nav button:not(.on) .ico-line { color: #b39a62; }
 .side-new-btn { flex: 1 1 100%; }
 .side-new-btn:disabled { opacity: .45; }
 .hbar-n { width: auto; min-width: 64px; white-space: nowrap; }
+
+/* Info-„i“ mit Erklärung */
+.info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 5px; border: 1px solid var(--gold-dim); border-radius: 50%; font-family: Georgia, serif; font-style: italic; font-size: 11px; line-height: 1; color: var(--accent); cursor: help; vertical-align: 1px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.info-pop { display: none; position: absolute; z-index: 50; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); width: max-content; max-width: 300px; padding: 9px 11px; background: #1a1916; border: 1px solid var(--gold-dim); box-shadow: 0 8px 24px rgba(0,0,0,.6); color: var(--text); font-family: var(--serif); font-style: normal; font-size: 14px; line-height: 1.4; text-align: left; white-space: normal; }
+.info:hover .info-pop, .info:focus .info-pop, .info.open .info-pop { display: block; }
+@media (max-width: 640px) { .info-pop { max-width: 240px; left: auto; right: -10px; transform: none; } }
+/* Kopfleiste am PC in einer Zeile halten */
+@media (min-width: 641px) and (max-width: 1450px) {
+  header { flex-wrap: nowrap; gap: 10px; }
+  header h1 { font-size: 15px; letter-spacing: .1em; white-space: nowrap; }
+  nav { gap: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  nav button { font-size: 15px; padding: 6px 8px; white-space: nowrap; }
+  .user { flex-wrap: nowrap; }
+}

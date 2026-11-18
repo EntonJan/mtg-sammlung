@@ -2,10 +2,21 @@ import { useEffect, useState } from 'react'
 import { comboUrl, estimateBracket, findCombos } from '../spellbook'
 import { loadSuggestions } from '../edhrec'
 import { suggestTags, tagKey } from '../categories'
+import Info from './Info'
+
+const INFO = {
+  'Tempo (Ø Manawert)': 'Durchschnittlicher Manawert aller Nicht-Länder. Je niedriger, desto schneller kommt das Deck ins Spiel. Volle Punkte bis Ø 2,6.',
+  'Ramp & schnelles Mana': 'Karten mit der Kategorie „Ramp“ plus besonders schnelles Mana (Sol Ring, Signets, Mana-Elfen …). Volle Punkte ab 12 Ramp.',
+  'Kartenvorteil': 'Karten mit der Kategorie „Draw“. Volle Punkte ab 12.',
+  'Interaktion': 'Karten mit „Removal“ oder „Board Wipe“. Volle Punkte ab 12.',
+  'Tutoren': 'Karten, die eine beliebige Karte aus der Bibliothek suchen (nicht nur Länder). Je Tutor 0,35 Punkte.',
+  'Combos (3+ Karten)': 'Combos aus 3 oder mehr Karten, die komplett im Deck stecken (Commander Spellbook). Zwei-Karten-Combos zählen schon beim Mindest-Bracket.',
+  'Passung zum Commander': 'Wie gut das Deck auf genau diesen Commander zugeschnitten ist – aus EDHREC-Daten: 40 % Abdeckung (Anteil deiner Karten, die EDHREC für diesen Commander empfiehlt), 30 % Spielquote (wie oft diese Karten in Decks mit dem Commander stecken) und 30 % Synergie-Karten (Anteil mit deutlich überdurchschnittlicher Synergie). Allrounder wie Signets zählen damit auch mit, wenn sie typisch für den Commander sind.',
+}
 
 const FAST_MANA = /^(Sol Ring|Mana Crypt|Mana Vault|Chrome Mox|Mox Diamond|Mox Opal|Mox Amber|Jeweled Lotus|Lotus Petal|Grim Monolith|Ancient Tomb|Dark Ritual|Cabal Ritual|Simian Spirit Guide|Elvish Spirit Guide|Mana Drain|Arcane Signet|Fellwar Stone|Talisman of .*|.* Signet|Birds of Paradise|Llanowar Elves|Elvish Mystic|Fyndhorn Elves|Avacyn's Pilgrim|Noble Hierarch|Deathrite Shaman|Carpet of Flowers|Utopia Sprawl|Wild Growth)$/
 
-// Spielstärke-Schätzung (0–10) aus Tempo, Ressourcen, Interaktion, Tutoren, Combos und Commander-Synergie
+// Spielstärke-Schätzung (0–10) aus Tempo, Ressourcen, Interaktion, Tutoren, Combos und Passung zum Commander
 function powerOf(deck, commanders, rows, combos, edh) {
   const nonland = rows.filter((r) => !/Land/.test((r.card.type || '').split(' // ')[0]))
   const n = (pred) => nonland.reduce((t, r) => t + (pred(r) ? r.qty : 0), 0)
@@ -17,25 +28,36 @@ function powerOf(deck, commanders, rows, combos, edh) {
   const tutors = n((r) => tagsOf(r.card).includes('Tutor'))
   const fast = n((r) => FAST_MANA.test(r.card.name))
   const multi = combos.filter((v) => v.uses.length >= 3).length
-  // Synergie: Durchschnitt der EDHREC-Synergie der Deckkarten mit dem Commander
-  let syn = null, known = 0
+  // Commander-Passung (0–100 %) aus drei EDHREC-Signalen – reine Durchschnitts-Synergie wäre zu niedrig,
+  // weil starke Allrounder (Signets, Removal) fast 0 % Synergie haben, obwohl sie perfekt ins Deck passen:
+  //  · Abdeckung: Anteil deiner Nicht-Land-Karten, die EDHREC für diesen Commander überhaupt empfiehlt
+  //  · Spielquote: wie oft die erkannten Karten in Decks mit diesem Commander stecken (Ø, 50 %+ = voll)
+  //  · Synergie-Karten: Anteil der Karten mit deutlich positiver Synergie (≥ 10 %), 40 %+ = voll
+  let fit = null, known = 0, detail = ''
   if (edh) {
     const m = new Map()
     for (const l of edh.lists) for (const c of l.cards) if (!m.has(c.name)) m.set(c.name, c)
-    const vals = []
-    for (const r of nonland) { const c = m.get(r.card.name) || m.get(r.card.name.split(' // ')[0]); if (c) { known++; vals.push(c.synergy || 0) } }
-    if (vals.length >= 5) syn = vals.reduce((a, b) => a + b, 0) / vals.length
+    const hits = []
+    for (const r of nonland) { const c = m.get(r.card.name) || m.get(r.card.name.split(' // ')[0]); if (c) hits.push(c) }
+    known = hits.length
+    if (nonland.length >= 10 && known >= 5) {
+      const coverage = known / nonland.length
+      const incl = hits.reduce((t, c) => t + (c.pct || 0), 0) / known / 100
+      const synShare = hits.filter((c) => (c.synergy || 0) >= 0.1).length / nonland.length
+      fit = 0.4 * Math.min(1, coverage / 0.8) + 0.3 * Math.min(1, incl / 0.5) + 0.3 * Math.min(1, synShare / 0.4)
+      detail = `${Math.round(fit * 100)} % Passung · ${known}/${nonland.length} Karten von EDHREC empfohlen · Ø ${Math.round(incl * 100)} % Spielquote · ${Math.round(synShare * 100)} % Synergie-Karten`
+    }
   }
   const f = []
-  const add = (label, pts, max, detail) => f.push({ label, pts: Math.min(pts, max), max, detail })
+  const add = (label, pts, max, detail) => f.push({ label, pts: Math.min(pts, max), max, detail, info: INFO[label] })
   add('Tempo (Ø Manawert)', cmc <= 2.6 ? 2 : cmc <= 3.0 ? 1.5 : cmc <= 3.4 ? 1 : cmc <= 3.8 ? 0.5 : 0, 2, `Ø ${cmc.toFixed(2)} ohne Länder`)
   add('Ramp & schnelles Mana', (ramp >= 12 ? 1 : ramp >= 9 ? 0.6 : ramp >= 6 ? 0.3 : 0) + Math.min(fast * 0.15, 0.5), 1.5, `${ramp} Ramp, davon ${fast} schnelles Mana`)
   add('Kartenvorteil', draw >= 12 ? 1.5 : draw >= 9 ? 1 : draw >= 6 ? 0.5 : 0, 1.5, `${draw} Draw-Karten`)
   add('Interaktion', inter >= 12 ? 1.5 : inter >= 9 ? 1 : inter >= 6 ? 0.5 : 0, 1.5, `${inter} Removal/Board Wipes`)
   add('Tutoren', tutors * 0.35, 1, `${tutors} Tutoren`)
   add('Combos (3+ Karten)', multi * 0.35, 1, `${multi} im Deck`)
-  if (syn != null) add('Synergie mit dem Commander', syn >= 0.3 ? 1.5 : syn >= 0.2 ? 1.1 : syn >= 0.12 ? 0.7 : syn >= 0.06 ? 0.3 : 0, 1.5, `Ø ${Math.round(syn * 100)} % Synergie (EDHREC, ${known} Karten erkannt)`)
-  else add('Synergie mit dem Commander', 0, 1.5, edh === undefined ? 'wird geladen …' : 'keine EDHREC-Daten')
+  if (fit != null) add('Passung zum Commander', fit >= 0.75 ? 1.5 : fit >= 0.6 ? 1.1 : fit >= 0.45 ? 0.7 : fit >= 0.3 ? 0.3 : 0, 1.5, detail)
+  else add('Passung zum Commander', 0, 1.5, edh === undefined ? 'wird geladen …' : known ? 'zu wenige Karten erkannt' : 'keine EDHREC-Daten')
   // Rohpunkte (0–10) auf die Bracket-Skala 1–5 abbilden: 2,5 → 2 · 4,5 → 3 · 7,5 → 4 · 10 → 5
   const raw = f.reduce((t, x) => t + x.pts, 0)
   const pts = [[0, 1], [2.5, 2], [4.5, 3], [7.5, 4], [10, 5]]
@@ -101,7 +123,7 @@ export default function DeckBracket({ deck, commanders, rows }) {
           <span className="bracket-name">Bracket · {min === 2 ? 'Exhibition / Core' : NAMES[min]}</span>
         </div>
         <div className="bracket-why">
-          <b>Mindest-Bracket nach den offiziellen Regeln</b>
+          <b>Mindest-Bracket nach den offiziellen Regeln <Info>Die offiziellen Commander-Brackets: Bracket 1–2 ohne Game Changer, Massen-Landzerstörung und frühe Zwei-Karten-Combos; Bracket 3 erlaubt bis zu 3 Game Changer; ab Bracket 4 ist alles erlaubt. Die Game-Changer-Liste kommt von Scryfall.</Info></b>
           <ul>{why.map((w) => <li key={w}>{w}</li>)}</ul>
           {res?.bracketTag && <p className="muted small">Commander Spellbook stuft das Deck ein als: <b>{SB_TAG[res.bracketTag] || res.bracketTag}</b></p>}
           <p className="muted small">Game Changer laut offizieller Liste (Scryfall), Landzerstörung und Extra-Züge anhand des Kartentexts.</p>
@@ -115,10 +137,10 @@ export default function DeckBracket({ deck, commanders, rows }) {
             <span className="bracket-name">Spielstärke · Bracket {eff === 1 ? '1–2' : eff}</span>
           </div>
           <div className="bracket-why">
-            <b>Spielstärke: {power.score.toLocaleString('de-DE', { minimumFractionDigits: 1 })} von 5 – spielt sich wie Bracket {eff === 1 ? '1–2' : eff}</b>
+            <b><Info>Eine Schätzung von 1 bis 5 auf der Bracket-Skala: Tempo, Ressourcen, Interaktion, Tutoren, Combos und die Passung zum Commander ergeben Rohpunkte (0–10), die auf 1–5 umgerechnet werden. Ab x,6 gibt es den Hinweis „an der Grenze zum nächsten Bracket“.</Info> Spielstärke: {power.score.toLocaleString('de-DE', { minimumFractionDigits: 1 })} von 5 – spielt sich wie Bracket {eff === 1 ? '1–2' : eff}</b>
             <p className="muted small">
               {eff > min
-                ? `Formal reicht Bracket ${min === 2 ? '1–2' : min}, aber Tempo, Ressourcen und Synergie sprechen eher für Bracket ${eff}. Für faire Partien lieber so ansagen.`
+                ? `Formal reicht Bracket ${min === 2 ? '1–2' : min}, aber Tempo, Ressourcen und die Passung zum Commander sprechen eher für Bracket ${eff}. Für faire Partien lieber so ansagen.`
                 : 'Passt zum Mindest-Bracket – die Spielstärke liegt nicht höher als die Regeln vorgeben.'}
               {power.edge && eff === power.plays && <> <b className="power-edge">Starkes Bracket {eff} – an der Grenze zu Bracket {eff + 1}.</b></>}
             </p>
@@ -132,7 +154,7 @@ export default function DeckBracket({ deck, commanders, rows }) {
         <div className="power-factors">
           {power.f.map((x) => (
             <div key={x.label} className="power-f">
-              <span>{x.label}</span>
+              <span>{x.label} {x.info && <Info>{x.info}</Info>}</span>
               <span className="power-track"><span style={{ width: `${(x.pts / x.max) * 100}%` }} /></span>
               <span className="muted small">{x.detail}</span>
             </div>

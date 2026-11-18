@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { loadSuggestions } from '../edhrec'
 import { getImagesByName } from '../scryfall'
+import Info from './Info'
 
 const LABELS = {
   newcards: 'Neue Karten', highsynergycards: 'Hohe Synergie', topcards: 'Top-Karten', gamechangers: 'Game Changer',
   creatures: 'Kreaturen', instants: 'Spontanzauber', sorceries: 'Hexereien', utilityartifacts: 'Artefakte', enchantments: 'Verzauberungen',
   planeswalkers: 'Planeswalker', utilitylands: 'Besondere Länder', manaartifacts: 'Mana-Artefakte', lands: 'Länder', battles: 'Schlachten',
+}
+
+const LIST_INFO = {
+  highsynergycards: 'Karten, die bei diesem Commander deutlich öfter gespielt werden als sonst in diesen Farben – also typisch für seine Strategie.',
+  topcards: 'Die meistgespielten Karten in Decks mit diesem Commander, unabhängig von der Synergie.',
+  newcards: 'Neu erschienene Karten, die bereits in Decks mit diesem Commander auftauchen.',
+  gamechangers: 'Karten von der offiziellen Game-Changer-Liste – sie heben das Deck mindestens auf Bracket 3.',
 }
 
 // EDHREC-Vorschläge für den Commander – mit Markierung, was du schon besitzt
@@ -60,7 +68,11 @@ export default function DeckSuggest({ commanders, rows, ownedByName, onTake, deN
       <div className="suggest-head">
         <p className="muted small">
           Beliebte Karten für {commanders.map((c) => c.name).join(' + ')} laut <a href={data?.url} target="_blank" rel="noreferrer">EDHREC</a>.
-          Karten, die schon im Deck sind, sind ausgeblendet.
+          Karten, die schon im Deck sind, sind ausgeblendet.{' '}
+          <Info>
+            <b>Prozent oben links</b> = Spielquote: in wie viel Prozent der Decks mit diesem Commander die Karte steckt.<br />
+            <b>Grüne Zahl oben rechts</b> = Synergie: um wie viele Prozentpunkte die Karte bei diesem Commander häufiger gespielt wird als in allen Decks mit denselben Farben. Hohe Synergie = typisch für genau diesen Commander, 0 % = Allrounder wie Sol Ring.
+          </Info>
         </p>
         <div className="seg seg-small">
           {[['owned', 'Besitze ich'], ['free', 'Frei verfügbar'], ['missing', 'Fehlt mir'], ['all', 'Alle']].map(([k, l]) => (
@@ -79,7 +91,7 @@ export default function DeckSuggest({ commanders, rows, ownedByName, onTake, deN
       {data && !shown.length && <p className="muted">Keine passenden Karten.</p>}
       {shown.map((l) => (
         <section key={l.tag} className="deck-raster-group">
-          <h3>{l.label} <span className="muted">({l.cards.length})</span></h3>
+          <h3>{l.label} <span className="muted">({l.cards.length})</span>{LIST_INFO[l.tag] && <Info>{LIST_INFO[l.tag]}</Info>}</h3>
           <div className="raster suggest-grid">
             {l.cards.map((c) => (
               <div key={c.name} className={`raster-card sugg ${c.own.free ? 'have' : c.own.decks.length ? 'indeck' : 'missing'}`} title={deNames[c.own.oracleId] ? `${c.name} (${deNames[c.own.oracleId]})` : c.name}>
