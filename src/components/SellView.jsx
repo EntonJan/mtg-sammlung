@@ -174,7 +174,7 @@ export default function SellView({ entries, decks, cards, deNames = {}, onMoveMa
                       <span className="small">€</span>
                     </label>
                   ) : <span className="price">{euro(r.price)}</span>}
-                  <a className="btn small cm-btn" href={cardmarketUrl(r.card)} target="_blank" rel="noreferrer">Cardmarket ↗</a>
+                  <a className="btn small cm-btn" href={cardmarketUrl(r.card)} target="_blank" rel="noreferrer" title="Auf Cardmarket ansehen"><span className="cm-long">Cardmarket </span><span className="cm-short">CM </span>↗</a>
                   {tab === 'free' && <button className="btn small" onClick={() => toSell([r], false)} title="1 Exemplar in den Verkaufsordner">→ Verkauf</button>}
                 </div>
               )

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { fromItems, toItems } from '../store'
+import EmptyHint from './EmptyHint'
 
 const fmt = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 const day = (t) => new Date(t).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
@@ -53,7 +54,11 @@ export default function DeckHistory({ deck, cards, onUpdate, onRestore }) {
           <input placeholder="Name, z. B. „Vor dem Spieleabend“" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
           <button className="btn primary small" onClick={save}>Aktuelle Version merken</button>
         </div>
-        {!(deck.versions || []).length && <p className="muted small">Noch keine Version gemerkt. Merke dir einen Stand, bevor du größer umbaust – dann kannst du jederzeit vergleichen oder zurück.</p>}
+        {!(deck.versions || []).length && <EmptyHint title="Versionen" steps={[
+          'Gib oben einen Namen ein, z. B. „Vor dem Spieleabend“, und tippe „Aktuelle Version merken“.',
+          'Bau das Deck danach beliebig um – jede Änderung landet unten im Protokoll.',
+          'Über die gemerkte Version siehst du, was sich geändert hat, und kannst mit einem Klick zurück.',
+        ]} />}
         {[...(deck.versions || [])].reverse().map((v) => {
           const n = Object.values(fromItems(v.items)).reduce((s, e) => s + e.qty, 0)
           const open = cmp === v.t

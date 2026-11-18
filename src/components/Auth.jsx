@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   EmailAuthProvider, GoogleAuthProvider, linkWithCredential, reauthenticateWithPopup, sendPasswordResetEmail,
-  signInWithCredential, signInWithEmailAndPassword, signInWithPopup, updatePassword,
+  signInWithCredential, signInWithEmailAndPassword, signInWithPopup, signOut, updatePassword,
 } from 'firebase/auth'
 import { auth, googleProvider } from '../firebase'
 import { isNativeApp } from '../util'
@@ -98,7 +98,7 @@ export function Settings({ user, onClose, friendsCfg = {}, setFriendsCfg }) {
         <button className="close" onClick={onClose} aria-label="Schließen">×</button>
         <div className="detail-info">
           <h2>Einstellungen</h2>
-          <p className="muted small">Angemeldet als {user.email}</p>
+          <p className="muted small settings-user">Angemeldet als {user.email} <button className="btn small ghost" onClick={() => signOut(auth)}>Abmelden</button></p>
 
           <h3>Freunde</h3>
         <label className="chk">

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { dragProps, readDrag } from '../drag'
 import { entryKey } from '../store'
 import { FINISH_LABEL, cardmarketUrl, euro, unitPrice } from '../util'
@@ -14,6 +14,8 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
   const [over, setOver] = useState(false)
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deck.name)
+  const [actOpen, setActOpen] = useState(false)
+  useEffect(() => { if (!actOpen) return; const c = () => setActOpen(false); window.addEventListener('click', c); return () => window.removeEventListener('click', c) }, [actOpen])
   const [confirmDel, setConfirmDel] = useState(false)
   const [copied, setCopied] = useState('')
   const [minPrice, setMinPrice] = useState('')
@@ -61,20 +63,29 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
           <span><b>{count}</b> Karten</span>
           <span>Wert <b>{euro(value)}</b></span>
         </div>
-        <button className={`btn small ${adding ? 'active' : 'primary'}`} onClick={() => setAdding((a) => !a)}>
-          {adding ? 'Suche schließen' : '+ Neue Karte (Ordner + Sammlung)'}
-        </button>
-        <button className={`btn small ${deck.shareId ? 'active' : ''}`} onClick={onShare}>{deck.shareId ? 'Geteilt ✓' : 'Teilen'}</button>
-        {confirmDel ? (
-          <span className="confirm">
-            Alle Karten zurück in die Sammlung und Ordner löschen?
-            <button className="btn small danger" onClick={onDelete}>Ja, auflösen</button>
-            <button className="btn small ghost" onClick={() => setConfirmDel(false)}>Abbrechen</button>
-          </span>
-        ) : (
-          <button className="btn ghost small danger" onClick={() => setConfirmDel(true)}>Ordner auflösen</button>
-        )}
+        <div className="deck-actions">
+          <button className={`btn small ${adding ? 'active' : 'primary'}`} onClick={() => setAdding((a) => !a)}>
+            {adding ? 'Suche schließen' : '+ Neue Karte'}
+          </button>
+          <button className={`btn small ${deck.shareId ? 'active' : ''}`} onClick={onShare}>{deck.shareId ? 'Geteilt ✓' : 'Teilen'}</button>
+          <div className="menu-wrap">
+            <button className="btn small" onClick={(e) => { e.stopPropagation(); setActOpen((o) => !o) }} title="Weitere Aktionen">⋯</button>
+            {actOpen && (
+              <div className="drop-menu" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => { setActOpen(false); setName(deck.name); setEditing(true) }}>Umbenennen</button>
+                <button className="danger" onClick={() => { setActOpen(false); setConfirmDel(true) }}>Ordner auflösen …</button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+      {confirmDel && (
+        <div className="confirm-bar">
+          <span>Ordner „{deck.name}“ auflösen? Alle {count} Karten gehen zurück in die Sammlung, der Ordner wird gelöscht. Mit ↶ lässt sich das rückgängig machen.</span>
+          <button className="btn small danger" onClick={onDelete}>Ja, auflösen</button>
+          <button className="btn small ghost" onClick={() => setConfirmDel(false)}>Abbrechen</button>
+        </div>
+      )}
 
       {adding && (
         <div className="deck-new">
@@ -83,7 +94,7 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
             „−“ nimmt ein hier hinzugefügtes Exemplar wieder ganz heraus.
           </p>
           <AddCards entries={deck.entries} onChange={(c, f, d) => onAddNew(c, f, d)}
-            placeholder="Karte suchen, die neu in diesen Ordner + die Sammlung soll (englisch oder deutsch)" />
+            placeholder="Neue Karte für Ordner + Sammlung suchen …" />
         </div>
       )}
       <div className="hand-actions">
@@ -98,7 +109,7 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
           <option value="name">Nach Name</option>
           <option value="set">Nach Edition</option>
         </select>
-        <label className="muted small">ab €
+        <label className="muted small min-price">ab €
           <input type="number" min="0" step="0.5" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} style={{ width: 70, marginLeft: 6 }} />
         </label>
       </div>
@@ -136,7 +147,7 @@ export default function BinderView({ deck, cards, onMove, onRename, onDelete, on
               <td className="muted small">{r.card.setName} ({r.card.set} #{r.card.num})</td>
               <td className="price">{euro(r.price)}</td>
               <td onClick={(e) => e.stopPropagation()}>
-                <a className="btn small cm-btn" href={cardmarketUrl(r.card)} target="_blank" rel="noreferrer">Cardmarket ↗</a>{' '}
+                <a className="btn small cm-btn" href={cardmarketUrl(r.card)} target="_blank" rel="noreferrer" title="Auf Cardmarket ansehen"><span className="cm-long">Cardmarket </span><span className="cm-short">CM </span>↗</a>{' '}
                 <button className="mini" title="1 Exemplar zurück in die Sammlung"
                   onClick={() => onMove({ id: r.id, finish: r.finish, from: deck.id }, 'collection')}>↩</button>
               </td>

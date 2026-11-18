@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { dragProps, readDrag } from '../drag'
 import { entryKey } from '../store'
 import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../util'
@@ -6,6 +6,7 @@ import Mana from './Mana'
 import DeckStats from './DeckStats'
 import DeckHand from './DeckHand'
 import DeckPlaytest from './DeckPlaytest'
+import DeckCompare from './DeckCompare'
 import DeckExport from './DeckExport'
 import CollectionView from './CollectionView'
 import AddCards from './AddCards'
@@ -24,6 +25,13 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
+const TAB_GROUPS = [
+  ['Bauen', [['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien']]],
+  ['Analyse', [['stats', 'Statistik'], ['synergy', 'Synergie'], ['combos', 'Combos'], ['suggest', 'Vorschläge']]],
+  ['Spielen', [['hand', 'Probehand'], ['play', 'Testspiel'], ['tokens', 'Token']]],
+  ['Mehr', [['history', 'Verlauf'], ['compare', 'Vergleich'], ['export', 'Export']]],
+]
+
 export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion, onShare, uid }) {
   const [printRow, setPrintRow] = useState(null)
   const [newQuery, setNewQuery] = useState('')
@@ -34,6 +42,9 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
   const [recon, setRecon] = useState(null)
   const [reconAny, setReconAny] = useState(false)
   const [tab, setTab] = useState('list')
+  const [actOpen, setActOpen] = useState(false)
+  const [compact, setCompact] = useState(false)
+  useEffect(() => { if (!actOpen) return; const c = () => setActOpen(false); window.addEventListener('click', c); return () => window.removeEventListener('click', c) }, [actOpen])
   // Hauptgruppen immer nach Kartentyp; Unterkategorien (Removal, Ramp, Draw …) zuschaltbar
   const [subOn, setSubOnState] = useState(() => { try { return localStorage.getItem('deckSubs') !== '0' } catch { return true } })
   const setSubOn = (v) => { setSubOnState(v); try { localStorage.setItem('deckSubs', v ? '1' : '0') } catch { /* egal */ } }
@@ -129,10 +140,12 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
     <div className={`deck-split ${builder ? 'builder' : ''}`}>
     <div
       className={`deck ${over ? 'over' : ''}`}
+      onScroll={(e) => { const c = e.currentTarget.scrollTop > 90; if (c !== compact) setCompact(c) }}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-mtg-card')) { e.preventDefault(); setOver(true) } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false) }}
       onDrop={(e) => { e.preventDefault(); setOver(false); const d = readDrag(e); if (d && d.from !== deck.id) onMove(d, deck.id) }}
     >
+      <div className={`deck-top ${compact ? 'compact' : ''} ${tab === 'play' ? 'no-stick' : ''}`}>
       <div className="deck-head">
         {editing ? (
           <input className="deck-title-input" value={name} autoFocus onChange={(e) => setName(e.target.value)}
@@ -142,25 +155,34 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         )}
         <div className="deck-stats">
           <span className={count === 100 ? 'ok' : ''}><b>{count}</b>/100 Karten{sideCount > 0 && <span className="muted"> (+{sideCount} Sideboard)</span>}</span>
-          <span>Wert <b>{euro(value)}</b></span>
-          {identity.length > 0 && <span>Farbidentität <b>{identity.map((c) => COLOR_NAMES[c]).join(', ')}</b></span>}
+          <span className="ds-more">Wert <b>{euro(value)}</b></span>
+          {identity.length > 0 && <span className="ds-more">Farbidentität <b>{identity.map((c) => COLOR_NAMES[c]).join(', ')}</b></span>}
         </div>
-        <button className="btn small" onClick={() => setRecon(reconcilePreview(reconAny))} title="Prüfen, ob Deck-Karten zusätzlich frei in der Sammlung liegen">Mit Sammlung abgleichen</button>
-        <button className={`btn small ${deck.shareId ? 'active' : ''}`} onClick={onShare} title={deck.shareId ? 'Wird geteilt – Link anzeigen' : 'Nur-Lesen-Link erstellen'}>{deck.shareId ? 'Geteilt ✓' : 'Teilen'}</button>
-        <button className={`btn small ${builder ? 'active' : ''}`} onClick={toggleBuilder} title="Sammlung daneben einblenden">
-          {builder ? 'Deckbau-Modus aus' : 'Deckbau-Modus'}
-        </button>
-        {confirmDel ? (
-          <span className="confirm">
-            Alle {count} Karten zurück in die Sammlung und Deck löschen?
-            <button className="btn small danger" onClick={onDelete}>Ja, auflösen</button>
-            <button className="btn small ghost" onClick={() => setConfirmDel(false)}>Abbrechen</button>
-          </span>
-        ) : (
-          <button className="btn ghost small danger" onClick={() => setConfirmDel(true)}>Deck auflösen</button>
-        )}
+        <div className="deck-actions">
+          <button className={`btn small ${builder ? 'active' : ''} hide-m`} onClick={toggleBuilder} title="Sammlung daneben einblenden">
+            {builder ? 'Deckbau-Modus aus' : 'Deckbau-Modus'}
+          </button>
+          <button className={`btn small ${deck.shareId ? 'active' : ''}`} onClick={onShare} title={deck.shareId ? 'Wird geteilt – Link anzeigen' : 'Nur-Lesen-Link erstellen'}>{deck.shareId ? 'Geteilt ✓' : 'Teilen'}</button>
+          <div className="menu-wrap">
+            <button className="btn small" onClick={(e) => { e.stopPropagation(); setActOpen((o) => !o) }} aria-expanded={actOpen} title="Weitere Aktionen">⋯</button>
+            {actOpen && (
+              <div className="drop-menu" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => { setActOpen(false); setEditing(true); setName(deck.name) }}>Umbenennen</button>
+                <button onClick={() => { setActOpen(false); setRecon(reconcilePreview(reconAny)) }}>Mit Sammlung abgleichen</button>
+                <button className="show-m" onClick={() => { setActOpen(false); toggleBuilder() }}>{builder ? 'Deckbau-Modus aus' : 'Deckbau-Modus'}</button>
+                <button className="danger" onClick={() => { setActOpen(false); setConfirmDel(true) }}>Deck auflösen …</button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-
+      {confirmDel && (
+        <div className="confirm-bar">
+          <span>Deck „{deck.name}“ auflösen? Alle {count} Karten gehen zurück in die Sammlung, das Deck wird gelöscht. Mit ↶ lässt sich das rückgängig machen.</span>
+          <button className="btn small danger" onClick={onDelete}>Ja, auflösen</button>
+          <button className="btn small ghost" onClick={() => setConfirmDel(false)}>Abbrechen</button>
+        </div>
+      )}
       {recon && (
         <div className="recon">
           {recon.count ? (
@@ -184,10 +206,16 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         </div>
       )}
 
-      <div className="deck-tabs">
-        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['synergy', 'Synergie'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['play', 'Testspiel'], ['tokens', 'Token'], ['history', 'Verlauf'], ['export', 'Export']].map(([k, l]) => (
-          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
+      <div className="deck-tabs grouped">
+        {TAB_GROUPS.map(([g, list]) => (
+          <div key={g} className="tab-group">
+            <span className="tg-label">{g}</span>
+            <div className="tg-btns">
+              {list.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+            </div>
+          </div>
         ))}
+      </div>
       </div>
 
       {tab === 'stats' && <><DeckBracket deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} /><DeckStats rows={rows} identity={[...new Set(commanders.flatMap((r) => r.card.ci || []))]} /></>}
@@ -199,6 +227,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       {tab === 'combos' && <DeckCombos deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} owned={owned} deNames={deNames}
         onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} onPlay={() => setTab('play')} />}
+      {tab === 'compare' && <DeckCompare deck={deck} decks={decks} cards={cards} onOpen={onOpen} />}
       {tab === 'play' && <DeckPlaytest deck={deck} decks={decks} cards={cards} uid={uid} onUpdate={onUpdate} />}
       {tab === 'export' && <DeckExport deck={deck} rows={rows} sideRows={sideRows} commanderKeys={cmdKeys} />}
       {tab === 'new' && (
@@ -209,7 +238,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
           </p>
           <h3>Karte suchen</h3>
           <AddCards key={newQuery} initialQuery={newQuery} entries={deck.entries} onChange={(c, f, d) => onAddNew(c, f, d)}
-            placeholder="Karte suchen, die neu in dieses Deck + die Sammlung soll (englisch oder deutsch)" />
+            placeholder="Neue Karte für Deck + Sammlung suchen …" />
           <DeckImport decks={decks} fixedDeck={deck} onImportDeck={onImportDeck} />
         </div>
       )}

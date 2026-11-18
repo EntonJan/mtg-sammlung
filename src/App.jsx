@@ -4,18 +4,19 @@ import { deleteShare, newShareId, publishShare, shareRows } from './share'
 import ShareDialog from './components/ShareDialog'
 import FriendsView from './components/FriendsView'
 import PullView from './components/PullView'
-import { CameraIcon } from './components/Icons'
+import { CameraIcon, SearchIcon } from './components/Icons'
 import { loadProfile, saveProfileShares, watchFriends } from './friends'
 import { auth } from './firebase'
 import { Login, Settings } from './components/Auth'
 import { entryKey, fromItems, loadCollection, loadDecks, loadMeta, newDeckId, saveAll, saveHistoryPoint, saveMeta } from './store'
 import { addToCache, ensureCards, getGermanNames, loadCardCache, loadGermanNames, refreshStalePrices, resolveDeckLines, savePriceSnapshot, setWaitHandler, today } from './scryfall'
-import { groupOf, subtypesOf, unitPrice, wishAlarm } from './util'
+import { euro, groupOf, isNativeApp, subtypesOf, unitPrice, wishAlarm } from './util'
 import CollectionView from './components/CollectionView'
 import AddCards from './components/AddCards'
 import ImportView from './components/ImportView'
 import CardDetail from './components/CardDetail'
 import Sidebar from './components/Sidebar'
+import CommandPalette from './components/CommandPalette'
 import DeckView from './components/DeckView'
 import MatchView from './components/MatchView'
 import ValueView from './components/ValueView'
@@ -25,7 +26,10 @@ import SellView from './components/SellView'
 import ScanView from './components/ScanView'
 
 // Menüpunkte, die am Handy unter „Weiteres“ liegen
-const MORE = [['scan', 'Scannen'], ['value', 'Wert'], ['sell', 'Verkaufen'], ['match', 'Was fehlt mir?'], ['pull', 'Raussuchen'], ['import', 'Import']]
+// Hauptmenü: „Listen“ fasst Was fehlt mir? / Raussuchen / Import zusammen
+const LIST_VIEWS = ['match', 'pull', 'import']
+const SECONDARY = [['value', 'Wert'], ['sell', 'Verkaufen'], ['match', 'Listen']]
+const MORE = [['scan', 'Scannen'], ...SECONDARY]
 
 export default function App() {
   const [user, setUser] = useState(undefined)
@@ -59,6 +63,18 @@ function Main({ user }) {
   const [wishlist, setWishlistState] = useState([])
   const [shareMeta, setShareMeta] = useState({})   // { collection: id, wishlist: id }
   const [shareOpen, setShareOpen] = useState(null) // { kind, deckId?, title }
+  // Zuletzt geöffnete Decks/Ordner (für die Seitenleiste)
+  const [recent, setRecent] = useState(() => { try { return JSON.parse(localStorage.getItem('recentDecks') || '[]') } catch { return [] } })
+  useEffect(() => {
+    if (view.kind !== 'deck') return
+    setRecent((r) => { const n = [view.id, ...r.filter((x) => x !== view.id)].slice(0, 5); try { localStorage.setItem('recentDecks', JSON.stringify(n)) } catch { /* egal */ } return n })
+  }, [view])
+  const [palette, setPalette] = useState(false)
+  useEffect(() => {
+    const k = (e) => { if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); setPalette((p) => !p) } }
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
+  }, [])
+  const [moreAt, setMoreAt] = useState({ left: 0, top: 52 })
   const [moreOpen, setMoreOpen] = useState(false)
   const [sales, setSales] = useState([])  // Verkaufsprotokoll
   const [friendsCfg, setFriendsCfgState] = useState(null) // null = noch nicht geladen
@@ -550,6 +566,27 @@ function Main({ user }) {
     saveMeta(user.uid, 'wishlist', { items }).catch((e) => { console.error(e); setSaveState('error') })
   }, [user.uid, rememberCard])
   const wishAlarms = useMemo(() => wishlist.filter((w) => wishAlarm(w, cards)).length, [wishlist, cards])
+  // Android-App: Benachrichtigung, sobald eine Karte der Wunschliste unter den Zielpreis fällt (je Karte einmal, bis sie wieder darüber liegt)
+  useEffect(() => {
+    if (!isNativeApp() || !wishlist.length) return
+    const hits = wishlist.filter((w) => cards[w.id] && wishAlarm(w, cards))
+    let done = []; try { done = JSON.parse(localStorage.getItem('alarmNotified') || '[]') } catch { /* leer */ }
+    const keyOf = (w) => `${w.id}|${w.finish}|${w.target}`
+    const fresh = hits.filter((w) => !done.includes(keyOf(w)))
+    try { localStorage.setItem('alarmNotified', JSON.stringify(hits.map(keyOf))) } catch { /* egal */ }
+    if (!fresh.length) return
+    import('@capacitor/local-notifications').then(async ({ LocalNotifications }) => {
+      const perm = await LocalNotifications.checkPermissions()
+      if (perm.display !== 'granted' && (await LocalNotifications.requestPermissions()).display !== 'granted') return
+      await LocalNotifications.schedule({
+        notifications: fresh.slice(0, 5).map((w, i) => ({
+          id: Math.floor(Date.now() / 1000) % 100000 * 10 + i,
+          title: 'Preisalarm 🔔',
+          body: `${cards[w.id].name}: jetzt ${euro(unitPrice(cards[w.id], w.finish))} (Ziel ${euro(Number(w.target))})`,
+        })),
+      })
+    }).catch(console.error)
+  }, [wishlist, cards])
 
   // ---- Freunde: Profil und Freigaben (was Freunde sehen dürfen) ----
   const [profile, setProfile] = useState(undefined)
@@ -595,6 +632,7 @@ function Main({ user }) {
   const setFriendsCfg = useCallback((c) => { setFriendsCfgState(c); saveMeta(user.uid, 'friends', c).catch(console.error) }, [user.uid])
 
   const go = (v) => { setMoreOpen(false); setView(v) }
+  const isView = (k) => (k === 'match' ? LIST_VIEWS.includes(view.kind) : view.kind === k)
 
   // Verkauft: Exemplare aus dem Verkaufsordner (und damit aus der Sammlung) austragen und den Erlös protokollieren
   const markSold = useCallback((binderId, list) => {
@@ -772,6 +810,13 @@ function Main({ user }) {
 
   const saveLabel = { saved: 'Gespeichert', pending: 'Änderungen …', saving: 'Speichere …', error: 'Speichern fehlgeschlagen' }[saveState]
   const deck = view.kind === 'deck' ? decks[view.id] : null
+  const listTabs = (
+    <div className="deck-tabs lists-tabs">
+      {[['match', 'Was fehlt mir?'], ['pull', 'Raussuchen'], ['import', 'Import']].map(([k, l]) => (
+        <button key={k} className={view.kind === k ? 'on' : ''} onClick={() => setView({ kind: k })}>{l}</button>
+      ))}
+    </div>
+  )
 
   return (
     <div className="app">
@@ -780,29 +825,27 @@ function Main({ user }) {
         <h1>MTG Sammlung</h1>
         <nav>
           <button className={view.kind === 'add' ? 'on' : ''} onClick={() => go({ kind: 'add' })}>Hinzufügen</button>
-          <button className={`more-item ${view.kind === 'scan' ? 'on' : ''}`} onClick={() => go({ kind: 'scan' })}><CameraIcon /> Scannen</button>
+          <button className={`nav-sec-m ${view.kind === 'scan' ? 'on' : ''}`} onClick={() => go({ kind: 'scan' })}><CameraIcon /> Scannen</button>
           <button className={view.kind === 'wish' ? 'on' : ''} onClick={() => go({ kind: 'wish' })}>
             Wunschliste{wishAlarms > 0 && <span className="badge">🔔 {wishAlarms}</span>}
           </button>
-          {MORE.filter(([k]) => k !== 'scan').map(([k, label]) => (
-            <button key={k} className={`more-item ${view.kind === k ? 'on' : ''}`} onClick={() => go({ kind: k })}>{label}</button>
-          )).slice(0, 3)}
+          {SECONDARY.map(([k, label]) => (
+            <button key={k} className={`nav-sec ${isView(k) ? 'on' : ''}`} onClick={() => go({ kind: k })}>{label}</button>
+          ))}
           <button className={view.kind === 'friends' ? 'on' : ''} onClick={() => go({ kind: 'friends' })}>
             Freunde{friendReq > 0 && <span className="badge">{friendReq}</span>}
           </button>
-          <button className={`more-item ${view.kind === 'pull' ? 'on' : ''}`} onClick={() => go({ kind: 'pull' })}>Raussuchen</button>
-          <button className={`more-item ${view.kind === 'import' ? 'on' : ''}`} onClick={() => go({ kind: 'import' })}>Import</button>
-          <button className={`more-toggle ${moreOpen || MORE.some(([k]) => k === view.kind) ? 'on' : ''}`} onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen}>
-            Weiteres <span className="more-caret">{moreOpen ? '▾' : '▴'}</span>
+          <button className={`more-toggle ${moreOpen || MORE.some(([k]) => isView(k)) ? 'on' : ''}`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMoreAt({ left: Math.min(r.left, window.innerWidth - 240), top: r.bottom + 4 }); setMoreOpen((o) => !o) }} aria-expanded={moreOpen}>
+            Weiteres <span className="more-caret">▾</span>
           </button>
         </nav>
         {moreOpen && (
           <>
             <div className="more-backdrop" onClick={() => setMoreOpen(false)} />
-            <div className="more-menu" role="menu">
+            <div className="more-menu" role="menu" style={{ '--more-left': `${moreAt.left}px`, '--more-top': `${moreAt.top}px` }}>
               <div className="more-head">◆ Weiteres ◆</div>
               {MORE.map(([k, label]) => (
-                <button key={k} role="menuitem" className={view.kind === k ? 'on' : ''} onClick={() => go({ kind: k })}>
+                <button key={k} role="menuitem" className={`${k === 'scan' ? 'mm-m' : ''} ${isView(k) ? 'on' : ''}`} onClick={() => go({ kind: k })}>
                   {k === 'scan' && <CameraIcon />}{label}
                 </button>
               ))}
@@ -812,21 +855,30 @@ function Main({ user }) {
           </>
         )}
         <div className="user">
+          <button className="btn icon small cp-btn" onClick={() => setPalette(true)} title="Suchen (Strg+K)" aria-label="Suchen"><SearchIcon /></button>
           <button className="btn icon small" disabled={!undoInfo.undo} onClick={undo} title="Rückgängig (Strg+Z)">↶</button>
           <button className="btn icon small" disabled={!undoInfo.redo} onClick={redo} title="Wiederholen (Strg+Y)">↷</button>
           <span className={`save save-${saveState}`}>{saveLabel}</span>
-          <button className="btn icon small" onClick={() => setShowSettings(true)} title="Einstellungen / Android-App">⚙</button>
-          <button className="btn ghost small" onClick={() => signOut(auth)} title={user.email}>Abmelden</button>
+          <button className="btn icon small set-btn" onClick={() => setShowSettings(true)} title="Einstellungen / Android-App">⚙</button>
         </div>
       </header>
 
-      {status && <div className="status">{status}</div>}
+      {status && (() => {
+        const m = status.match(/(\d+)\/(\d+)/)
+        const pct = m ? Math.min(100, Math.round((Number(m[1]) / Math.max(1, Number(m[2]))) * 100)) : null
+        return (
+          <div className={`status ${pct != null ? 'with-bar' : ''}`}>
+            <span>{pct != null ? status.replace(/\s*\d+\/\d+$/, '') : status}</span>
+            {pct != null && <><span className="status-bar"><i style={{ width: `${pct}%` }} /></span><span className="status-num">{Number(m[1]).toLocaleString('de-DE')} / {Number(m[2]).toLocaleString('de-DE')}</span></>}
+          </div>
+        )
+      })()}
 
       <div className="body">
         {entries && (
           <Sidebar
             view={view} setView={setView} freeCount={freeCount} catCounts={catCounts} subCounts={subCounts} decks={decks} deckStats={deckStats}
-            onDrop={dropCard} onCreate={createDeck}
+            onDrop={dropCard} onCreate={createDeck} recent={recent}
             open={sideOpen} onClose={() => setSideOpen(false)}
           />
         )}
@@ -882,15 +934,15 @@ function Main({ user }) {
           ) : view.kind === 'value' ? (
             <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
           ) : view.kind === 'pull' ? (
-            <PullView entries={entries} decks={decks} cards={cards} deNames={deNames} onRemove={removeCopies} onOpen={setOpen} />
+            <>{listTabs}<PullView entries={entries} decks={decks} cards={cards} deNames={deNames} onRemove={removeCopies} onOpen={setOpen} /></>
           ) : view.kind === 'friends' ? (
             <FriendsView uid={user.uid} decks={decks} entries={entries} cards={cards} wishlist={wishlist} shareMeta={shareMeta}
               profile={profile} setProfile={setProfile}
               friendsCfg={fc} setFriendsCfg={setFriendsCfg} ensureShare={createShare} onCount={setFriendReq} />
           ) : view.kind === 'match' ? (
-            <MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} wishlist={wishlist} setWishlist={setWishlist} />
+            <>{listTabs}<MatchView entries={entries} decks={decks} cards={cards} onCreateDeck={createDeckFromPicks} wishlist={wishlist} setWishlist={setWishlist} /></>
           ) : view.kind === 'import' ? (
-            <ImportView entries={entries} decks={decks} onImport={importEntries} onImportDeck={importDeck} />
+            <>{listTabs}<ImportView entries={entries} decks={decks} onImport={importEntries} onImportDeck={importDeck} /></>
           ) : (
             <div className="center muted">Deck nicht gefunden.</div>
           )}
@@ -909,6 +961,8 @@ function Main({ user }) {
           onCreate={() => createShare(shareOpen.kind, shareOpen.deckId)} onDelete={() => removeShare(shareOpen.kind, shareOpen.deckId)}
           onClose={() => setShareOpen(null)} />
       )}
+      {palette && <CommandPalette onClose={() => setPalette(false)} decks={decks} cards={cards} entries={entries} deNames={deNames}
+        onGo={(v) => { setSideOpen(false); setView(v) }} onOpenCard={setOpen} onSettings={() => setShowSettings(true)} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   )

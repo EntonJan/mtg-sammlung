@@ -32,7 +32,7 @@ export default function DeckFetch({ deck, entries, decks, cards, onMove, deNames
   return (
     <div className="fetch">
       <div className="fetch-bar">
-        <input className="search" placeholder="Karte suchen – aus Sammlung/anderem Deck holen oder neu hinzufügen …" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="search" placeholder="Karte suchen (Sammlung, andere Decks, neu) …" value={q} onChange={(e) => setQ(e.target.value)} />
         <button className="btn small" onClick={() => onNew(q.trim())} title="Karte, die du noch nicht in der App hast: neu ins Deck und damit in die Sammlung">+ Neue Karte (Deck + Sammlung)</button>
       </div>
       {hits.length > 0 && (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { loadHistory } from '../store'
 import { loadPriceSnapshots } from '../scryfall'
 import { FINISH_LABEL, euro, unitPrice } from '../util'
@@ -155,7 +155,14 @@ function MoverList({ title, sum, list, onOpen }) {
 
 // Einfaches SVG-Liniendiagramm
 function LineChart({ points }) {
-  const W = 720, H = 220, P = { l: 70, r: 12, t: 12, b: 28 }
+  const ref = useRef(null)
+  const [W, setW] = useState(720)
+  useEffect(() => {
+    const el = ref.current; if (!el) return
+    const ro = new ResizeObserver(([e]) => setW(Math.max(280, Math.round(e.contentRect.width))))
+    ro.observe(el); return () => ro.disconnect()
+  }, [])
+  const H = W < 500 ? 180 : 220, P = { l: W < 500 ? 56 : 70, r: 12, t: 12, b: 28 }
   const vals = points.map((p) => p[1])
   const min = Math.min(...vals), max = Math.max(...vals)
   const span = max - min || 1
@@ -165,7 +172,7 @@ function LineChart({ points }) {
   const ticks = [min, min + span / 2, max]
   const labelEvery = Math.ceil(points.length / 6)
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="linechart" role="img" aria-label="Wertverlauf">
+    <div ref={ref} className="linechart-wrap"><svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="linechart" role="img" aria-label="Wertverlauf">
       {ticks.map((t) => (
         <g key={t}>
           <line x1={P.l} x2={W - P.r} y1={y(t)} y2={y(t)} stroke="var(--line)" />
@@ -179,6 +186,6 @@ function LineChart({ points }) {
           {i % labelEvery === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" fill="var(--muted)">{p[0].slice(5).split('-').reverse().join('.')}</text>}
         </g>
       ))}
-    </svg>
+    </svg></div>
   )
 }

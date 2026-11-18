@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { searchCards } from '../scryfall'
 import { FINISH_LABEL, euro, unitPrice, wishAlarm } from '../util'
+import EmptyHint from './EmptyHint'
 
 
 // Wunschliste mit Zielpreis („Preisalarm“)
@@ -81,7 +82,7 @@ export default function WishlistView({ wishlist, setWishlist, cards, ownedOracle
                     {ownedOracles.has(c.oracleId) && <span className="chip">schon im Besitz</span>}
                   </td>
                   <td>{euro(unitPrice(c, w.finish))}</td>
-                  <td><input type="number" min="0" step="0.5" className="cat-target" value={w.target} onChange={(e) => update(i, { target: e.target.value })} /></td>
+                  <td><input type="number" min="0" step="0.5" className="cat-target" value={w.target ?? ''} onChange={(e) => update(i, { target: e.target.value })} /></td>
                   <td>{alarm ? <span className="ok-text">🔔 Zielpreis erreicht</span> : ''}</td>
                   <td><button className="mini" title="Entfernen" onClick={() => remove(i)}>×</button></td>
                 </tr>
@@ -90,7 +91,12 @@ export default function WishlistView({ wishlist, setWishlist, cards, ownedOracle
           </tbody>
         </table>
       ) : (
-        <p className="muted">Noch leer. Suche oben nach Karten oder setze sie über „Was fehlt mir?“ auf die Liste. Der Zielpreis wird mit 80 % des aktuellen Preises vorbelegt.</p>
+        <EmptyHint steps={[
+          'Such oben nach einer Karte oder setze fehlende Karten über „Listen → Was fehlt mir?“ auf die Wunschliste.',
+          'Der Zielpreis wird mit 80 % des aktuellen Preises vorbelegt – du kannst ihn jederzeit ändern.',
+          'Fällt eine Karte unter deinen Zielpreis, erscheint oben im Menü eine 🔔 (in der Android-App zusätzlich eine Benachrichtigung).',
+          'Mit „Teilen“ können Freunde deine Wunschliste sehen und mit ihren Tauschkarten abgleichen.',
+        ]} />
       )}
       <p className="muted small">Preise werden einmal täglich beim Öffnen der App aktualisiert. Ist eine Karte unter deinem Zielpreis, erscheint oben in der Leiste ein 🔔.</p>
     </div>

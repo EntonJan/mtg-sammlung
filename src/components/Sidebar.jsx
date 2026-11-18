@@ -3,7 +3,7 @@ import { readDrag } from '../drag'
 import { GROUPS, euro } from '../util'
 
 // Linke Leiste: „Sammlung“ + alle Decks. Jeder Eintrag ist ein Ablageziel für Drag & Drop.
-export default function Sidebar({ view, setView, freeCount, catCounts, subCounts, decks, deckStats, onDrop, onCreate, open, onClose }) {
+export default function Sidebar({ view, setView, freeCount, catCounts, subCounts, decks, deckStats, onDrop, onCreate, open, onClose, recent = [] }) {
   const [over, setOver] = useState(null)
   const [newName, setNewName] = useState('')
   const [subFilter, setSubFilter] = useState('')
@@ -77,6 +77,10 @@ export default function Sidebar({ view, setView, freeCount, catCounts, subCounts
       )}
 
       <div className="side-list">
+        {all.length > 4 && recent.filter((id) => decks[id]).length > 0 && <>
+          <div className="side-head">Zuletzt geöffnet</div>
+          {recent.filter((id) => decks[id]).slice(0, 3).map((id) => <Entry key={'r' + id} d={decks[id]} binder={decks[id].kind === 'binder'} st={deckStats[id]} on={false} over={over === id} go={go} target={target} />)}
+        </>}
         <div className="side-head">Decks</div>
         {list.map((d) => <Entry key={d.id} d={d} st={deckStats[d.id]} on={view.kind === 'deck' && view.id === d.id} over={over === d.id} go={go} target={target} />)}
         {!list.length && <p className="side-empty">Noch keine Decks. Lege unten eins an und ziehe Karten darauf.</p>}

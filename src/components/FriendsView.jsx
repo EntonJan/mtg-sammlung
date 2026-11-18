@@ -3,6 +3,7 @@ import { NAME_RE, acceptRequest, claimName, findUser, loadProfile, removeFriend,
 import { loadShare } from '../share'
 import { euro } from '../util'
 import SharedView from './SharedView'
+import EmptyHint from './EmptyHint'
 
 // Freunde: Benutzername, Freigaben, Anfragen, Tausch-Abgleich
 export default function FriendsView({ uid, decks, entries, cards, wishlist, shareMeta, friendsCfg, setFriendsCfg, ensureShare, onCount, profile, setProfile }) {
@@ -37,7 +38,12 @@ export default function FriendsView({ uid, decks, entries, cards, wishlist, shar
     return (
       <div className="import friends">
         <h2>Freunde</h2>
-        <p className="muted">Wähle einen Benutzernamen, über den dich Freunde finden können (3–20 Zeichen, Buchstaben, Zahlen, _ . -).</p>
+        <EmptyHint steps={[
+          'Wähle unten einen Benutzernamen (3–20 Zeichen, Buchstaben, Zahlen, _ . -) – darüber finden dich deine Freunde.',
+          'Schick deinen Namen an Freunde oder such ihren Namen und sende eine Anfrage.',
+          'Lege fest, was sie sehen dürfen: Wunschliste, Tauschordner, Decks oder die ganze Sammlung.',
+          'Danach siehst du sofort, welche ihrer Karten auf deiner Wunschliste stehen – und umgekehrt (Tausch-Abgleich).',
+        ]} />
         <div className="hist-save">
           <input placeholder="z. B. Enton" value={name} onChange={(e) => setName(e.target.value)} />
           <button className="btn primary" disabled={busy || !NAME_RE.test(name)} onClick={() => run(async () => { await claimName(uid, name.trim()); setProfile(await loadProfile(uid)) })}>Namen festlegen</button>

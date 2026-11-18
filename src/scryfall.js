@@ -399,3 +399,28 @@ export async function tokensForNames(names) {
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
+
+// Stärke/Widerstand + Schlüsselwörter für Testspiel-Bots (per Name, im Speicher gecacht)
+const statsByName = {}
+export async function cardStats(names) {
+  const todo = [...new Set(names.map((n) => n.split(' // ')[0]))].filter((n) => !(n in statsByName))
+  for (let i = 0; i < todo.length; i += 75) {
+    const batch = todo.slice(i, i + 75)
+    const res = await sfFetch(`${API}/cards/collection`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifiers: batch.map((name) => ({ name })) }),
+    })
+    if (!res.ok) break
+    for (const c of (await res.json()).data) {
+      const f = c.card_faces?.[0] || c
+      const num = (v) => (v == null ? null : Number.isFinite(Number(v)) ? Number(v) : 0)
+      statsByName[c.name.split(' // ')[0]] = {
+        pow: num(c.power ?? f.power), tou: num(c.toughness ?? f.toughness),
+        kw: (c.keywords || []).map((k) => k.toLowerCase()),
+        text: c.oracle_text ?? f.oracle_text ?? '',
+      }
+    }
+    for (const n of batch) statsByName[n] ||= null
+  }
+  return Object.fromEntries(names.map((n) => [n, statsByName[n.split(' // ')[0]] || null]))
+}

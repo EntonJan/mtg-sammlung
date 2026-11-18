@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { loadProfile, watchFriends } from '../friends'
 import { loadShare } from '../share'
-import { tokensForNames } from '../scryfall'
+import { cardStats, tokensForNames } from '../scryfall'
 import { entryKey } from '../store'
 
 // Testspiel: eigenes Deck gegen 1–3 eigene oder Freundes-Decks. Freies Spielfeld ohne Regel-Engine –
@@ -45,6 +45,27 @@ function fromShare(s) {
   return out
 }
 
+// ---------- Gegner-Bot ----------
+// Einfacher „Druck-Simulator“: legt ein Land, wirkt nach Manakurve, greift mit allem an, was nicht frisch ist.
+// Kartentexte versteht er nicht – Ziele, Trigger und Blocks entscheidest du selbst.
+const ROCK = /^(Sol Ring|Mana Crypt|Mana Vault|Arcane Signet|Fellwar Stone|Mind Stone|Thought Vessel|Commander's Sphere|Coldsteel Heart|Talisman of .*|.* Signet|Chromatic Lantern|Gilded Lotus|Worn Powerstone|Hedron Archive|Thran Dynamo|Basalt Monolith|Grim Monolith|Everflowing Chalice|Wayfarer's Bauble)$/
+const rockMana = (c) => (/^(Sol Ring|Mana Crypt|Worn Powerstone|Hedron Archive|Mana Vault)$/.test(c.name) ? 2 : /^(Gilded Lotus|Thran Dynamo|Basalt Monolith|Grim Monolith)$/.test(c.name) ? 3 : 1)
+const isPermanent = (c) => !/\b(Instant|Sorcery)\b/.test((c.type || '').split(' // ')[0])
+const landCount = (h) => h.filter((c) => isLand(c)).length
+function botKeep(p) {
+  // Starthand: 2–5 Länder behalten, sonst bis zu zwei Mulligans
+  while (p.mulls < 2) {
+    const l = landCount(p.z.hand)
+    if (l >= 2 && l <= 5) break
+    p.z.lib = shuffle([...p.z.lib, ...p.z.hand]); p.z.hand = p.z.lib.splice(0, 7); p.mulls++
+  }
+  if (p.mulls > 1) { // pro Mulligan nach dem ersten eine Karte unter die Bibliothek (teuerste zuerst)
+    const sorted = [...p.z.hand].sort((a, b) => (b.cmc || 0) - (a.cmc || 0))
+    for (const c of sorted.slice(0, p.mulls - 1)) { p.z.hand.splice(p.z.hand.indexOf(c), 1); p.z.lib.push(c) }
+  }
+  p.kept = true
+}
+
 function newPlayer(id, label, src) {
   const lib = shuffle(src.main.map((c) => inst(c)))
   return {
@@ -65,6 +86,7 @@ export default function DeckPlaytest({ deck, decks, cards, uid, onUpdate }) {
 function Setup({ deck, decks, cards, uid, onStart }) {
   const [friends, setFriends] = useState(null) // [{uid, name, decks:[{id,name,cmd}]}]
   const [picks, setPicks] = useState([null]) // je Gegner: 'own:<id>' | 'share:<id>'
+  const [bots, setBots] = useState([true])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const own = useMemo(() => Object.values(decks).filter((d) => d.kind !== 'binder').sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [decks])
@@ -90,20 +112,27 @@ function Setup({ deck, decks, cards, uid, onStart }) {
     try {
       const me = fromOwnDeck(deck, cards)
       const srcs = []
-      for (const p of picks) {
+      for (const [pi, p] of picks.entries()) {
         if (!p) continue
+        const bot = bots[pi] !== false
         const [kind, id] = p.split(':')
-        if (kind === 'own') srcs.push({ src: fromOwnDeck(decks[id], cards), label: 'Gegner ' + (srcs.length + 1) })
+        if (kind === 'own') srcs.push({ src: fromOwnDeck(decks[id], cards), label: 'Gegner ' + (srcs.length + 1), bot })
         else {
           const s = await loadShare(id)
           if (!s) throw new Error('Ein Freundes-Deck konnte nicht geladen werden (Freigabe aufgehoben?).')
           const fr = friends.find((f) => f.decks.some((d) => d.id === id))
-          srcs.push({ src: fromShare(s), label: fr?.name || 'Freund' })
+          srcs.push({ src: fromShare(s), label: fr?.name || 'Freund', bot })
         }
       }
       if (!srcs.length) throw new Error('Wähle mindestens einen Gegner.')
       if (me.main.length < 7) throw new Error('Dein Deck braucht mindestens 7 Karten ohne Commander.')
-      const players = [newPlayer(0, 'Du', me), ...srcs.map((s, i) => newPlayer(i + 1, s.label, s.src))]
+      const players = [newPlayer(0, 'Du', me), ...srcs.map((s, i) => ({ ...newPlayer(i + 1, s.label, s.src), bot: s.bot }))]
+      // Für Bots Stärke/Widerstand + Schlüsselwörter nachladen
+      const botNames = [...new Set(players.filter((p) => p.bot).flatMap((p) => p.names))]
+      if (botNames.length) {
+        const st = await cardStats(botNames).catch(() => ({}))
+        for (const p of players.filter((x) => x.bot)) for (const z of Object.values(p.z)) for (const c of z) { const v = st[c.name]; if (v) { c.pow = v.pow; c.tou = v.tou; c.kw = v.kw } }
+      }
       onStart({ players, active: 0, turn: 1, phase: 'mull', log: [{ t: 1, msg: `Testspiel: ${deck.name} gegen ${srcs.map((s) => s.src.name).join(', ')}` }], startedAt: Date.now() })
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
@@ -126,11 +155,12 @@ function Setup({ deck, decks, cards, uid, onStart }) {
               </optgroup>
             ))}
           </select>
-          {picks.length > 1 && <button className="btn small" onClick={() => setPicks(picks.filter((_, j) => j !== i))}>Entfernen</button>}
+          <label className="chk small" title="Der Bot legt Länder, wirkt Karten nach Manakurve und greift an – du spielst nur noch dein Deck"><input type="checkbox" checked={bots[i] !== false} onChange={() => setBots(bots.map((b, j) => (j === i ? b === false : b)).concat(bots.length <= i ? [false] : []))} /> 🤖 Bot spielt</label>
+          {picks.length > 1 && <button className="btn small" onClick={() => { setPicks(picks.filter((_, j) => j !== i)); setBots(bots.filter((_, j) => j !== i)) }}>Entfernen</button>}
         </div>
       ))}
       <div className="pt-setup-actions">
-        {picks.length < 3 && <button className="btn" onClick={() => setPicks([...picks, null])}>+ Weiterer Gegner</button>}
+        {picks.length < 3 && <button className="btn" onClick={() => { setPicks([...picks, null]); setBots([...bots, true]) }}>+ Weiterer Gegner</button>}
         <button className="btn primary" disabled={busy || !picks.some(Boolean)} onClick={start}>{busy ? 'Lade Decks …' : 'Testspiel starten'}</button>
       </div>
       {friends === null && <p className="muted small">Lade Decks deiner Freunde …</p>}
@@ -197,6 +227,7 @@ function Table({ game, setGame, deck, onUpdate }) {
     } else if (to === 'bf' && zone === 'hand') log(g, `${pname(p)} spielt ${c.name}`)
     else if (zone === 'lib' && to === 'hand') log(g, `${pname(p)} nimmt ${c.name} aus der Bibliothek auf die Hand`)
     else log(g, `${pname(p)}: ${c.name} ${ZONES[zone]} → ${ZONES[to]}${to === 'lib' ? (where === 'top' ? ' (oben)' : ' (unten)') : ''}`)
+    if (to === 'bf') c.since = g.turn
     if (to === 'lib' && where === 'top') p.z.lib.unshift(c)
     else p.z[to].push(c)
   })
@@ -225,6 +256,63 @@ function Table({ game, setGame, deck, onUpdate }) {
   })
   const untapAll = (pid) => change((g) => { P(g, pid).z.bf.forEach((c) => { c.tapped = false }); log(g, `${pname(P(g, pid))} enttappt alles`) })
 
+  const botTurn = (g, p) => {
+    const say = (m) => log(g, `🤖 ${pname(p)}: ${m}`)
+    // 1. Land
+    const land = p.z.hand.find((c) => isLand(c))
+    if (land) { p.z.hand.splice(p.z.hand.indexOf(land), 1); land.since = g.turn; p.z.bf.push(land); say(`spielt ${land.name}`) }
+    // 2. Mana: Länder + bekannte Manasteine
+    let mana = p.z.bf.filter((c) => isLand(c)).length + p.z.bf.filter((c) => ROCK.test(c.name)).reduce((t, c) => t + rockMana(c), 0)
+    const cast = []
+    // Commander zuerst, wenn bezahlbar
+    for (const c of [...p.z.cmd]) {
+      const cost = (c.cmc || 0) + 2 * (p.tax[c.uid] || 0)
+      if (cost <= mana) { mana -= cost; p.tax[c.uid] = (p.tax[c.uid] || 0) + 1; p.z.cmd.splice(p.z.cmd.indexOf(c), 1); c.since = g.turn; p.z.bf.push(c); cast.push(`${c.name} (Commander${cost > (c.cmc || 0) ? `, Steuer +${cost - (c.cmc || 0)}` : ''})`) }
+    }
+    // Dann Handkarten: Manasteine vorziehen, sonst teuerste zuerst
+    for (;;) {
+      const options = p.z.hand.filter((c) => !isLand(c) && (c.cmc || 0) <= mana)
+      if (!options.length) break
+      options.sort((a, b) => (ROCK.test(b.name) - ROCK.test(a.name)) || (b.cmc || 0) - (a.cmc || 0))
+      const c = options[0]
+      p.z.hand.splice(p.z.hand.indexOf(c), 1); mana -= c.cmc || 0
+      if (ROCK.test(c.name)) mana += rockMana(c)
+      if (isPermanent(c)) { c.since = g.turn; p.z.bf.push(c) } else p.z.gy.push(c)
+      cast.push(c.name)
+    }
+    if (cast.length) say(`wirkt ${cast.join(', ')}${cast.some((n) => p.z.gy.some((c) => c.name === n)) ? ' – Ziele/Effekte bitte selbst ausführen' : ''}`)
+    // Länder als genutzt markieren (rein optisch)
+    let used = p.z.bf.filter((c) => isLand(c)).length + p.z.bf.filter((c) => ROCK.test(c.name)).reduce((t, c) => t + rockMana(c), 0) - mana
+    for (const c of p.z.bf) { if (used <= 0) break; if (isLand(c) || ROCK.test(c.name)) { c.tapped = true; used -= ROCK.test(c.name) ? rockMana(c) : 1 } }
+    // 3. Angriff mit allen Kreaturen, die seit einer Runde liegen (Eile: sofort)
+    const attackers = p.z.bf.filter((c) => (isCreature(c) || c.pt) && !c.tapped && ((c.since ?? 0) < g.turn || c.kw?.includes('haste')) && (c.pow ?? 0) > 0)
+    const targets = g.players.filter((x) => x.id !== p.id && x.life > 0)
+    if (attackers.length && targets.length) {
+      const target = targets.find((x) => x.id === 0) || targets.sort((a, b) => a.life - b.life)[0]
+      attackers.forEach((c) => { if (!c.kw?.includes('vigilance')) c.tapped = true })
+      const dmg = attackers.reduce((t, c) => t + (c.pow || 0) + (c.ctr['+1/+1'] || 0) - (c.ctr['-1/-1'] || 0), 0)
+      g.attack = { from: p.id, target: target.id, list: attackers.map((c) => ({ uid: c.uid, name: c.name, pow: (c.pow || 0) + (c.ctr['+1/+1'] || 0) - (c.ctr['-1/-1'] || 0), tou: c.tou, isCmd: !!c.isCmd, blocked: false, kw: c.kw || [] })) }
+      say(`greift ${pname(target)} an mit ${attackers.map((c) => `${c.name}${c.pow != null ? ` (${c.pow}/${c.tou})` : ''}`).join(', ')} – zusammen ${dmg} Schaden`)
+    } else if (!cast.length && !land) say('passt')
+  }
+
+  const resolveAttack = () => change((g) => {
+    const a = g.attack; if (!a) return
+    const t = P(g, a.target)
+    let total = 0, cmdHit = 0, poison = 0
+    for (const x of a.list) {
+      if (x.blocked) continue
+      if (x.kw.includes('infect')) { poison += x.pow; continue }
+      total += x.pow; if (x.isCmd) cmdHit += x.pow
+    }
+    t.life -= total; t.poison += poison
+    if (cmdHit) t.cmdDmg[a.from] = (t.cmdDmg[a.from] || 0) + cmdHit
+    const blocked = a.list.filter((x) => x.blocked).map((x) => x.name)
+    log(g, `${pname(t)} nimmt ${total} Schaden${poison ? ` und ${poison} Gift` : ''}${cmdHit ? ` (davon ${cmdHit} Commander-Schaden)` : ''}${blocked.length ? ` – geblockt: ${blocked.join(', ')}` : ''} → ${t.life} Leben`)
+    g.attack = null
+  })
+  const toggleBlock = (uid) => change((g) => { const x = g.attack?.list.find((y) => y.uid === uid); if (x) x.blocked = !x.blocked })
+
   // Zugwechsel: nächster Spieler enttappt und zieht
   const nextTurn = () => change((g) => {
     const n = g.players.length
@@ -235,6 +323,8 @@ function Table({ game, setGame, deck, onUpdate }) {
     p.z.bf.forEach((c) => { c.tapped = false })
     const got = p.z.lib.splice(0, 1); p.z.hand.push(...got)
     log(g, `— Zug ${g.turn}: ${pname(p)} ist dran (enttappt${got.length ? ', zieht 1' : ', Bibliothek leer!'})`)
+    g.attack = null
+    if (p.bot && p.life > 0) botTurn(g, p)
   })
 
   // Mulligan-Phase
@@ -246,6 +336,7 @@ function Table({ game, setGame, deck, onUpdate }) {
   const keep = (pid) => change((g) => {
     const p = P(g, pid); p.kept = true
     log(g, `${pname(p)} behält ${p.z.hand.length} Karten${p.mulls > 1 ? ` – ${p.mulls - 1} davon unter die Bibliothek legen` : ''}`)
+    g.players.filter((x) => x.bot && !x.kept).forEach((x) => { botKeep(x); log(g, `🤖 ${pname(x)} behält ${x.z.hand.length} Karten${x.mulls ? ` (${x.mulls} Mulligan)` : ''}`) })
     if (g.players.every((x) => x.kept)) { g.phase = 'play'; log(g, `— Zug 1: ${pname(g.players[0])} beginnt`) }
   })
 
@@ -323,7 +414,7 @@ function Table({ game, setGame, deck, onUpdate }) {
     return (
       <div key={p.id} className={`pt-board ${game.active === p.id && game.phase === 'play' ? 'active' : ''} ${compact ? 'compact' : ''}`}>
         <div className="pt-head">
-          <div className="pt-who"><b>{pname(p)}</b><span className="muted small">{p.deck}</span>{game.active === p.id && game.phase === 'play' && <span className="chip">am Zug</span>}</div>
+          <div className="pt-who"><b>{pname(p)}</b><span className="muted small">{p.deck}</span>{p.bot && <span className="chip bot-chip">🤖 Bot</span>}{game.active === p.id && game.phase === 'play' && <span className="chip">am Zug</span>}</div>
           <div className="pt-life">
             <button onClick={() => life(p.id, -5)}>−5</button><button onClick={() => life(p.id, -1)}>−1</button>
             <b className={p.life <= 0 ? 'dead' : ''}>{p.life}</b>
@@ -378,7 +469,7 @@ function Table({ game, setGame, deck, onUpdate }) {
               ? p.z.hand.map((c) => renderCard(c, p.id, 'hand', size))
               : p.z.hand.map((c) => <div key={c.uid} className={`pt-card back ${size}`} />)}
           </div>
-          {game.phase === 'mull' && !p.kept && (
+          {game.phase === 'mull' && !p.kept && !p.bot && (
             <div className="pt-mull">
               <button className="btn small" onClick={() => mulligan(p.id)}>Mulligan</button>
               <button className="btn small primary" onClick={() => keep(p.id)}>Behalten</button>
@@ -402,6 +493,28 @@ function Table({ game, setGame, deck, onUpdate }) {
         <button className="btn" onClick={() => setEnding(true)}>Test beenden</button>
       </div>
       <p className="muted small pt-help">Karte antippen = Aktionen · Doppelklick = tappen bzw. ausspielen · am PC Karten zwischen Zonen ziehen · Strg+Z = rückgängig</p>
+
+      {game.attack && (() => {
+        const a = game.attack; const from = game.players[a.from]; const to = game.players[a.target]
+        const dmg = a.list.filter((x) => !x.blocked).reduce((t, x) => t + x.pow, 0)
+        return (
+          <div className="pt-attack" onClick={(e) => e.stopPropagation()}>
+            <b>⚔ {pname(from)} greift {pname(to)} an</b>
+            <span className="muted small">Tippe geblockte Angreifer an – Kampfschaden zwischen Kreaturen regelst du selbst.</span>
+            <div className="pt-att-list">
+              {a.list.map((x) => (
+                <button key={x.uid} className={`pt-att ${x.blocked ? 'blocked' : ''}`} onClick={() => toggleBlock(x.uid)}>
+                  {x.name} <b>{x.pow}{x.tou != null ? `/${x.tou}` : ''}</b>{x.isCmd && <small> Commander</small>}{x.kw.filter((k) => ['flying', 'trample', 'menace', 'infect', 'lifelink', 'deathtouch'].includes(k)).map((k) => <small key={k}> · {k}</small>)}{x.blocked && <small> · geblockt</small>}
+                </button>
+              ))}
+            </div>
+            <div className="pt-att-actions">
+              <button className="btn primary" onClick={resolveAttack}>{dmg} Schaden übernehmen</button>
+              <button className="btn ghost" onClick={() => change((g) => { g.attack = null; log(g, 'Angriff ohne Schaden verworfen') })}>Verwerfen</button>
+            </div>
+          </div>
+        )
+      })()}
 
       <div className={`pt-opps n${opps.length}`}>{opps.map((p) => renderBoard(p, true))}</div>
       {renderBoard(me, false)}

@@ -45,7 +45,8 @@ export default function ImportView({ entries, decks, onImport, onImportDeck }) {
 
   return (
     <div className="import">
-      <h2>ManaBox-Import</h2>
+      <h2>Import</h2>
+      <h3 className="import-sub">Sammlung aus ManaBox (CSV)</h3>
       <p className="muted">
         In ManaBox: Sammlung → Teilen/Exportieren → CSV. Die Datei hier auswählen.
       </p>

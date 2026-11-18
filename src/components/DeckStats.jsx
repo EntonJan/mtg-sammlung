@@ -63,7 +63,7 @@ export default function DeckStats({ rows, identity }) {
     <div className="stats">
       <div className="stat-tiles">
         <Tile label="Karten" value={s.total} />
-        <Tile label="Länder" value={`${s.lands}${s.mdfc ? ` (davon ${s.mdfc} MDFC)` : ''}`} hint={`${Math.round((s.lands / s.total) * 100)} % · Commander: meist 35–38`} />
+        <Tile label="Länder" value={s.lands} sub={s.mdfc ? `davon ${s.mdfc} MDFC` : ''} hint={`${Math.round((s.lands / s.total) * 100)} % · Commander: meist 35–38`} />
         <Tile label="Ø Manawert" value={s.avg.toFixed(2).replace('.', ',')} hint="ohne Länder" />
         <Tile label="Zauber" value={s.spells} />
       </div>
@@ -130,11 +130,11 @@ export default function DeckStats({ rows, identity }) {
   )
 }
 
-function Tile({ label, value, hint }) {
+function Tile({ label, value, hint, sub }) {
   return (
     <div className="tile-stat" title={hint}>
       <span className="muted small">{label}</span>
-      <b>{value}</b>
+      <b>{value}{sub && <small className="tile-sub"> {sub}</small>}</b>
       {hint && <span className="muted tiny">{hint}</span>}
     </div>
   )
