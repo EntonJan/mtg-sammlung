@@ -12,7 +12,7 @@ const INFO = {
   'Interaktion': 'Karten mit „Removal“ oder „Board Wipe“. Volle Punkte ab 12.',
   'Tutoren': 'Karten, die eine beliebige Karte aus der Bibliothek suchen (nicht nur Länder). Je Tutor 0,35 Punkte.',
   'Combos (3+ Karten)': 'Combos aus 3 oder mehr Karten, die komplett im Deck stecken (Commander Spellbook). Zwei-Karten-Combos zählen schon beim Mindest-Bracket.',
-  'Interne Synergie': 'Wie stark die Karten untereinander zusammenspielen – aus dem Reiter „Synergie“: Anteil der Nicht-Länder, die stark vernetzt sind: mindestens ein Partner mit hoher Synergie (2+ verbundene Teileffekte) oder mindestens 3 verschiedene Partner. Länder zählen nicht mit. Volle Punkte ab 60 %.',
+  'Interne Synergie': 'Wie stark die Karten untereinander zusammenspielen – aus dem Reiter „Synergie“: Anteil der Nicht-Länder, die stark vernetzt sind: mindestens ein Partner mit hoher Synergie (2+ verbundene Teileffekte) oder mindestens 7 verschiedene Partner. Länder zählen nicht mit. Volle Punkte ab 60 %.',
   'Passung zum Commander': 'Wie gut das Deck auf genau diesen Commander zugeschnitten ist – aus EDHREC-Daten: 40 % Abdeckung (Anteil deiner Karten, die EDHREC für diesen Commander empfiehlt), 30 % Spielquote (wie oft diese Karten in Decks mit dem Commander stecken) und 30 % Synergie-Karten (Anteil mit deutlich überdurchschnittlicher Synergie). Allrounder wie Signets zählen damit auch mit, wenn sie typisch für den Commander sind.',
 }
 

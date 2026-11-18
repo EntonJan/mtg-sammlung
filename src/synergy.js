@@ -181,8 +181,8 @@ export function analyzeSynergy(cards) {
   }
   const nonland = list.filter((x) => !/\bLand\b/.test(front(x.card.type)))
   const connected = nonland.filter((x) => x.partners.length > 0)
-  // stark vernetzt: mind. ein Partner mit hoher Synergie (2+ Teileffekte) oder mind. 3 verschiedene Partner
-  const strong = nonland.filter((x) => x.high > 0 || x.partners.length >= 3)
+  // stark vernetzt: mind. ein Partner mit hoher Synergie (2+ Teileffekte) oder mind. 7 verschiedene Partner
+  const strong = nonland.filter((x) => x.high > 0 || x.partners.length >= 7)
   return {
     cards: list,
     themes: [...themes.values()].map((t) => ({ ...t, payoffs: [...t.payoffs], sources: [...t.sources] })).sort((a, b) => b.sources.length + b.payoffs.length - a.sources.length - a.payoffs.length),
