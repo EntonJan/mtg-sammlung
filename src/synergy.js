@@ -35,6 +35,8 @@ function parseFilter(phrase) {
   }
   f.subtypes = [...new Set(f.subtypes)]
   // „Kreaturen, die du kontrollierst“ oder „Länder“ allein wären zu allgemein (fast jede Karte)
+  // Suche nach Grundlandtypen (Forest, Island …) ist keine echte Synergie
+  if (f.subtypes.length && f.subtypes.every((x) => /^(Forests?|Islands?|Swamps?|Mountains?|Plains)$/.test(x)) && !f.include.filter((t) => t !== 'land').length) return null
   const onlyBroad = f.include.length === 1 && ['creature', 'land'].includes(f.include[0]) && !f.subtypes.length && f.cmcMin == null && f.cmcMax == null && !f.colors && !f.legendary && !f.historic && !f.multi && !f.colorless && !f.exclude.length
   if (onlyBroad) return null
   const specific = f.include.length || f.exclude.length || f.subtypes.length || f.cmcMin != null || f.cmcMax != null || f.historic || f.legendary || f.multi || f.colorless || f.colors
@@ -87,8 +89,9 @@ const EVENTS = [
   { key: 'draw', label: 'Karten ziehen', pay: /whenever you draw|draw your second card|whenever a player draws/i, prod: /\bdraws? (?:a|an|one|two|three|four|x|\d+|that many) (?:additional )?cards?\b|draw cards? equal/i },
   { key: 'life', label: 'Lebenspunkte gewinnen', pay: /whenever you gain life|if you gained (?:\d+ or more )?life|whenever you gain \d+/i, prod: /\byou gain (?:\d+|x|that much) life|gains? life equal|\blifelink\b/i },
   { key: 'opploss', label: 'Gegner verlieren Leben', pay: /whenever an opponent loses life|(?:player|opponent)s? lost (?:\d+ or more )?life this turn|if an opponent lost/i, prod: /each opponent loses (?:\d+|x)|deals? (?:\d+|x) damage to each opponent|target (?:opponent|player) loses (?:\d+|x) life|loses (?:\d+|x) life/i },
-  { key: 'token', label: 'Token', pay: /whenever (?:one or more )?(?:creature )?tokens?|for each (?:creature )?token|tokens you control (?:get|have)/i, prod: /\bcreates? (?:a|an|one|two|three|four|x|\d+|that many)[^.]*?tokens?/i },
-  { key: 'counter', label: '+1/+1-Marker', pay: /whenever (?:one or more )?\+1\/\+1 counters?|with (?:a|one or more) \+1\/\+1 counters? on (?:it|them)|for each \+1\/\+1 counter|\bproliferate\b/i, prod: /\bput (?:a|an|one|two|three|x|\d+|that many) \+1\/\+1 counters?|enters with (?:a|an|one|two|x|\d+) \+1\/\+1|\bproliferate\b/i },
+  { key: 'token', label: 'Token', pay: /whenever (?:one or more )?(?:creature )?tokens?|for each (?:creature )?token|tokens you control (?:get|have)|would create one or more tokens/i, prod: /\bcreates? (?:a|an|one|two|three|four|x|\d+|that many)[^.]*?tokens?/i },
+  // Proliferate profitiert von Markern, legt aber selbst keine neuen Arten – daher nur „profitiert“
+  { key: 'counter', label: 'Marker', pay: /whenever (?:one or more )?(?:\+1\/\+1 )?counters? (?:are|is) put|with (?:a|one or more) \+1\/\+1 counters? on (?:it|them)|for each \+1\/\+1 counter|\bproliferate\b|counters? would be put|double the number of (?:each kind of )?counters|for each counter on/i, prod: /\bput (?:a|an|one|two|three|x|\d+|that many|its) (?:\+1\/\+1|loyalty|poison|oil|charge|shield) counters?|enters with (?:a|an|one|two|three|x|\d+) (?:\+1\/\+1|oil|charge|shield) counters?|\bmodified\b|\bpoison counters?\b|\btoxic \d|\binfect\b/i },
   { key: 'sac', label: 'Opfern & Sterben', pay: /whenever you sacrifice|whenever (?:a|another) (?:nontoken )?creature (?:you control )?dies|whenever a permanent you control is put into a graveyard/i, prod: /\bsacrifice (?:a|an|another) (?:creature|artifact|permanent)|\bsacrifice x\b/i },
   { key: 'gy', label: 'Friedhof', pay: /from your graveyard|\bflashback\b|\bescape\b|\bunearth\b|cards? in your graveyard/i, prod: /\bmills? (?:a|one|two|three|x|\d+|that many) cards?|\bsurveil\b|discard (?:a|one|two|\w+) cards?/i },
   { key: 'discard', label: 'Abwerfen', pay: /whenever you discard|\bmadness\b/i, prod: /\bdiscard (?:a|one|two|x|\w+) cards?|\bcycling\b|\bconnive/i },
