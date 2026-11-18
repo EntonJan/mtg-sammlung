@@ -24,11 +24,13 @@ export default function DeckSynergy({ commanders, rows, onOpen }) {
     <div className="synergy">
       <div className="syn-stats">
         <div className="stat-tile"><span>Vernetzt</span><b>{Math.round(res.share * 100)} %</b><small>der Nicht-Länder haben mind. einen Partner</small></div>
+        <div className="stat-tile"><span>Hohe Synergie</span><b>{res.high}</b><small>Paare mit 2+ verbundenen Teileffekten</small></div>
         <div className="stat-tile"><span>Beidseitige Paare</span><b>{res.mutual}</b><small>beide profitieren voneinander</small></div>
         <div className="stat-tile"><span>Einzelgänger</span><b>{res.loners.length}</b><small>ohne erkannte Verbindung</small></div>
         <Info>
           Die App liest den englischen Regeltext jeder Karte: <b>Bedingungen</b> wie „whenever you cast a noncreature spell with mana value 3 or greater“, „whenever an Equipment enters“ oder „Elves you control get +1/+1“ verbinden die Karte mit allen passenden Karten im Deck.
-          <b> Ereignisse</b> wie „whenever you draw“ verbinden sie mit Karten, die dieses Ereignis auslösen („draw a card“). Geht es in beide Richtungen, ist die Verbindung beidseitig (↔) und zählt doppelt.
+          <b> Ereignisse</b> wie „whenever you draw“ verbinden sie mit Karten, die dieses Ereignis auslösen („draw a card“). Jede Karte wird in ihre <b>Teileffekte</b> zerlegt (Y’shtola z.B.: Nicht-Kreatur-Zauber ab Manawert 3, Gegner verlieren Leben, Karten ziehen, Leben gewinnen).
+          Je mehr Teileffekte zwei Karten verbinden – egal in welche Richtung –, desto stärker die Verbindung; ab 2 gilt sie als <b>hohe Synergie</b>. Partner sind danach sortiert, die stärksten stehen vorne.
           Erkannt wird viel, aber nicht alles – ungewöhnliche Einzel-Interaktionen können fehlen.
         </Info>
       </div>
@@ -59,13 +61,24 @@ export default function DeckSynergy({ commanders, rows, onOpen }) {
                 <div className="syn-name">
                   <b onClick={() => onOpen(c.card)}>{c.card.name}</b>
                   {c.isCommander && <span className="chip">Commander</span>}
-                  <span className="syn-score" title="Summe der Verbindungen (beidseitig zählt doppelt)">{c.score}</span>
+                  {c.high > 0 && <span className="syn-highcount" title="Partner mit 2 oder mehr verbundenen Teileffekten">{c.high}× hohe Synergie</span>}
+                  <span className="syn-score" title="Summe aller verbundenen Teileffekte">{c.score}</span>
                 </div>
+                {c.facets.length > 0 && (
+                  <div className="syn-facets">
+                    {c.facets.map((f) => (
+                      <span key={f.dir + f.label} className={`syn-facet ${f.dir}`} title={f.dir === 'gets' ? 'Teileffekt: diese Karte reagiert darauf' : 'Teileffekt: diese Karte liefert das'}>
+                        {f.dir === 'gets' ? 'braucht' : 'liefert'}: {f.label} <b>{f.count}</b>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="syn-partners">
                   {(all ? parts : parts.slice(0, 8)).map((p) => (
-                    <span key={p.key} className={`syn-chip ${p.both ? 'both' : ''}`} title={arrowTitle(p)}>
+                    <span key={p.key} className={`syn-chip ${p.both ? 'both' : ''} ${p.high ? 'high' : ''}`} title={`${arrowTitle(p)} · ${p.weight} verbundene Teileffekte`}>
+                      {p.high && <em className="syn-w">{p.weight}×</em>}
                       <i>{arrow(p)}</i> {byKey[p.key]?.card.name}
-                      <span className="muted small"> · {[...new Set([...p.gets, ...p.gives])].join(', ')}</span>
+                      <span className="muted small"> · {[...p.gets.map((r) => '← ' + r), ...p.gives.map((r) => '→ ' + r)].join(' · ')}</span>
                     </span>
                   ))}
                   {!all && parts.length > 8 && <button className="linklike small" onClick={() => setShowAll((s) => ({ ...s, [c.key]: true }))}>+{parts.length - 8} weitere</button>}

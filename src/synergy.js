@@ -86,7 +86,7 @@ const FILTER_PATTERNS = [
 
 // Ereignisse: pay = profitiert davon, prod = erzeugt es
 const EVENTS = [
-  { key: 'draw', label: 'Karten ziehen', pay: /whenever you draw|draw your second card|whenever a player draws/i, prod: /\bdraws? (?:a|an|one|two|three|four|x|\d+|that many) (?:additional )?cards?\b|draw cards? equal/i },
+  { key: 'draw', label: 'Karten ziehen', pay: /whenever you draw|draw your second card|whenever a player draws/i, prod: /(?<!opponent )\bdraws? (?:a|an|one|two|three|four|x|\d+|that many) (?:additional )?cards?\b|draw cards? equal/i },
   { key: 'life', label: 'Lebenspunkte gewinnen', pay: /whenever you gain life|if you gained (?:\d+ or more )?life|whenever you gain \d+/i, prod: /\byou gain (?:\d+|x|that much) life|gains? life equal|\blifelink\b/i },
   { key: 'opploss', label: 'Gegner verlieren Leben', pay: /whenever an opponent loses life|(?:player|opponent)s? lost (?:\d+ or more )?life this turn|if an opponent lost/i, prod: /each opponent loses (?:\d+|x)|deals? (?:\d+|x) damage to each opponent|target (?:opponent|player) loses (?:\d+|x) life|loses (?:\d+|x) life/i },
   { key: 'token', label: 'Token', pay: /whenever (?:one or more )?(?:creature )?tokens?|for each (?:creature )?token|tokens you control (?:get|have)|would create one or more tokens/i, prod: /\bcreates? (?:a|an|one|two|three|four|x|\d+|that many)[^.]*?tokens?/i },
@@ -149,10 +149,22 @@ export function analyzeSynergy(cards) {
     pb.gives.push(...reasons); pb.both = both
     per[b].partners.set(a, pb)
   }
+  // Gewicht = Anzahl verschiedener Teileffekte, die das Paar verbinden (in beide Richtungen).
+  // Ab 2 Teileffekten gilt das Paar als „hohe Synergie“.
   const list = Object.values(per).map((x) => {
-    const partners = [...x.partners.values()].map((p) => ({ ...p, gets: [...new Set(p.gets)], gives: [...new Set(p.gives)], weight: p.both ? 2 : 1 }))
-      .sort((p, q) => q.weight - p.weight)
-    return { ...x, partners, score: partners.reduce((t, p) => t + p.weight, 0) }
+    const partners = [...x.partners.values()].map((p) => {
+      const gets = [...new Set(p.gets)], gives = [...new Set(p.gives)]
+      const weight = gets.length + gives.length
+      return { ...p, gets, gives, weight, high: weight >= 2 }
+    }).sort((p, q) => q.weight - p.weight || (q.both - p.both) || per[p.key].card.name.localeCompare(per[q.key].card.name))
+    // Teileffekte der Karte: worauf sie reagiert (gets) und was sie liefert (gives), mit Anzahl Partner
+    const fm = new Map()
+    for (const p of partners) {
+      for (const r of p.gets) { const k = 'g|' + r; fm.set(k, { label: r, dir: 'gets', count: (fm.get(k)?.count || 0) + 1 }) }
+      for (const r of p.gives) { const k = 'v|' + r; fm.set(k, { label: r, dir: 'gives', count: (fm.get(k)?.count || 0) + 1 }) }
+    }
+    const facets = [...fm.values()].sort((a, b) => (a.dir === b.dir ? b.count - a.count : a.dir === 'gets' ? -1 : 1))
+    return { ...x, partners, facets, high: partners.filter((p) => p.high).length, score: partners.reduce((t, p) => t + p.weight, 0) }
   }).sort((a, b) => (b.isCommander - a.isCommander) || b.score - a.score)
 
   // Themen: Begründung → beteiligte Karten
@@ -171,6 +183,7 @@ export function analyzeSynergy(cards) {
     themes: [...themes.values()].map((t) => ({ ...t, payoffs: [...t.payoffs], sources: [...t.sources] })).sort((a, b) => b.sources.length + b.payoffs.length - a.sources.length - a.payoffs.length),
     loners: nonland.filter((x) => !x.partners.length && !x.isCommander),
     share: nonland.length ? connected.length / nonland.length : 0,
+    high: list.reduce((t, c) => t + c.high, 0) / 2,
     mutual: [...edges.keys()].filter((k) => { const [a, b] = k.split('>'); return a < b && edges.has(`${b}>${a}`) }).length,
   }
 }
