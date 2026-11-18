@@ -16,7 +16,7 @@ function shuffle(arr) {
 const isLand = (c) => ['Land', 'MDFC'].includes(groupOf(c.type))
 
 // Reiter „Probehand“: Starthand ziehen, Mulligan, weiterziehen + Simulation über viele Hände
-export default function DeckHand({ deck, rows, commanderKeys, onOpen }) {
+export default function DeckHand({ deck, rows, commanderKeys, onOpen, onPlay }) {
   // Bibliothek = alle Karten außer Commander, nach Anzahl aufgefächert
   const library = useMemo(() => {
     const lib = []
@@ -43,6 +43,7 @@ export default function DeckHand({ deck, rows, commanderKeys, onOpen }) {
         <button className="btn primary" onClick={() => newHand(0)}>Neue Hand</button>
         <button className="btn" onClick={() => newHand(mulligans + 1)}>Mulligan</button>
         <button className="btn" disabled={drawn >= deckOrder.length} onClick={() => setDrawn((d) => d + 1)}>Karte ziehen</button>
+        {onPlay && <button className="btn" onClick={onPlay} title="Dein Deck gegen eigene Decks oder Decks deiner Freunde testen">Deck gegen andere testen →</button>}
         <span className="muted">
           {drawn} Karten · {lands} {lands === 1 ? 'Land' : 'Länder'}
           {drawn > 7 && ` · Zug ${drawn - 7}`}

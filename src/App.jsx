@@ -867,6 +867,7 @@ function Main({ user }) {
               onImportDeck={importDeck}
               onChangePrinting={(from, card, finish, qty, mode) => changePrinting(deck.id, from, card, finish, qty, mode)}
               onRestoreVersion={(v) => restoreVersion(deck.id, v)}
+              uid={user?.uid}
               onShare={() => setShareOpen({ kind: 'deck', deckId: deck.id, title: deck.name })}
             />
           ) : view.kind === 'add' ? (

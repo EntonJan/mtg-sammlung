@@ -369,3 +369,33 @@ export async function getImagesByName(names) {
   if (todo.length) await set(IMG_KEY, imgCache)
   return imgCache
 }
+
+// Token für eine Liste von Kartennamen (z. B. Deck eines Freundes, von dem nur Namen bekannt sind)
+const tokByName = {}
+export async function tokensForNames(names) {
+  const todo = [...new Set(names.map((n) => n.split(' // ')[0]))].filter((n) => !(n in tokByName))
+  for (let i = 0; i < todo.length; i += 75) {
+    const batch = todo.slice(i, i + 75)
+    const res = await sfFetch(`${API}/cards/collection`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifiers: batch.map((name) => ({ name })) }),
+    })
+    if (!res.ok) break
+    for (const c of (await res.json()).data) {
+      tokByName[c.name.split(' // ')[0]] = (c.all_parts || []).filter((p) => p.component === 'token' || /emblem/i.test(p.type_line || '')).filter((p) => p.id !== c.id).map((p) => p.id)
+    }
+    for (const n of batch) tokByName[n] ||= []
+  }
+  const ids = [...new Set(names.flatMap((n) => tokByName[n.split(' // ')[0]] || []))]
+  if (!ids.length) return []
+  const out = []
+  for (const t of await collectionRaw(ids)) {
+    const face = t.card_faces?.[0] || {}
+    out.push({
+      id: t.id, name: t.name, type: t.type_line,
+      pt: t.power != null ? `${t.power}/${t.toughness}` : face.power != null ? `${face.power}/${face.toughness}` : '',
+      img: (t.image_uris || face.image_uris || {}).normal || '',
+    })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}

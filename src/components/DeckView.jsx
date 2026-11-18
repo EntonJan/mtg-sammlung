@@ -5,6 +5,7 @@ import { COLOR_NAMES, FINISH_LABEL, GROUPS, groupOf, unitPrice, euro } from '../
 import Mana from './Mana'
 import DeckStats from './DeckStats'
 import DeckHand from './DeckHand'
+import DeckPlaytest from './DeckPlaytest'
 import DeckExport from './DeckExport'
 import CollectionView from './CollectionView'
 import AddCards from './AddCards'
@@ -23,7 +24,7 @@ import { catsOf, tagKey } from '../categories'
 
 const isBasic = (c) => /Basic Land/.test(c.type) || /A deck can have any number/.test(c.text || '')
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion, onShare }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion, onShare, uid }) {
   const [printRow, setPrintRow] = useState(null)
   const [newQuery, setNewQuery] = useState('')
   const [editing, setEditing] = useState(false)
@@ -184,7 +185,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
       )}
 
       <div className="deck-tabs">
-        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['synergy', 'Synergie'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['tokens', 'Token'], ['history', 'Verlauf'], ['export', 'Export']].map(([k, l]) => (
+        {[['list', 'Liste'], ['new', '+ Neue Karten'], ['cats', 'Kategorien'], ['stats', 'Statistik'], ['synergy', 'Synergie'], ['combos', 'Combos'], ['suggest', 'Vorschläge'], ['hand', 'Probehand'], ['play', 'Testspiel'], ['tokens', 'Token'], ['history', 'Verlauf'], ['export', 'Export']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -197,7 +198,8 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'combos' && <DeckCombos deck={deck} commanders={commanders.map((r) => r.card)} rows={rest} owned={owned} deNames={deNames}
         onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
-      {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} />}
+      {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} onPlay={() => setTab('play')} />}
+      {tab === 'play' && <DeckPlaytest deck={deck} decks={decks} cards={cards} uid={uid} onUpdate={onUpdate} />}
       {tab === 'export' && <DeckExport deck={deck} rows={rows} sideRows={sideRows} commanderKeys={cmdKeys} />}
       {tab === 'new' && (
         <div className="deck-new">
