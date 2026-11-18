@@ -23,7 +23,7 @@ export default function DeckSynergy({ commanders, rows, onOpen }) {
   return (
     <div className="synergy">
       <div className="syn-stats">
-        <div className="stat-tile"><span>Stark vernetzt</span><b>{Math.round(res.strongShare * 100)} %</b><small>der Nicht-Länder: hohe Synergie oder 7+ Partner</small></div>
+        <div className="stat-tile"><span>Stark vernetzt</span><b>{Math.round(res.strongShare * 100)} %</b><small>der Nicht-Länder: 10+ Partner mit hoher oder 7+ mit normaler Synergie</small></div>
         <div className="stat-tile"><span>Mind. 1 Verbindung</span><b>{Math.round(res.share * 100)} %</b><small>der Nicht-Länder (Länder zählen nicht)</small></div>
         <div className="stat-tile"><span>Hohe Synergie</span><b>{res.high}</b><small>Paare mit 2+ verbundenen Teileffekten</small></div>
         <div className="stat-tile"><span>Beidseitige Paare</span><b>{res.mutual}</b><small>beide profitieren voneinander</small></div>
