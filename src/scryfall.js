@@ -424,3 +424,19 @@ export async function cardStats(names) {
   }
   return Object.fromEntries(names.map((n) => [n, statsByName[n.split(' // ')[0]] || null]))
 }
+
+// Volle Kartendaten für den Spieltisch (Regeltext, Stärke/Widerstand, Loyalität, Rückseiten), per Scryfall-ID
+export async function fullCards(ids) {
+  const out = {}
+  for (const c of await collectionRaw([...new Set(ids)])) {
+    const face = (f) => ({ name: f.name, type_line: f.type_line || '', oracle_text: f.oracle_text || '', power: f.power, toughness: f.toughness, loyalty: f.loyalty, mana_cost: f.mana_cost || '', image_uris: f.image_uris ? { normal: f.image_uris.normal } : undefined })
+    out[c.id] = {
+      name: c.name, type_line: c.type_line || c.card_faces?.[0]?.type_line || '', oracle_text: c.oracle_text ?? '', mana_cost: c.mana_cost ?? c.card_faces?.[0]?.mana_cost ?? '',
+      cmc: c.cmc || 0, power: c.power, toughness: c.toughness, loyalty: c.loyalty, colors: c.colors || c.card_faces?.[0]?.colors || [], color_identity: c.color_identity || [],
+      keywords: c.keywords || [], produced_mana: c.produced_mana || [],
+      image_url: c.image_uris?.normal || c.card_faces?.[0]?.image_uris?.normal || '',
+      card_faces: c.card_faces ? c.card_faces.map(face) : undefined,
+    }
+  }
+  return out
+}

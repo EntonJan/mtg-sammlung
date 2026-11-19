@@ -5,7 +5,7 @@ import path from 'node:path'
 
 const src = path.resolve('src')
 const demo = path.resolve('demo')
-const MAP = { firebase: 'firebase.js', store: 'store.js', share: 'share.js', friends: 'friends.js', scryfall: 'scryfall.js', tables: 'tables.js' }
+const MAP = { firebase: 'firebase.js', store: 'store.js', share: 'share.js', friends: 'friends.js', scryfall: 'scryfall.js' }
 
 export default defineConfig({
   base: '/mtg-sammlung/demo/',
@@ -15,7 +15,7 @@ export default defineConfig({
     resolveId(id, importer) {
       if (!importer || !importer.startsWith(src)) return null
       if (id === 'firebase/auth') return path.join(demo, 'auth.js')
-      const m = id.match(/^\.\.?\/(firebase|store|share|friends|scryfall|tables)$/)
+      const m = id.match(/^\.\.?\/(firebase|store|share|friends|scryfall)$/)
       return m ? path.join(demo, MAP[m[1]]) : null
     },
   }],

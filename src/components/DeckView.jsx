@@ -32,7 +32,7 @@ const TAB_GROUPS = [
   ['Mehr', [['history', 'Verlauf'], ['compare', 'Vergleich'], ['export', 'Export']]],
 ]
 
-export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion, onShare, uid, myName }) {
+export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMany, deNames, reserved, reconcilePreview, onReconcile, onRename, onDelete, onToggleCommander, onOpen, onUpdate, onAddNew, onImportDeck, onChangePrinting, onRestoreVersion, onShare, uid, myName, onAddResult }) {
   const [printRow, setPrintRow] = useState(null)
   const [newQuery, setNewQuery] = useState('')
   const [editing, setEditing] = useState(false)
@@ -228,7 +228,7 @@ export default function DeckView({ deck, decks, cards, entries, onMove, onMoveMa
         onTake={(pick) => onMove({ ...pick, from: 'collection' }, deck.id)} />}
       {tab === 'hand' && <DeckHand key={count} deck={deck} rows={rows} commanderKeys={cmdKeys} onOpen={onOpen} onPlay={() => setTab('play')} />}
       {tab === 'compare' && <DeckCompare deck={deck} decks={decks} cards={cards} onOpen={onOpen} />}
-      {tab === 'play' && <DeckPlaytest deck={deck} decks={decks} cards={cards} uid={uid} myName={myName} onUpdate={onUpdate} />}
+      {tab === 'play' && <DeckPlaytest deck={deck} decks={decks} cards={cards} uid={uid} myName={myName} onUpdate={onUpdate} onAddResult={onAddResult} />}
       {tab === 'export' && <DeckExport deck={deck} rows={rows} sideRows={sideRows} commanderKeys={cmdKeys} />}
       {tab === 'new' && (
         <div className="deck-new">

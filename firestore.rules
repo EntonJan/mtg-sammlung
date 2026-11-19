@@ -39,25 +39,19 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == other;
     }
 
-    // Online-Spieltisch: lesen/ändern dürfen nur Mitspieler und Eingeladene
-    function tableDoc(t) { return get(/databases/$(database)/documents/tables/$(t)).data; }
-    function seated(t) { return request.auth != null && request.auth.uid in tableDoc(t).players; }
-    match /tables/{t} {
-      allow read: if request.auth != null && (request.auth.uid in resource.data.players || request.auth.uid in resource.data.invited);
+    // Spieltisch (aus der MTG Lounge): Räume nur für Mitspieler und Eingeladene
+    function room(r) { return get(/databases/$(database)/documents/arena_rooms/$(r)).data; }
+    function inRoom(r) { return request.auth != null && request.auth.uid in room(r).players; }
+    match /arena_rooms/{r} {
+      allow read: if request.auth != null && (request.auth.uid in resource.data.players || request.auth.uid in resource.data.get('invited', []));
       allow create: if request.auth != null && request.resource.data.host == request.auth.uid && request.resource.data.players == [request.auth.uid];
-      allow update: if request.auth != null && (request.auth.uid in resource.data.players || request.auth.uid in resource.data.invited)
-        && request.resource.data.host == resource.data.host;
-      allow delete: if request.auth != null && resource.data.host == request.auth.uid;
-      match /seats/{uid} {
-        allow read: if seated(t);
-        allow create: if seated(t) && request.auth.uid == uid;
-        allow update: if seated(t);
-      }
-      match /private/{uid} {
-        allow read, write: if request.auth != null && request.auth.uid == uid && seated(t);
-      }
-      match /events/{e} {
-        allow read, create: if seated(t);
+      allow update: if request.auth != null && (request.auth.uid in resource.data.players || request.auth.uid in resource.data.get('invited', []));
+      allow delete: if request.auth != null && (resource.data.host == request.auth.uid || request.auth.uid in resource.data.players);
+      match /game_state/{p} {
+        allow read: if inRoom(r);
+        allow create, delete: if request.auth != null && request.auth.uid == p;
+        // eigener Zustand frei; bei Mitspielern nur Leben (z. B. „jeder Gegner verliert X“)
+        allow update: if inRoom(r) && (request.auth.uid == p || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['life']));
       }
     }
   }

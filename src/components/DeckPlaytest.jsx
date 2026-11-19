@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { loadProfile, watchFriends } from '../friends'
 import { loadShare } from '../share'
 import { cardStats, tokensForNames } from '../scryfall'
-import { OnlineGame, OnlineLobby } from './OnlineTable'
+import ArenaLobby from '../arena/ArenaLobby'
 import { ZONES, backImg, botKeep, fromOwnDeck, fromShare, isCreature, isDfc, isLand, isPermanent, newPlayer, nextUid, rockMana, ROCK, shuffle } from '../playtestCore'
 
 // Testspiel: eigenes Deck gegen 1–3 eigene oder Freundes-Decks. Freies Spielfeld ohne Regel-Engine –
@@ -14,11 +14,9 @@ const SHOW_TABLE = false
 const IMG = (f) => `${import.meta.env.BASE_URL}img/${f}`
 
 export default function DeckPlaytest(props) {
-  const [tableId, setTableId] = useState(null)
-  if (tableId) return <OnlineGame tableId={tableId} me={props.uid} onClose={() => setTableId(null)} />
   return (
     <>
-      {props.uid && <OnlineLobby {...props} onOpen={setTableId} />}
+      {props.uid && <ArenaLobby {...props} />}
       {SHOW_TABLE ? <PlaytestTable {...props} /> : <ForgeInfo deck={props.deck} cards={props.cards} />}
     </>
   )

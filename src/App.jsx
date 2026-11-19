@@ -921,6 +921,7 @@ function Main({ user }) {
               onRestoreVersion={(v) => restoreVersion(deck.id, v)}
               uid={user?.uid}
               myName={profile?.name || user?.displayName || ''}
+              onAddResult={(id, r) => { const d = S.current.decks[id]; if (d) updateDeck(id, { tests: [...(d.tests || []), { at: Date.now(), online: true, result: r.result, opponents: r.opponents.map((o) => `${o.name} (${o.deck})`), players: r.players, turns: null, lives: [], note: '' }].slice(-100) }) }}
               onShare={() => setShareOpen({ kind: 'deck', deckId: deck.id, title: deck.name })}
             />
           ) : view.kind === 'add' ? (
