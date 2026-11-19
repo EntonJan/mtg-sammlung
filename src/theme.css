@@ -727,3 +727,10 @@ nav { flex: 0 1 auto; min-width: 0; }
 }
 header nav { flex-shrink: 1; }
 header .user { flex: none; }
+
+.pt-elsewhere { margin: 22px 0 8px; }
+.pt-sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.pt-site { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); background: #161513; }
+.pt-site b { font-family: var(--title); font-size: 18px; color: var(--accent); }
+.pt-site .btn { margin-top: auto; align-self: flex-start; }
+.pt-site .ok { color: #8fc78a; }

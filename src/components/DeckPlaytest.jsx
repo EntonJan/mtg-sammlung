@@ -66,6 +66,19 @@ function botKeep(p) {
   p.kept = true
 }
 
+// Externe Seiten zum Testen: Liste wird kopiert, Seite geöffnet
+const ELSEWHERE = [
+  { name: 'Forge Web', url: 'https://forgeweb.app/', headers: false,
+    what: 'Echte Regeln gegen die Forge-KI – die stärkste Testmöglichkeit.',
+    how: 'Spielen geht ohne Konto; zum Speichern von Decks per E-Mail-Code anmelden. Beim Deck-Import die Liste einfügen und Commander wählen.' },
+  { name: 'Moxfield', url: 'https://moxfield.com/', headers: true,
+    what: 'Playtester mit Ziehen, Mulligan und Spielfeld – ohne Regeln, sehr komfortabel.',
+    how: 'Anmelden, neues Deck anlegen, über „Import“ die Liste einfügen, dann im Deck „Playtest“ öffnen.' },
+  { name: 'Untap.in', url: 'https://untap.in/', headers: false,
+    what: 'Online-Spieltisch – auch zum Spielen mit Freunden über Link.',
+    how: 'Anmelden, unter Decks die Liste als Text importieren, dann ein Spiel erstellen.' },
+]
+
 function newPlayer(id, label, src) {
   const lib = shuffle(src.main.map((c) => inst(c)))
   return {
@@ -138,6 +151,21 @@ function Setup({ deck, decks, cards, uid, onStart }) {
   }
 
   const tests = (deck.tests || []).slice().reverse()
+
+  // Deckliste als Text (Commander zuerst) – zum Einfügen bei anderen Testseiten
+  const listText = (withHeaders) => {
+    const d = fromOwnDeck(deck, cards)
+    const count = (arr) => { const m = new Map(); for (const c of arr) m.set(c.name, (m.get(c.name) || 0) + 1); return [...m].map(([n, q]) => `${q} ${n}`) }
+    return withHeaders
+      ? ['Commander', ...count(d.cmd), '', 'Deck', ...count(d.main)].join('\n')
+      : [...count(d.cmd), ...count(d.main)].join('\n')
+  }
+  const [copied, setCopied] = useState('')
+  const openElsewhere = async (site) => {
+    const text = listText(site.headers)
+    try { await navigator.clipboard.writeText(text); setCopied(site.name) } catch { setCopied('') ; window.prompt('Deckliste kopieren (Strg+C):', text) }
+    window.open(site.url, '_blank', 'noopener')
+  }
   return (
     <div className="pt-setup">
       <p className="muted">Spiele dein Deck gegen bis zu drei andere Decks – deine eigenen oder die deiner Freunde. Es gibt keine Regel-Automatik: du ziehst, spielst aus und rechnest für alle Seiten selbst, die App übernimmt Bibliothek, Zonen, Leben, Marker und Züge.</p>
@@ -166,6 +194,22 @@ function Setup({ deck, decks, cards, uid, onStart }) {
       {friends === null && <p className="muted small">Lade Decks deiner Freunde …</p>}
       {friends && !friends.length && <p className="muted small">Von Freunden sind keine Decks freigegeben. Freunde können ihre Decks unter „Freunde“ → „Was ich teile“ freigeben.</p>}
       {err && <p className="error">{err}</p>}
+
+      <section className="pt-elsewhere">
+        <h3 className="combo-sec">Woanders testen</h3>
+        <p className="muted small">Die Deckliste wird kopiert und die Seite öffnet sich in einem neuen Tab – dort einfach beim Import einfügen.</p>
+        <div className="pt-sites">
+          {ELSEWHERE.map((site) => (
+            <div key={site.name} className="pt-site">
+              <b>{site.name}</b>
+              <span className="muted small">{site.what}</span>
+              <span className="small">{site.how}</span>
+              <button className="btn" onClick={() => openElsewhere(site)}>Liste kopieren &amp; öffnen ↗</button>
+              {copied === site.name && <span className="ok small">✓ Deckliste kopiert</span>}
+            </div>
+          ))}
+        </div>
+      </section>
 
       {tests.length > 0 && (
         <section>
