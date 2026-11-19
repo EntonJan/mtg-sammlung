@@ -38,5 +38,27 @@ service cloud.firestore {
       allow update: if request.auth != null && request.auth.uid == other && resource.data.status == 'out' && request.resource.data.status == 'friend';
       allow delete: if request.auth != null && request.auth.uid == other;
     }
+
+    // Online-Spieltisch: lesen/ändern dürfen nur Mitspieler und Eingeladene
+    function tableDoc(t) { return get(/databases/$(database)/documents/tables/$(t)).data; }
+    function seated(t) { return request.auth != null && request.auth.uid in tableDoc(t).players; }
+    match /tables/{t} {
+      allow read: if request.auth != null && (request.auth.uid in resource.data.players || request.auth.uid in resource.data.invited);
+      allow create: if request.auth != null && request.resource.data.host == request.auth.uid && request.resource.data.players == [request.auth.uid];
+      allow update: if request.auth != null && (request.auth.uid in resource.data.players || request.auth.uid in resource.data.invited)
+        && request.resource.data.host == resource.data.host;
+      allow delete: if request.auth != null && resource.data.host == request.auth.uid;
+      match /seats/{uid} {
+        allow read: if seated(t);
+        allow create: if seated(t) && request.auth.uid == uid;
+        allow update: if seated(t);
+      }
+      match /private/{uid} {
+        allow read, write: if request.auth != null && request.auth.uid == uid && seated(t);
+      }
+      match /events/{e} {
+        allow read, create: if seated(t);
+      }
+    }
   }
 }

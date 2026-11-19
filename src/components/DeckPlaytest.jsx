@@ -2,78 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { loadProfile, watchFriends } from '../friends'
 import { loadShare } from '../share'
 import { cardStats, tokensForNames } from '../scryfall'
-import { entryKey } from '../store'
+import { OnlineGame, OnlineLobby } from './OnlineTable'
+import { ZONES, backImg, botKeep, fromOwnDeck, fromShare, isCreature, isDfc, isLand, isPermanent, newPlayer, nextUid, rockMana, ROCK, shuffle } from '../playtestCore'
 
 // Testspiel: eigenes Deck gegen 1–3 eigene oder Freundes-Decks. Freies Spielfeld ohne Regel-Engine –
 // du spielst alle Seiten selbst (ziehen, ausspielen, tappen, Marker, Token, Leben, Commander-Schaden).
-
-const ZONES = { lib: 'Bibliothek', hand: 'Hand', bf: 'Spielfeld', gy: 'Friedhof', ex: 'Exil', cmd: 'Commander-Zone' }
-const isLand = (c) => /\bLand\b/.test((c.type || '').split(' // ')[0])
-const isCreature = (c) => /\bCreature\b/.test((c.type || '').split(' // ')[0])
-const isDfc = (c) => / \/\/ /.test(c.type || '') && /cards\.scryfall\.io\/[a-z]+\/front\//.test(c.img || '')
-const backImg = (img) => img.replace('/front/', '/back/')
-
-function shuffle(arr) {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] }
-  return a
-}
-
-let uidN = 0
-const inst = (c, extra = {}) => ({ uid: `c${++uidN}`, name: c.name, img: c.img || '', type: c.type || '', cmc: c.cmc ?? 0, tapped: false, ctr: {}, flip: false, ...extra })
-
-// Deck → { name, cmd:[card], main:[card] } (Karten nach Anzahl aufgefächert)
-function fromOwnDeck(d, cards) {
-  const side = new Set(d.side || []), cmd = new Set(d.commanders || [])
-  const out = { name: d.name, cmd: [], main: [] }
-  for (const e of Object.values(d.entries || {})) {
-    const c = cards[e.id]; const k = entryKey(e.id, e.finish)
-    if (!c || side.has(k)) continue
-    if (cmd.has(k)) { out.cmd.push(c); continue }
-    for (let i = 0; i < e.qty; i++) out.main.push(c)
-  }
-  return out
-}
-function fromShare(s) {
-  const out = { name: s.name, cmd: [], main: [] }
-  for (const r of s.rows || []) {
-    const c = { name: r.n, img: r.i, type: r.t, cmc: r.m }
-    if (r.z === 'side') continue
-    if (r.z === 'cmd') { out.cmd.push(c); continue }
-    for (let i = 0; i < r.q; i++) out.main.push(c)
-  }
-  return out
-}
-
-// ---------- Gegner-Bot ----------
-// Einfacher „Druck-Simulator“: legt ein Land, wirkt nach Manakurve, greift mit allem an, was nicht frisch ist.
-// Kartentexte versteht er nicht – Ziele, Trigger und Blocks entscheidest du selbst.
-const ROCK = /^(Sol Ring|Mana Crypt|Mana Vault|Arcane Signet|Fellwar Stone|Mind Stone|Thought Vessel|Commander's Sphere|Coldsteel Heart|Talisman of .*|.* Signet|Chromatic Lantern|Gilded Lotus|Worn Powerstone|Hedron Archive|Thran Dynamo|Basalt Monolith|Grim Monolith|Everflowing Chalice|Wayfarer's Bauble)$/
-const rockMana = (c) => (/^(Sol Ring|Mana Crypt|Worn Powerstone|Hedron Archive|Mana Vault)$/.test(c.name) ? 2 : /^(Gilded Lotus|Thran Dynamo|Basalt Monolith|Grim Monolith)$/.test(c.name) ? 3 : 1)
-const isPermanent = (c) => !/\b(Instant|Sorcery)\b/.test((c.type || '').split(' // ')[0])
-const landCount = (h) => h.filter((c) => isLand(c)).length
-function botKeep(p) {
-  // Starthand: 2–5 Länder behalten, sonst bis zu zwei Mulligans
-  while (p.mulls < 2) {
-    const l = landCount(p.z.hand)
-    if (l >= 2 && l <= 5) break
-    p.z.lib = shuffle([...p.z.lib, ...p.z.hand]); p.z.hand = p.z.lib.splice(0, 7); p.mulls++
-  }
-  if (p.mulls > 1) { // pro Mulligan nach dem ersten eine Karte unter die Bibliothek (teuerste zuerst)
-    const sorted = [...p.z.hand].sort((a, b) => (b.cmc || 0) - (a.cmc || 0))
-    for (const c of sorted.slice(0, p.mulls - 1)) { p.z.hand.splice(p.z.hand.indexOf(c), 1); p.z.lib.push(c) }
-  }
-  p.kept = true
-}
-
-function newPlayer(id, label, src) {
-  const lib = shuffle(src.main.map((c) => inst(c)))
-  return {
-    id, label, deck: src.name, life: 40, poison: 0, cmdDmg: {}, tax: {},
-    z: { lib: lib.slice(7), hand: lib.slice(0, 7), bf: [], gy: [], ex: [], cmd: src.cmd.map((c) => inst(c, { isCmd: true })) },
-    showHand: id === 0, mulls: 0, kept: false, names: [...new Set([...src.main, ...src.cmd].map((c) => c.name))],
-  }
-}
 
 // Vorerst zeigt der Reiter nur die Forge-Verlinkung. Der eigene Spieltisch (mit Bot) bleibt im Code
 // und lässt sich über SHOW_TABLE wieder einschalten.
@@ -81,7 +14,14 @@ const SHOW_TABLE = false
 const IMG = (f) => `${import.meta.env.BASE_URL}img/${f}`
 
 export default function DeckPlaytest(props) {
-  return SHOW_TABLE ? <PlaytestTable {...props} /> : <ForgeInfo deck={props.deck} cards={props.cards} />
+  const [tableId, setTableId] = useState(null)
+  if (tableId) return <OnlineGame tableId={tableId} me={props.uid} onClose={() => setTableId(null)} />
+  return (
+    <>
+      {props.uid && <OnlineLobby {...props} onOpen={setTableId} />}
+      {SHOW_TABLE ? <PlaytestTable {...props} /> : <ForgeInfo deck={props.deck} cards={props.cards} />}
+    </>
+  )
 }
 
 function ForgeInfo({ deck, cards }) {
@@ -253,7 +193,9 @@ function Setup({ deck, decks, cards, uid, onStart }) {
 }
 
 // ---------- Spieltisch ----------
-function Table({ game, setGame, deck, onUpdate }) {
+export function Table({ game, setGame, deck, onUpdate, online }) {
+  const meId = game.me ?? 0
+  const ro = (p) => !!online && p.id !== meId // fremde Seite online: nur ansehen + Leben/Gift/Commander-Schaden
   const hist = useRef([])
   const [menu, setMenu] = useState(null) // { pid, zone, uid, x, y }
   const [viewer, setViewer] = useState(null) // { pid, zone, top? }
@@ -270,10 +212,11 @@ function Table({ game, setGame, deck, onUpdate }) {
     fn(n)
     return n
   })
-  const undo = () => { const prev = hist.current.pop(); if (prev) setGame(prev) }
+  const undo = () => { if (online) return; const prev = hist.current.pop(); if (prev) setGame(prev) }
   const log = (g, msg) => g.log.push({ t: g.turn, msg })
-  const P = (g, pid) => g.players[pid]
-  const pname = (p) => (p.id === 0 ? 'Du' : p.label)
+  const P = (g, pid) => g.players.find((x) => x.id === pid)
+  const pname = (p) => (online ? p.label : p.id === meId ? 'Du' : p.label) // für Protokoll (online: echte Namen)
+  const who = (p) => (p.id === meId ? 'Du' : p.label) // für Überschriften
 
   const take = (p, zone, uid) => { const i = p.z[zone].findIndex((c) => c.uid === uid); return i < 0 ? null : p.z[zone].splice(i, 1)[0] }
   const move = (pid, zone, uid, to, where = 'top') => change((g) => {
@@ -308,10 +251,10 @@ function Table({ game, setGame, deck, onUpdate }) {
   const tap = (pid, uid) => change((g) => { const c = card(g, pid, uid); if (c) c.tapped = !c.tapped })
   const counter = (pid, uid, kind, d) => change((g) => { const c = card(g, pid, uid); if (!c) return; const v = (c.ctr[kind] || 0) + d; if (v <= 0) delete c.ctr[kind]; else c.ctr[kind] = v })
   const flip = (pid, zone, uid) => change((g) => { const c = P(g, pid).z[zone].find((x) => x.uid === uid); if (c) c.flip = !c.flip })
-  const copy = (pid, uid) => change((g) => { const c = card(g, pid, uid); if (!c) return; P(g, pid).z.bf.push({ ...c, uid: `c${++uidN}`, token: true, tapped: false, ctr: {} }); log(g, `${pname(P(g, pid))} erstellt eine Kopie von ${c.name}`) })
+  const copy = (pid, uid) => change((g) => { const c = card(g, pid, uid); if (!c) return; P(g, pid).z.bf.push({ ...c, uid: nextUid(), token: true, tapped: false, ctr: {} }); log(g, `${pname(P(g, pid))} erstellt eine Kopie von ${c.name}`) })
   const makeToken = (pid, t, n = 1) => change((g) => {
     const p = P(g, pid)
-    for (let i = 0; i < n; i++) p.z.bf.push({ uid: `c${++uidN}`, name: t.name, img: t.img || '', type: t.type || 'Token', pt: t.pt || '', cmc: 0, tapped: false, ctr: {}, token: true })
+    for (let i = 0; i < n; i++) p.z.bf.push({ uid: nextUid(), name: t.name, img: t.img || '', type: t.type || 'Token', pt: t.pt || '', cmc: 0, tapped: false, ctr: {}, token: true })
     log(g, `${pname(p)} erstellt ${n}× ${t.name}${t.pt ? ` ${t.pt}` : ''}`)
   })
   const untapAll = (pid) => change((g) => { P(g, pid).z.bf.forEach((c) => { c.tapped = false }); log(g, `${pname(P(g, pid))} enttappt alles`) })
@@ -348,7 +291,7 @@ function Table({ game, setGame, deck, onUpdate }) {
     const attackers = p.z.bf.filter((c) => (isCreature(c) || c.pt) && !c.tapped && ((c.since ?? 0) < g.turn || c.kw?.includes('haste')) && (c.pow ?? 0) > 0)
     const targets = g.players.filter((x) => x.id !== p.id && x.life > 0)
     if (attackers.length && targets.length) {
-      const target = targets.find((x) => x.id === 0) || targets.sort((a, b) => a.life - b.life)[0]
+      const target = targets.find((x) => x.id === (g.me ?? 0)) || targets.sort((a, b) => a.life - b.life)[0]
       attackers.forEach((c) => { if (!c.kw?.includes('vigilance')) c.tapped = true })
       const dmg = attackers.reduce((t, c) => t + (c.pow || 0) + (c.ctr['+1/+1'] || 0) - (c.ctr['-1/-1'] || 0), 0)
       g.attack = { from: p.id, target: target.id, list: attackers.map((c) => ({ uid: c.uid, name: c.name, pow: (c.pow || 0) + (c.ctr['+1/+1'] || 0) - (c.ctr['-1/-1'] || 0), tou: c.tou, isCmd: !!c.isCmd, blocked: false, kw: c.kw || [] })) }
@@ -375,11 +318,13 @@ function Table({ game, setGame, deck, onUpdate }) {
 
   // Zugwechsel: nächster Spieler enttappt und zieht
   const nextTurn = () => change((g) => {
-    const n = g.players.length
-    const next = (g.active + 1) % n
-    if (next === 0) g.turn++
-    g.active = next
-    const p = g.players[next]
+    const order = g.order || g.players.map((x) => x.id)
+    const idx = order.indexOf(g.active)
+    const nextId = order[(idx + 1) % order.length]
+    if ((idx + 1) % order.length === 0) g.turn++
+    g.active = nextId
+    if (online) { log(g, `— Zug ${g.turn}: ${P(g, nextId)?.label} ist dran`); return } // enttappen + ziehen macht der Client des Spielers selbst
+    const p = P(g, nextId)
     p.z.bf.forEach((c) => { c.tapped = false })
     const got = p.z.lib.splice(0, 1); p.z.hand.push(...got)
     log(g, `— Zug ${g.turn}: ${pname(p)} ist dran (enttappt${got.length ? ', zieht 1' : ', Bibliothek leer!'})`)
@@ -397,14 +342,14 @@ function Table({ game, setGame, deck, onUpdate }) {
     const p = P(g, pid); p.kept = true
     log(g, `${pname(p)} behält ${p.z.hand.length} Karten${p.mulls > 1 ? ` – ${p.mulls - 1} davon unter die Bibliothek legen` : ''}`)
     g.players.filter((x) => x.bot && !x.kept).forEach((x) => { botKeep(x); log(g, `🤖 ${pname(x)} behält ${x.z.hand.length} Karten${x.mulls ? ` (${x.mulls} Mulligan)` : ''}`) })
-    if (g.players.every((x) => x.kept)) { g.phase = 'play'; log(g, `— Zug 1: ${pname(g.players[0])} beginnt`) }
+    if (g.players.every((x) => x.kept)) { g.phase = 'play'; g.active = (g.order || [g.players[0].id])[0]; log(g, `— Zug 1: ${pname(P(g, g.active))} beginnt`) }
   })
 
   const toggleHand = (pid) => change((g) => { P(g, pid).showHand = !P(g, pid).showHand })
 
   // Ziehen & Ablegen (PC)
   const onDragStart = (e, pid, zone, uid) => { e.dataTransfer.setData('text/plain', JSON.stringify({ pid, zone, uid })); e.dataTransfer.effectAllowed = 'move' }
-  const dropTo = (pid, to) => ({
+  const dropTo = (pid, to) => (online && pid !== meId ? {} : {
     onDragOver: (e) => { e.preventDefault(); e.currentTarget.classList.add('drop') },
     onDragLeave: (e) => e.currentTarget.classList.remove('drop'),
     onDrop: (e) => {
@@ -438,18 +383,19 @@ function Table({ game, setGame, deck, onUpdate }) {
     setGame(null)
   }
 
-  const me = game.players[0]
-  const opps = game.players.slice(1)
-  const m = menu && game.players[menu.pid].z[menu.zone].find((c) => c.uid === menu.uid)
+  const me = P(game, meId)
+  const opps = game.players.filter((p) => p.id !== meId)
+  const m = menu && P(game, menu.pid)?.z[menu.zone].find((c) => c.uid === menu.uid)
 
   const renderCard = (c, pid, zone, size) => {
     const shown = c.flip && isDfc(c) ? backImg(c.img) : c.img
+    const lock = !!online && pid !== meId
     const pt = c.pt && <span className="pt-pt">{c.pt}</span>
     return (
       <div key={c.uid} className={`pt-card ${size || ''} ${c.tapped ? 'tapped' : ''} ${c.token ? 'token' : ''}`}
-        draggable onDragStart={(e) => onDragStart(e, pid, zone, c.uid)}
-        onClick={(e) => openMenu(e, pid, zone, c.uid)}
-        onDoubleClick={(e) => { e.stopPropagation(); setMenu(null); if (zone === 'bf') tap(pid, c.uid); else if (zone === 'hand' || zone === 'cmd') move(pid, zone, c.uid, 'bf') }}
+        draggable={!lock} onDragStart={(e) => !lock && onDragStart(e, pid, zone, c.uid)}
+        onClick={(e) => { if (lock) { e.stopPropagation(); if (shown) setBig(shown) } else openMenu(e, pid, zone, c.uid) }}
+        onDoubleClick={(e) => { e.stopPropagation(); setMenu(null); if (lock) return; if (zone === 'bf') tap(pid, c.uid); else if (zone === 'hand' || zone === 'cmd') move(pid, zone, c.uid, 'bf') }}
         onMouseEnter={() => shown && setHover(shown)} onMouseLeave={() => setHover(null)}
         title={c.name}>
         {shown ? <img src={shown} alt={c.name} loading="lazy" /> : <div className="pt-noimg"><b>{c.name}</b><small>{c.type}</small></div>}
@@ -457,7 +403,7 @@ function Table({ game, setGame, deck, onUpdate }) {
         {Object.keys(c.ctr).length > 0 && (
           <div className="pt-ctrs">{Object.entries(c.ctr).map(([k, v]) => <span key={k} className={k === '+1/+1' ? 'plus' : k === '-1/-1' ? 'minus' : ''}>{k === '+1/+1' ? `+${v}/+${v}` : k === '-1/-1' ? `−${v}/−${v}` : `${v} ${k}`}</span>)}</div>
         )}
-        {c.isCmd && zone === 'cmd' && (game.players[pid].tax[c.uid] || 0) > 0 && <span className="pt-tax">+{(game.players[pid].tax[c.uid]) * 2}</span>}
+        {c.isCmd && zone === 'cmd' && (P(game, pid).tax[c.uid] || 0) > 0 && <span className="pt-tax">+{(P(game, pid).tax[c.uid]) * 2}</span>}
       </div>
     )
   }
@@ -474,7 +420,7 @@ function Table({ game, setGame, deck, onUpdate }) {
     return (
       <div key={p.id} className={`pt-board ${game.active === p.id && game.phase === 'play' ? 'active' : ''} ${compact ? 'compact' : ''}`}>
         <div className="pt-head">
-          <div className="pt-who"><b>{pname(p)}</b><span className="muted small">{p.deck}</span>{p.bot && <span className="chip bot-chip">🤖 Bot</span>}{game.active === p.id && game.phase === 'play' && <span className="chip">am Zug</span>}</div>
+          <div className="pt-who"><b>{who(p)}</b><span className="muted small">{p.deck}</span>{p.bot && <span className="chip bot-chip">🤖 Bot</span>}{game.active === p.id && game.phase === 'play' && <span className="chip">am Zug</span>}</div>
           <div className="pt-life">
             <button onClick={() => life(p.id, -5)}>−5</button><button onClick={() => life(p.id, -1)}>−1</button>
             <b className={p.life <= 0 ? 'dead' : ''}>{p.life}</b>
@@ -487,10 +433,10 @@ function Table({ game, setGame, deck, onUpdate }) {
             ))}
           </div>
           <div className="pt-piles">
-            <button className="pt-pile" {...dropTo(p.id, 'lib')} onClick={() => draw(p.id)} title="Klick: Karte ziehen · Karten hierher ziehen = oben auf die Bibliothek">Bibliothek <b>{p.z.lib.length}</b></button>
+            <button className="pt-pile" {...dropTo(p.id, 'lib')} disabled={ro(p)} onClick={() => draw(p.id)} title="Klick: Karte ziehen · Karten hierher ziehen = oben auf die Bibliothek">Bibliothek <b>{p.z.lib.length}</b></button>
             <button className="pt-pile" {...dropTo(p.id, 'gy')} onClick={() => setViewer({ pid: p.id, zone: 'gy' })}>Friedhof <b>{p.z.gy.length}</b></button>
             <button className="pt-pile" {...dropTo(p.id, 'ex')} onClick={() => setViewer({ pid: p.id, zone: 'ex' })}>Exil <b>{p.z.ex.length}</b></button>
-            <details className="pt-more" onClick={(e) => e.stopPropagation()}>
+            {!ro(p) && <details className="pt-more" onClick={(e) => e.stopPropagation()}>
               <summary className="btn small">Aktionen ▾</summary>
               <div className="pt-more-pop" onClick={(e) => { const d = e.currentTarget.closest('details'); if (d && e.target.tagName === 'BUTTON') d.open = false }}>
                 <button onClick={() => draw(p.id)}>1 Karte ziehen</button>
@@ -502,7 +448,7 @@ function Table({ game, setGame, deck, onUpdate }) {
                 <button onClick={() => setTokenFor(p.id)}>Token erstellen …</button>
                 <button onClick={() => untapAll(p.id)}>Alles enttappen</button>
               </div>
-            </details>
+            </details>}
           </div>
         </div>
 
@@ -522,14 +468,14 @@ function Table({ game, setGame, deck, onUpdate }) {
         <div className="pt-zone pt-hand" {...dropTo(p.id, 'hand')}>
           <span className="pt-zlabel">
             Hand ({p.z.hand.length})
-            {p.id !== 0 && <button className="linklike small" onClick={() => toggleHand(p.id)}>{p.showHand ? 'verdecken' : 'aufdecken'}</button>}
+            {p.id !== meId && !online && <button className="linklike small" onClick={() => toggleHand(p.id)}>{p.showHand ? 'verdecken' : 'aufdecken'}</button>}
           </span>
           <div className="pt-cards">
             {p.showHand
               ? p.z.hand.map((c) => renderCard(c, p.id, 'hand', size))
               : p.z.hand.map((c) => <div key={c.uid} className={`pt-card back ${size}`} />)}
           </div>
-          {game.phase === 'mull' && !p.kept && !p.bot && (
+          {game.phase === 'mull' && !p.kept && !p.bot && !ro(p) && (
             <div className="pt-mull">
               <button className="btn small" onClick={() => mulligan(p.id)}>Mulligan</button>
               <button className="btn small primary" onClick={() => keep(p.id)}>Behalten</button>
@@ -545,17 +491,19 @@ function Table({ game, setGame, deck, onUpdate }) {
     <div className="pt-table" onClick={() => setMenu(null)}>
       <div className="pt-bar">
         <b>Zug {game.turn}</b>
-        <span className="muted">{game.phase === 'mull' ? 'Starthände: Mulligan oder behalten' : `${pname(game.players[game.active])} ist am Zug`}</span>
+        <span className="muted">{game.phase === 'mull' ? 'Starthände: Mulligan oder behalten' : `${who(P(game, game.active) || me)} ${game.active === meId ? 'bist' : 'ist'} am Zug`}</span>
         <span className="spacer" />
-        {game.phase === 'play' && <button className="btn primary" onClick={nextTurn}>Zug beenden →</button>}
-        <button className="btn" disabled={!hist.current.length} onClick={undo} title="Strg+Z">↶ Rückgängig</button>
+        {game.phase === 'play' && (!online || game.active === meId) && <button className="btn primary" onClick={nextTurn}>Zug beenden →</button>}
+        {!online && <button className="btn" disabled={!hist.current.length} onClick={undo} title="Strg+Z">↶ Rückgängig</button>}
         <button className={`btn ${showLog ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); setShowLog((s) => !s) }}>Protokoll</button>
-        <button className="btn" onClick={() => setEnding(true)}>Test beenden</button>
+        {online
+          ? <button className="btn" onClick={online.leave}>{online.isHost ? 'Tisch beenden' : 'Tisch verlassen'}</button>
+          : <button className="btn" onClick={() => setEnding(true)}>Test beenden</button>}
       </div>
       <p className="muted small pt-help">Karte antippen = Aktionen · Doppelklick = tappen bzw. ausspielen · am PC Karten zwischen Zonen ziehen · Strg+Z = rückgängig</p>
 
       {game.attack && (() => {
-        const a = game.attack; const from = game.players[a.from]; const to = game.players[a.target]
+        const a = game.attack; const from = P(game, a.from); const to = P(game, a.target)
         const dmg = a.list.filter((x) => !x.blocked).reduce((t, x) => t + x.pow, 0)
         return (
           <div className="pt-attack" onClick={(e) => e.stopPropagation()}>
@@ -609,16 +557,16 @@ function Table({ game, setGame, deck, onUpdate }) {
         </div>
       )}
 
-      {viewer && <ZoneViewer game={game} viewer={viewer} onClose={() => setViewer(null)} move={move} shuffleLib={shuffleLib} setBig={setBig} pname={pname} />}
-      {tokenFor != null && <TokenDialog player={game.players[tokenFor]} onClose={() => setTokenFor(null)} onMake={(t, n) => { makeToken(tokenFor, t, n); setTokenFor(null) }} />}
+      {viewer && <ZoneViewer game={game} viewer={viewer} onClose={() => setViewer(null)} move={move} shuffleLib={shuffleLib} setBig={setBig} pname={pname} readOnly={ro(P(game, viewer.pid))} />}
+      {tokenFor != null && <TokenDialog player={P(game, tokenFor)} isMe={tokenFor === meId} onClose={() => setTokenFor(null)} onMake={(t, n) => { makeToken(tokenFor, t, n); setTokenFor(null) }} />}
       {big && <div className="pt-big" onClick={() => setBig(null)}><img src={big.replace('/normal/', '/large/')} alt="" /></div>}
       {ending && <EndDialog game={game} pname={pname} onClose={() => setEnding(false)} onSave={finish} onDiscard={() => setGame(null)} />}
     </div>
   )
 }
 
-function ZoneViewer({ game, viewer, onClose, move, shuffleLib, setBig, pname }) {
-  const p = game.players[viewer.pid]
+function ZoneViewer({ game, viewer, onClose, move, shuffleLib, setBig, pname, readOnly }) {
+  const p = game.players.find((x) => x.id === viewer.pid)
   const all = p.z[viewer.zone]
   const list = viewer.zone === 'lib' && viewer.top ? all.slice(0, viewer.top) : viewer.zone === 'lib' ? [...all].sort((a, b) => a.name.localeCompare(b.name)) : all
   const targets = ['hand', 'bf', 'gy', 'ex'].filter((z) => z !== viewer.zone)
@@ -631,11 +579,11 @@ function ZoneViewer({ game, viewer, onClose, move, shuffleLib, setBig, pname }) 
           {list.map((c) => (
             <div key={c.uid} className="pt-vcard">
               {c.img ? <img src={c.img} alt={c.name} onClick={() => setBig(c.img)} /> : <div className="pt-noimg"><b>{c.name}</b></div>}
-              <div className="pt-vbtns">
+              {!readOnly && <div className="pt-vbtns">
                 {targets.map((z) => <button key={z} onClick={() => move(p.id, viewer.zone, c.uid, z)}>{ZONES[z]}</button>)}
                 {viewer.zone !== 'lib' && <button onClick={() => move(p.id, viewer.zone, c.uid, 'lib', 'top')}>Bibl. oben</button>}
                 <button onClick={() => move(p.id, viewer.zone, c.uid, 'lib', 'bottom')}>Bibl. unten</button>
-              </div>
+              </div>}
             </div>
           ))}
         </div>
@@ -648,7 +596,7 @@ function ZoneViewer({ game, viewer, onClose, move, shuffleLib, setBig, pname }) 
   )
 }
 
-function TokenDialog({ player, onClose, onMake }) {
+function TokenDialog({ player, isMe, onClose, onMake }) {
   const [list, setList] = useState(null)
   const [name, setName] = useState('')
   const [pt, setPt] = useState('1/1')
@@ -657,7 +605,7 @@ function TokenDialog({ player, onClose, onMake }) {
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal pt-viewer" onClick={(e) => e.stopPropagation()}>
-        <h3>Token erstellen – {player.id === 0 ? 'Du' : player.label}</h3>
+        <h3>Token erstellen – {isMe ? 'Du' : player.label}</h3>
         <div className="pt-tokform">
           Anzahl <input type="number" min="1" max="50" value={n} onChange={(e) => setN(Math.max(1, Number(e.target.value) || 1))} />
         </div>
@@ -685,7 +633,8 @@ function TokenDialog({ player, onClose, onMake }) {
 }
 
 function EndDialog({ game, pname, onClose, onSave, onDiscard }) {
-  const [result, setResult] = useState(game.players[0].life <= 0 ? 'loss' : game.players.slice(1).every((p) => p.life <= 0) ? 'win' : null)
+  const me = game.players.find((p) => p.id === (game.me ?? 0))
+  const [result, setResult] = useState(me.life <= 0 ? 'loss' : game.players.filter((p) => p !== me).every((p) => p.life <= 0) ? 'win' : null)
   const [note, setNote] = useState('')
   return (
     <div className="modal-bg" onClick={onClose}>

@@ -754,3 +754,15 @@ header .user { flex: none; }
 .forge-gallery { display: grid; grid-template-columns: 0.42fr 1fr; gap: 14px; margin: 14px 0 8px; align-items: start; }
 .forge-step p { margin-bottom: 0; }
 @media (max-width: 900px) { .forge-gallery { grid-template-columns: 1fr; } .forge-shot.small { max-width: 320px; } }
+
+/* Online-Spieltisch */
+.ot-lobby { border: 1px solid var(--gold-deep); background: #151412; padding: 12px 14px; margin-bottom: 18px; max-width: 1000px; }
+.beta-chip { background: #2a2416; border-color: var(--gold-dim); color: var(--accent); margin-left: 8px; vertical-align: middle; }
+.ot-invite { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 10px; margin: 6px 0; border: 1px solid #7a6230; background: #1d1a12; }
+.ot-invite.mine { border-color: var(--line); background: #171614; }
+.ot-invite b { font-family: var(--title); color: #f1e6c8; }
+.ot-new { margin-top: 8px; }
+.ot-friends { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 6px 0 10px; }
+.ot-seats { list-style: none; padding: 0; margin: 6px 0; }
+.ot-seats li { padding: 4px 0; display: flex; gap: 8px; align-items: center; }
+.ot-hint { margin: 0 0 6px; }
