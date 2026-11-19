@@ -46,6 +46,12 @@ export default function ArenaLobby({ deck, decks, cards, uid, myName, onAddResul
       setPick({}); setPlaying({ roomId: id, deckId: deck.id })
     } catch (e) { setErr('Tisch konnte nicht angelegt werden: ' + e.message) } finally { setBusy(false) }
   }
+  // Alleine ausprobieren: Tisch nur mit dir, startet sofort
+  const solo = async () => {
+    setBusy(true); setErr('')
+    try { const id = await createRoom(uid, name, deck, cmdName(deck, cards), []); setPlaying({ roomId: id, deckId: deck.id }) }
+    catch (e) { setErr('Tisch konnte nicht angelegt werden: ' + e.message) } finally { setBusy(false) }
+  }
   const join = async (r) => {
     const d = decks[joinDeck[r.id] || deck.id]
     setBusy(true); setErr('')
@@ -84,7 +90,10 @@ export default function ArenaLobby({ deck, decks, cards, uid, myName, onAddResul
           <div className="ot-friends">
             {fr.map(([k, v]) => <label key={k} className="chk"><input type="checkbox" checked={!!pick[k]} onChange={() => setPick({ ...pick, [k]: !pick[k] })} /> {v.name}</label>)}
           </div>
-          <button className="btn primary" disabled={busy || !fr.length} onClick={create}>Tisch eröffnen &amp; einladen</button>
+          <div className="pt-setup-actions">
+            <button className="btn primary" disabled={busy || !fr.length} onClick={create}>Tisch eröffnen &amp; einladen</button>
+            <button className="btn" disabled={busy} onClick={solo} title="Tisch nur mit dir – zum Ausprobieren von Ziehen, Stack, Manapool, Ländern, Token usw.">Alleine ausprobieren</button>
+          </div>
         </div>
       )}
       {games.length > 0 && (
