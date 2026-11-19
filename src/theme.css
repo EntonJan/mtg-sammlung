@@ -734,3 +734,23 @@ header .user { flex: none; }
 .pt-site b { font-family: var(--title); font-size: 18px; color: var(--accent); }
 .pt-site .btn { margin-top: auto; align-self: flex-start; }
 .pt-site .ok { color: #8fc78a; }
+
+/* Testspiel: Forge-Erklärung */
+.forge { max-width: 1000px; }
+.forge-hero { display: grid; grid-template-columns: 1fr 1.1fr; gap: 22px; align-items: center; margin-bottom: 8px; }
+.forge-hero h3 { font-family: var(--title); font-size: 26px; color: #f1e6c8; margin: 0 0 8px; font-weight: 600; }
+.forge-hero p { line-height: 1.5; margin: 0 0 10px; }
+.forge-hero .ok { color: #8fc78a; margin-top: 8px; }
+.forge-shot { margin: 0; border: 1px solid var(--gold-deep); outline: 1px solid #2a251c; outline-offset: 3px; }
+.forge-shot img { width: 100%; display: block; }
+.forge-shot figcaption { font-size: 12.5px; color: var(--muted); padding: 5px 8px; }
+.forge-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.forge-step { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); background: #161513; }
+.forge-step .n { flex: none; width: 28px; height: 28px; border: 1px solid var(--gold-dim); border-radius: 50%; display: grid; place-items: center; font-family: var(--title); color: var(--accent); }
+.forge-step b { font-family: var(--title); font-size: 17px; color: #f1e6c8; }
+.forge-step p { margin: 4px 0 8px; line-height: 1.45; }
+.forge-step img { max-width: 100%; max-height: 220px; display: block; border: 1px solid var(--gold-deep); }
+@media (max-width: 900px) { .forge-hero, .forge-steps { grid-template-columns: 1fr; } }
+.forge-gallery { display: grid; grid-template-columns: 0.42fr 1fr; gap: 14px; margin: 14px 0 8px; align-items: start; }
+.forge-step p { margin-bottom: 0; }
+@media (max-width: 900px) { .forge-gallery { grid-template-columns: 1fr; } .forge-shot.small { max-width: 320px; } }
