@@ -10,6 +10,8 @@ export default {
   content: ['./src/arena/**/*.{js,jsx}'],
   important: '.arena-root',
   corePlugins: { preflight: false },
+  // Zur Laufzeit zusammengesetzte Klassen (Hellsicht/Überwachen-Fenster)
+  safelist: ['blue', 'purple', 'yellow'].flatMap((c) => [`border-${c}-500/60`, `text-${c}-400`, `bg-${c}-600`, `hover:bg-${c}-500`]),
   theme: {
     extend: {
       colors: {

@@ -43,3 +43,4 @@ body.arena-open { overflow: hidden; }
     radial-gradient(circle at 50% 50%, transparent 0 22%, rgba(212,180,106,.25) 23% 24%, transparent 25%),
     repeating-linear-gradient(45deg, #1d1912 0 6px, #16130e 6px 12px); box-shadow: inset 0 0 0 3px #0d0c0a, inset 0 0 0 4px rgba(212,180,106,.4); }
 .arena-root .arena-noimg { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; font-size: 10px; color: #e8dfc8; background: #1d1b17; border: 1px solid #5e4f2c; border-radius: inherit; }
+@media (hover: none) { .arena-root .touch-show { opacity: 1 !important; } }

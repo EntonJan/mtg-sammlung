@@ -1,7 +1,7 @@
 // Räume für den Spieltisch (gleiches Datenmodell wie in der MTG Lounge, ergänzt um Einladungen)
 //   arena_rooms/{id}                    – host, players[], invited[], maxPlayers, playerInfo{uid:{name,deckId,deckName,commanderName}}, seatOrder, stack, combat, …
 //   arena_rooms/{id}/game_state/{uid}   – Zustand eines Spielers
-import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 import { db } from '../firebase'
 
 // Vorerst nur für ausgewählte Konten (Freigabe: ARENA_ALL = true)
@@ -39,16 +39,36 @@ export async function leaveRoom(id, me) {
   const r = snap.data()
   const rest = r.players.filter((p) => p !== me)
   const pi = { ...(r.playerInfo || {}) }; delete pi[me]
-  if (!rest.length) { await deleteDoc(ref).catch(() => updateDoc(ref, { players: [], playerInfo: {}, emptyAt: Date.now() })) }
-  else await updateDoc(ref, { players: rest, playerInfo: pi, invited: (r.invited || []).filter((p) => p !== me) })
+  if (!rest.length) { await deleteDoc(ref).catch(() => updateDoc(ref, { players: [], playerInfo: {}, emptyAt: Date.now() }).catch(() => {})) }
+  else {
+    // war ich am Zug, geht der Zug an den nächsten anwesenden Spieler
+    const patch = { players: rest, playerInfo: pi, invited: (r.invited || []).filter((p) => p !== me) }
+    if (r.activePlayer === me && Array.isArray(r.seatOrder)) {
+      const i = r.seatOrder.indexOf(me)
+      for (let k = 1; k <= r.seatOrder.length; k++) { const c = r.seatOrder[(i + k) % r.seatOrder.length]; if (rest.includes(c)) { patch.activePlayer = c; break } }
+    }
+    await updateDoc(ref, patch)
+  }
 }
 
-export async function cancelRoom(id) { await deleteDoc(doc(db, 'arena_rooms', id)) }
+// Tisch auflösen (Gastgeber): erst alle Spielzustände, dann den Raum löschen
+export async function cancelRoom(id) {
+  try { const st = await getDocs(collection(db, 'arena_rooms', id, 'game_state')); await Promise.all(st.docs.map((d) => deleteDoc(d.ref))) } catch (e) { console.warn(e) }
+  await deleteDoc(doc(db, 'arena_rooms', id))
+}
+
+// Mit den Anwesenden beginnen, wenn nicht alle Eingeladenen kommen
+export async function startNow(id) {
+  const ref = doc(db, 'arena_rooms', id)
+  const r = (await getDoc(ref)).data()
+  // Einladungen der Fehlenden zurücknehmen, damit sie keinen vollen Tisch mehr angeboten bekommen
+  await updateDoc(ref, { maxPlayers: r.players.length, invited: (r.invited || []).filter((p) => r.players.includes(p)) })
+}
 
 // Meine Tische und Einladungen
 export function watchRooms(uid, cb) {
   const res = { mine: [], inv: [] }
-  const emit = () => cb({ mine: res.mine, inv: res.inv.filter((r) => !r.players.includes(uid)) })
+  const emit = () => cb({ mine: res.mine, inv: res.inv.filter((r) => !r.players.includes(uid) && r.players.length < (r.maxPlayers || 2)) })
   const map = (s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))
   try {
     const a = onSnapshot(query(collection(db, 'arena_rooms'), where('players', 'array-contains', uid)), (s) => { res.mine = map(s); emit() }, () => {})

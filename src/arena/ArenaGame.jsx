@@ -11,6 +11,19 @@ let arenaUser = null
 export const setArenaUser = (u) => { arenaUser = u }
 // Rückmeldungen an die App (Ergebnis speichern usw.)
 export const arenaHooks = {}
+// Ergebnis einmal pro Spieler und Tisch ins eigene Deck melden. Teilnehmer kommen aus dem Ergebnis selbst
+// (beim Melden festgehalten), weil Mitspieler den Raum schon verlassen haben können.
+const reportResult = (roomId, me, gr, fallbackInfo, fallbackPlayers) => {
+  if (!gr || !arenaHooks.onResult) return
+  window.__arenaSaved = window.__arenaSaved || {}
+  if (window.__arenaSaved[roomId]) return
+  window.__arenaSaved[roomId] = true
+  const info = gr.participants || fallbackInfo || {}
+  const ids = Object.keys(info).length ? Object.keys(info) : (fallbackPlayers || [])
+  const w = gr.winner
+  const opponents = ids.filter((p) => p !== me).map((p) => ({ uid: p, name: info[p]?.name || '?', deck: info[p]?.deckName || '?', commander: info[p]?.commanderName || '' }))
+  Promise.resolve(arenaHooks.onResult({ result: !w || w === 'draw' ? 'draw' : w === me ? 'win' : 'loss', winnerName: w && w !== 'draw' ? (info[w]?.name || '?') : null, opponents, players: ids.length })).catch(console.error)
+}
 // Firestore lehnt „undefined“ ab (z. B. Karten ohne Stärke/Loyalität/Rückseite) – vor jedem Schreiben entfernen.
 // Sonderwerte wie increment() sind keine einfachen Objekte und bleiben unangetastet.
 const isPlain = (v) => v !== null && typeof v === 'object' && (Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype)
@@ -112,7 +125,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
         // Used to decide where a card played from hand should go: lands go straight to the battlefield,
         // everything else goes onto the shared stack first.
-        const isLand = (card) => /\bLand\b/i.test(card?.type_line || '');
+        const isLand = (card) => /\bLand\b/i.test((card?.card_faces?.[0]?.type_line) || (card?.type_line || '').split(' // ')[0]);
         const BASIC_SUBTYPES = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
 
         // Detects what kind of ETB effect a land has so we can handle it interactively.
@@ -459,47 +472,6 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             return found;
         };
 
-        const Header = ({ user, selectedDeck }) => {
-            const displayName = user.displayName || user.email.split('@')[0];
-            const hexId = user.uid.substring(0, 9).toUpperCase();
-
-            return (
-                <header className="bg-gray-800 shadow-md p-4 flex-shrink-0 border-b border-gray-700 z-50 relative">
-                    <div className="max-w-7xl mx-auto flex justify-between items-center h-full">
-                        <div className="flex items-center space-x-4">
-                            <h1 className="text-2xl font-bold text-red-400 tracking-tight">Arena</h1>
-                            <button onClick={() => window.location.href = 'homescreen.html'} className="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded-full transition-colors shadow-sm" title="Home Menu">
-                                <Icon name="home" className="w-5 h-5" />
-                            </button>
-                        </div>
-                        {selectedDeck && (
-                            <div className="hidden md:flex flex-col items-center absolute left-1/2 transform -translate-x-1/2">
-                                 <span className="text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Spielt mit</span>
-                                 <span className="text-yellow-400 font-bold text-lg leading-none">{selectedDeck.name}</span>
-                            </div>
-                        )}
-                        <div className="text-right text-sm">
-                            <div className="flex items-center justify-end space-x-2">
-                                 <span className="font-semibold text-white cursor-pointer hover:text-red-300" onClick={async () => {
-                                     const newName = prompt(`Enter new display name:`);
-                                     if (newName && newName.trim()) {
-                                         try { await window.updateProfile(user, { displayName: newName.trim() }); window.location.reload(); } catch(e) {}
-                                     }
-                                 }}>{displayName}</span>
-                                 <span className="text-gray-500">| {hexId}</span>
-                            </div>
-                             <div className="flex items-center justify-end space-x-2 mt-1">
-                                <span className="text-xs text-gray-500">{user.email}</span>
-                                <button onClick={() => window.signOut(window.auth).then(() => window.location.href = 'index.html')} className="text-red-400 hover:text-red-300 text-xs flex items-center">
-                                    <Icon name="log-out" className="w-3 h-3 mr-1" /> Logout
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </header>
-            );
-        };
-
         const CardImage = ({ src, alt, className, style, onClick, onContextMenu, onMouseEnter, onMouseLeave, isBack = false }) => {
             const imageSrc = isBack ? null : src;
             return (
@@ -566,8 +538,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         ) : (
                             <>
                                 <p className="text-gray-300 text-sm text-center">
-                                    Choose {cardsToBottom} card{cardsToBottom > 1 ? 's' : ''} to put on the bottom of your library.
-                                    <br/>Selected: {bottomingSelection.length}/{cardsToBottom}
+                                    Wähle {cardsToBottom} Karte{cardsToBottom > 1 ? 'n' : ''}, die unter deine Bibliothek kommt{cardsToBottom > 1 ? 'en' : ''}.
+                                    <br/>Ausgewählt: {bottomingSelection.length}/{cardsToBottom}
                                 </p>
                                 <div className="flex gap-2 flex-wrap justify-center">
                                     {hand.map(card => {
@@ -814,7 +786,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 </h2>
                                 <p className="text-gray-400 text-sm mt-0.5">
                                     {remaining > 0
-                                        ? `Select ${remaining} more land${remaining > 1 ? 's' : ''}${type === 'specific_two' && selected.length === 1 ? ` (need a ${subtypes.find(s => !new RegExp(`\\b${s}\\b`,'i').test(selected[0]?.type_line||''))})` : ''}`
+                                        ? `Noch ${remaining} Land${remaining > 1 ? 'er' : ''} wählen${type === 'specific_two' && selected.length === 1 ? ` (need a ${subtypes.find(s => !new RegExp(`\\b${s}\\b`,'i').test(selected[0]?.type_line||''))})` : ''}`
                                         : 'Confirming…'
                                     }
                                 </p>
@@ -918,7 +890,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             disabled={selected.size !== excess}
                             className={`font-bold px-8 py-3 rounded-lg shadow-lg text-white transition-colors ${selected.size === excess ? 'bg-red-600 hover:bg-red-500' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
                         >
-                            Discard {excess} card{excess !== 1 ? 's' : ''} and end turn
+                            {excess} Karte{excess !== 1 ? 'n' : ''} abwerfen und Zug beenden
                         </button>
                     </div>
                 </div>
@@ -934,7 +906,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
             const allDecided = cards.every(c => decisions[c.instanceId]);
 
-            const modeLabel = mode === 'scry' ? 'Scry' : mode === 'surveil' ? 'Surveil' : 'Bibliothek – oberste Karten';
+            const modeLabel = mode === 'scry' ? 'Hellsicht' : mode === 'surveil' ? 'Überwachen' : 'Bibliothek – oberste Karten';
             const modeColor = mode === 'scry' ? 'blue' : mode === 'surveil' ? 'purple' : 'yellow';
 
             const btnBase = 'px-3 py-1.5 rounded text-xs font-bold transition-colors border-2';
@@ -952,7 +924,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
                     <div className={`bg-gray-900 border-2 border-${modeColor}-500/60 rounded-xl shadow-2xl w-full max-w-5xl flex flex-col`} style={{ maxHeight: '90vh' }}>
                         <div className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
-                            <h2 className={`text-xl font-bold text-${modeColor}-400`}>{modeLabel} — {cards.length} card{cards.length !== 1 ? 's' : ''}</h2>
+                            <h2 className={`text-xl font-bold text-${modeColor}-400`}>{modeLabel} – {cards.length} Karte{cards.length !== 1 ? 'n' : ''}</h2>
                             <div className="flex gap-2 items-center">
                                 {mode === 'look' && (
                                     <button
@@ -971,7 +943,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     disabled={!allDecided}
                                     className={`px-5 py-2 rounded-lg font-bold text-white transition-colors ${allDecided ? `bg-${modeColor}-600 hover:bg-${modeColor}-500` : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
                                 >
-                                    {allDecided ? 'Bestätigen' : `Decide all ${cards.filter(c => !decisions[c.instanceId]).length} remaining`}
+                                    {allDecided ? 'Bestätigen' : `Noch ${cards.filter(c => !decisions[c.instanceId]).length} offen`}
                                 </button>
                                 <button onClick={onCancel} className="text-gray-400 hover:text-white text-lg px-2">✕</button>
                             </div>
@@ -985,20 +957,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                             <img src={card.image_url} alt={card.name} className="w-24 rounded shadow-lg" />
                                             <div className="flex flex-col gap-1 w-full">
                                                 {mode === 'scry' && <>
-                                                    {btn(card.instanceId, 'top', '▲ Top', { active: 'bg-blue-600 border-blue-400 text-white', inactive: 'border-yellow-800 text-blue-400 hover:bg-gray-900' })}
-                                                    {btn(card.instanceId, 'bottom', '▼ Bottom', { active: 'bg-gray-600 border-gray-400 text-white', inactive: 'border-gray-700 text-gray-400 hover:bg-gray-800' })}
+                                                    {btn(card.instanceId, 'top', '▲ Oben', { active: 'bg-blue-600 border-blue-400 text-white', inactive: 'border-yellow-800 text-blue-400 hover:bg-gray-900' })}
+                                                    {btn(card.instanceId, 'bottom', '▼ Unten', { active: 'bg-gray-600 border-gray-400 text-white', inactive: 'border-gray-700 text-gray-400 hover:bg-gray-800' })}
                                                 </>}
                                                 {mode === 'surveil' && <>
-                                                    {btn(card.instanceId, 'top', '▲ Top', { active: 'bg-purple-600 border-purple-400 text-white', inactive: 'border-purple-800 text-purple-400 hover:bg-purple-900' })}
-                                                    {btn(card.instanceId, 'graveyard', '💀 GY', { active: 'bg-red-700 border-red-500 text-white', inactive: 'border-yellow-800 text-red-400 hover:bg-gray-900' })}
+                                                    {btn(card.instanceId, 'top', '▲ Oben', { active: 'bg-purple-600 border-purple-400 text-white', inactive: 'border-purple-800 text-purple-400 hover:bg-purple-900' })}
+                                                    {btn(card.instanceId, 'graveyard', '💀 Friedhof', { active: 'bg-red-700 border-red-500 text-white', inactive: 'border-yellow-800 text-red-400 hover:bg-gray-900' })}
                                                 </>}
                                                 {mode === 'look' && <>
-                                                    {btn(card.instanceId, 'top', '▲ Top', { active: 'bg-yellow-600 border-yellow-400 text-white', inactive: 'border-yellow-800 text-yellow-400 hover:bg-yellow-900' })}
+                                                    {btn(card.instanceId, 'top', '▲ Oben', { active: 'bg-yellow-600 border-yellow-400 text-white', inactive: 'border-yellow-800 text-yellow-400 hover:bg-yellow-900' })}
                                                     {btn(card.instanceId, 'hand', '✋ Hand', { active: 'bg-blue-600 border-blue-400 text-white', inactive: 'border-yellow-800 text-blue-400 hover:bg-gray-900' })}
                                                     {btn(card.instanceId, 'battlefield', '⚔️ Battlefield', { active: 'bg-green-600 border-green-400 text-white', inactive: 'border-green-800 text-green-400 hover:bg-green-900' })}
                                                     {btn(card.instanceId, 'reveal', '👁 Reveal+Hand', { active: 'bg-teal-600 border-teal-400 text-white', inactive: 'border-teal-800 text-teal-400 hover:bg-teal-900' })}
-                                                    {btn(card.instanceId, 'graveyard', '💀 GY', { active: 'bg-red-800 border-red-600 text-white', inactive: 'border-yellow-800 text-red-400 hover:bg-gray-900' })}
-                                                    {btn(card.instanceId, 'bottom', '▼ Bottom', { active: 'bg-gray-600 border-gray-400 text-white', inactive: 'border-gray-700 text-gray-400 hover:bg-gray-800' })}
+                                                    {btn(card.instanceId, 'graveyard', '💀 Friedhof', { active: 'bg-red-800 border-red-600 text-white', inactive: 'border-yellow-800 text-red-400 hover:bg-gray-900' })}
+                                                    {btn(card.instanceId, 'bottom', '▼ Unten', { active: 'bg-gray-600 border-gray-400 text-white', inactive: 'border-gray-700 text-gray-400 hover:bg-gray-800' })}
                                                 </>}
                                                 {dec && <div className="text-center text-[10px] text-green-400 font-bold mt-1">✓ {dec.replace('_random','')}</div>}
                                             </div>
@@ -1041,6 +1013,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const [quantity, setQuantity] = useState(1);
             const [colors, setColors] = useState(['W']);
             const [targetPlayerId, setTargetPlayerId] = useState(myUid);
+            // Beim Öffnen wieder für dich selbst und 1 Stück – sonst landet ein Token versehentlich beim Gegner
+            useEffect(() => { if (isOpen) { setTargetPlayerId(myUid); setQuantity(1) } }, [isOpen, myUid]);
 
             const toggleColor = (c) => {
                 setColors(prev => 
@@ -1082,7 +1056,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-1">Stärke/Widerstand</label>
-                                <input type="text" value={stats} onChange={e => setStats(e.target.value)} className="bg-gray-700 border border-gray-600 p-2 rounded w-full text-white" placeholder="e.g., 1/1" />
+                                <input type="text" value={stats} onChange={e => setStats(e.target.value)} className="bg-gray-700 border border-gray-600 p-2 rounded w-full text-white" placeholder="z. B. 1/1" />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-1">Anzahl</label>
@@ -1112,7 +1086,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         </div>
 
                         <button onClick={handleSubmit} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg transition-colors w-full mt-4">
-                            Create {quantity} Token(s)
+                            {quantity} Token erstellen
                         </button>
                     </div>
                 </Modal>
@@ -1156,7 +1130,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         {counterPicker ? (
                             <div className="p-3">
                                 <div className="text-xs text-gray-400 font-bold uppercase tracking-wide mb-2">
-                                    {counterPicker.mode === 'add' ? `Add ${counterPicker.type} counters` : `Remove ${counterPicker.type} counters`}
+                                    {counterPicker.mode === 'add' ? `${counterPicker.type}-Marker hinzufügen` : `${counterPicker.type}-Marker entfernen`}
                                 </div>
                                 <div className="flex gap-2 mb-2">
                                     {[1, 2, 3, 5].map(n => (
@@ -1304,7 +1278,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         {(state.emblems || []).length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1">
                                 {state.emblems.map(e => (
-                                    <span key={e.instanceId} className="bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[9px] font-bold px-1 py-0.5 rounded" title={e.stage > 0 ? e.stageText[e.stage - 1] : 'Just created'}>
+                                    <span key={e.instanceId} className="bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[9px] font-bold px-1 py-0.5 rounded" title={e.stage > 0 ? e.stageText[e.stage - 1] : 'Gerade erstellt'}>
                                         {e.name} {e.maxStage > 1 ? `${e.stage}/${e.maxStage}` : ''}
                                     </span>
                                 ))}
@@ -1591,7 +1565,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         <div style={{ color:'#9ca3af', fontSize:11, marginBottom:10 }}>
                             {pendingBlocker
                                 ? `"${pendingBlocker.name}" selected — click an attacker to block it`
-                                : 'Click one of your creatures to select it as a blocker, then click the attacker'}
+                                : 'Klicke eine deiner Kreaturen als Blocker an, dann den Angreifer'}
                         </div>
                         {/* My creatures — only valid blockers are clickable */}
                         <div style={{ marginBottom:8 }}>
@@ -1649,7 +1623,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
                             <button onClick={onPassPriority}
                                 style={{ background:'#d97706', color:'white', border:'none', borderRadius:6, padding:'6px 14px', cursor:'pointer', fontSize:12, fontWeight:'bold' }}>
-                                ✓ No Blocker / Pass Priority
+                                ✓ Kein Blocker / Priorität abgeben
                             </button>
                         </div>
                     </div>
@@ -1699,7 +1673,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     <div style={{ position:'fixed', inset:0, zIndex:500, background:'rgba(0,0,0,0.85)', display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
                         <div style={{ background:'#1f2937', border:'2px solid #22c55e', borderRadius:16, padding:20, minWidth:500, maxWidth:800, maxHeight:'85vh', overflowY:'auto', boxShadow:'0 20px 50px rgba(0,0,0,0.9)' }}>
                             <div style={{ color:'#4ade80', fontWeight:'bold', fontSize:16, marginBottom:4 }}>
-                                💥 {hasAnyFirstStrike && stepsNeeded > 1 ? (damageStep === 0 ? '⚡ First Strike Damage' : 'Normal Damage') : 'Assign Combat Damage'}
+                                💥 {hasAnyFirstStrike && stepsNeeded > 1 ? (damageStep === 0 ? '⚡ Erstschlag-Schaden' : 'Normaler Schaden') : 'Kampfschaden verteilen'}
                             </div>
                             <div style={{ color:'#6b7280', fontSize:12, marginBottom:16 }}>
                                 {hasAnyFirstStrike && damageStep === 0
@@ -1765,7 +1739,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                 ) : (
                                                     <div style={{ flex:1 }}>
                                                         <div style={{ color:'#f87171', fontSize:12 }}>
-                                                            Unblocked — deals {atkP} damage to{' '}
+                                                            Ungeblockt – macht {atkP} Schaden an{' '}
                                                             {atk.targetPlayerId?.startsWith('pw_')
                                                                 ? (opponentNames?.[atk.targetPlayerId] || '🌟 Planeswalker')
                                                                 : atk.targetPlayerId
@@ -1804,7 +1778,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     }
                                 }} disabled={!allAssigned}
                                     style={{ background: allAssigned ? '#16a34a' : '#374151', color: allAssigned ? 'white' : '#6b7280', border:'none', borderRadius:6, padding:'8px 16px', cursor: allAssigned ? 'pointer' : 'not-allowed', fontSize:12, fontWeight:'bold' }}>
-                                    {hasAnyFirstStrike && damageStep === 0 && stepsNeeded > 1 ? '⚡ Resolve First Strike →' : 'Resolve Damage →'}
+                                    {hasAnyFirstStrike && damageStep === 0 && stepsNeeded > 1 ? '⚡ Erstschlag auflösen →' : 'Schaden auflösen →'}
                                 </button>
                             </div>
                         </div>
@@ -1939,8 +1913,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         {img()}
                         <div>
                             <p style={{ color:'#d1d5db', fontSize:13, marginBottom:6 }}>
-                                {type === 'scry' && 'Enters tapped, then Scry 1.'}
-                                {type === 'surveil' && 'Enters tapped, then Surveil 1.'}
+                                {type === 'scry' && 'Kommt getappt ins Spiel, dann Hellsicht 1.'}
+                                {type === 'surveil' && 'Kommt getappt ins Spiel, dann Überwachen 1.'}
                                 {type === 'triome' && 'Enters tapped.'}
                                 {(type === 'check' || type === 'fast' || type === 'slow') && `Enters tapped (condition not met).`}
                             </p>
@@ -1948,7 +1922,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         </div>
                     </div>
                     <button onClick={() => onResolve(true)} style={{ background:'#15803d', color:'white', border:'none', borderRadius:6, padding:'8px 20px', cursor:'pointer', fontWeight:'bold', fontSize:13 }}>
-                        Place Tapped {type === 'scry' ? '→ then Scry 1' : type === 'surveil' ? '→ then Surveil 1' : ''}
+                        Getappt legen {type === 'scry' ? '→ dann Hellsicht 1' : type === 'surveil' ? '→ dann Überwachen 1' : ''}
                     </button>
                 </div>
             );
@@ -2051,7 +2025,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // { card, zone, ability: { type, subtypes, count }, selected: [] }
             // null = not in card-selection mode; array of selected instanceIds while choosing cards to bottom.
             const [bottomingCards, setBottomingCards] = useState(null);
-            const [startGameModalDismissed, setStartGameModalDismissed] = useState(false);
+            const [startGameModalDismissed, setStartGameModalDismissedRaw] = useState(() => { try { return sessionStorage.getItem('arena-start-' + roomId) === '1' } catch { return false } });
+            const setStartGameModalDismissed = (v) => { try { if (v) sessionStorage.setItem('arena-start-' + roomId, '1') } catch {} setStartGameModalDismissedRaw(v) };
             // null = no prompt; otherwise the tokenSpec of an Aura token waiting for me to choose a creature.
             const [auraAttachPrompt, setAuraAttachPrompt] = useState(null);
             const [emblemModalOpen, setEmblemModalOpen] = useState(false);
@@ -2144,13 +2119,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         // of several opponents in a 3-4 player game who never got around to clicking Confirm
                         // themselves - should leave automatically instead of being stuck waiting forever.
                         if (data.gameResult && data.gameResult.confirmed) {
-                            // Ergebnis einmal pro Spieler ins eigene Deck schreiben
-                            if (!window.__arenaSaved?.[roomId]) {
-                                window.__arenaSaved = { ...(window.__arenaSaved || {}), [roomId]: true };
-                                const info = data.playerInfo || {}; const w = data.gameResult.winner;
-                                const opponents = (data.players || []).filter((p) => p !== user.uid).map((p) => ({ uid: p, name: info[p]?.name || '?', deck: info[p]?.deckName || '?', commander: info[p]?.commanderName || '' }));
-                                Promise.resolve(arenaHooks.onResult?.({ result: !w || w === 'draw' ? 'draw' : w === user.uid ? 'win' : 'loss', winnerName: w && w !== 'draw' ? (info[w]?.name || '?') : null, opponents, players: (data.players || []).length })).catch(console.error);
-                            }
+                            reportResult(roomId, user.uid, data.gameResult, data.playerInfo, data.players);
                             setLeaveGameModal(false);
                             onLeave();
                         }
@@ -2408,8 +2377,9 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     updateDoc(roomRef, { deathRequests: (lobbyState?.deathRequests || []).filter(r => r.targetPlayerId !== user.uid) });
                     return;
                 }
-                const enduringCards = deadCards.filter(hasEnduringAbility);
-                const normalDead = deadCards.filter(c => !hasEnduringAbility(c));
+                const enduringCards = deadCards.filter(c => !c.isToken && !c.isCommander && hasEnduringAbility(c));
+                const cmdDead = deadCards.filter(c => c.isCommander);
+                const normalDead = deadCards.filter(c => !c.isToken && !c.isCommander && !hasEnduringAbility(c));
                 const returned = enduringCards.map(c => ({
                     ...c, isTapped: false,
                     type_line: c.type_line?.replace(/Enchantment Creature/i, 'Enchantment').replace(/\bCreature\b/i, '').trim() || 'Enchantment',
@@ -2418,8 +2388,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 updateDoc(myStateRef, {
                     battlefieldLower: [...bfLower.filter(c => !deadIds.has(c.instanceId)), ...returned],
                     battlefieldUpper: bfUpper.filter(c => !deadIds.has(c.instanceId)),
-                    graveyard: [...normalDead, ...(myState.graveyard || [])]
+                    graveyard: [...normalDead, ...(myState.graveyard || [])],
+                    ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...c, isTapped: false, counters: [], attachments: [] })), ...(myState.commandZone || [])] } : {})
                 });
+                if (cmdDead.length) addToast(`👑 ${cmdDead.map(c => c.name).join(', ')} zurück in die Commander-Zone`, 'blue');
                 updateDoc(roomRef, { deathRequests: (lobbyState?.deathRequests || []).filter(r => r.targetPlayerId !== user.uid) });
                 if (normalDead.length) addToast(`💀 ${normalDead.map(c => c.name).join(', ')} → Friedhof`, 'red');
                 if (enduringCards.length) addToast(`♾️ ${enduringCards.map(c => c.name).join(', ')} kehrt als Verzauberung zurück`, 'purple');
@@ -2864,7 +2836,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 // because two players can plausibly cast in quick succession (you cast, I respond) - a plain
                 // updateDoc based on a possibly-stale local lobbyState snapshot could let the second write
                 // clobber the first instead of stacking on top of it.
-                const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: getDeckCommanderDisplayName(deck) || (user.displayName || 'Player'), timestamp: Date.now() };
+                const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: user.displayName || getDeckCommanderDisplayName(deck) || 'Spieler', timestamp: Date.now() };
                 runTx(async (tx) => {
                     const snap = await tx.get(roomRef);
                     const currentStack = snap.exists() ? (snap.data().stack || []) : [];
@@ -3767,10 +3739,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         const data = snap.data();
                         const bfLower = data.battlefieldLower || [];
                         const bfUpper = data.battlefieldUpper || [];
-                        const deadCards = [
+                        const allDead = [
                             ...bfLower.filter(c => myDeadIds.has(c.instanceId)),
                             ...bfUpper.filter(c => myDeadIds.has(c.instanceId)),
                         ];
+                        const cmdDead = allDead.filter(c => c.isCommander);
+                        const deadCards = allDead.filter(c => !c.isToken && !c.isCommander);
                         const enduringCards = deadCards.filter(hasEnduringAbility);
                         const undyingCards = deadCards.filter(c => !hasEnduringAbility(c) && hasUndying(c) && !(c.counters||[]).some(x => x.type==='+1/+1'));
                         const persistCards = deadCards.filter(c => !hasEnduringAbility(c) && !hasUndying(c) && hasPersist(c) && !(c.counters||[]).some(x => x.type==='-1/-1'));
@@ -3784,6 +3758,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             battlefieldLower: [...bfLower.filter(c => !myDeadIds.has(c.instanceId)), ...returned],
                             battlefieldUpper: bfUpper.filter(c => !myDeadIds.has(c.instanceId)),
                             graveyard: [...normalDead, ...(data.graveyard || [])],
+                            ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...c, isTapped: false, counters: [], attachments: [] })), ...(data.commandZone || [])] } : {}),
                             ...myUpdates
                         });
                         return { normalDead, enduringCards, undyingCards, persistCards };
@@ -4002,7 +3977,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     if (looseEquipment.length) updates.battlefieldLower = [...updates.battlefieldLower, ...looseEquipment];
                 }
 
-                if (toZone === 'graveyard') updates.graveyard = [card, ...updates.graveyard];
+                const tokenGone = card.isToken && leavingBattlefield;
+                const toCmd = card.isCommander && (toZone === 'graveyard' || toZone === 'exile');
+                if (tokenGone) { addToast(`✨ Token ${card.name} verschwindet`, 'blue'); }
+                else if (toCmd) { updates.commandZone = [{ ...card, isTapped: false, counters: [] }, ...updates.commandZone]; addToast(`👑 ${card.name} zurück in die Commander-Zone`, 'blue'); }
+                else if (toZone === 'graveyard') updates.graveyard = [card, ...updates.graveyard];
                 else if (toZone === 'exile') updates.exile = [card, ...updates.exile];
                 else if (toZone === 'hand') updates.hand = [...updates.hand, card];
                 else if (toZone === 'command') updates.commandZone = [card, ...updates.commandZone];
@@ -4024,7 +4003,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // Equipment tap on their own regardless of what they're attached to (rule: attachments aren't
             // automatically tapped/untapped along with their host).
             const toggleTap = (id, battlefield, clickEvent) => {
-                const allBF = battlefield === 'upper' ? (myState.battlefieldUpper || []) : (myState.battlefieldLower || []);
+                const isUpper = battlefield === 'upper' || battlefield === 'battlefieldUpper';
+                const allBF = isUpper ? (myState.battlefieldUpper || []) : (myState.battlefieldLower || []);
                 const card = allBF.find(c => c.instanceId === id);
                 const toggleInList = (arr) => (arr || []).map(c => {
                     if (c.instanceId === id) return { ...c, isTapped: !c.isTapped };
@@ -4035,7 +4015,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 });
                 // If tapping (not untapping) a land, add its mana to the pool
                 if (card && !card.isTapped && isLand(card)) tapLandForMana(card, clickEvent);
-                if (battlefield === 'upper') {
+                if (isUpper) {
                     updateMyState({ battlefieldUpper: toggleInList(myState.battlefieldUpper) });
                 } else {
                     updateMyState({ battlefieldLower: toggleInList(myState.battlefieldLower) });
@@ -4065,12 +4045,26 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 if (Object.keys(bfUpdates).length) updateMyState(bfUpdates);
                 const seatOrder = lobbyState?.seatOrder;
                 if (!seatOrder || seatOrder.length === 0) return;
-                const myIndex = seatOrder.indexOf(activePlayerId);
-                const nextPlayer = seatOrder[(myIndex + 1) % seatOrder.length];
+                const present = seatOrder.filter((p) => (lobbyState?.players || []).includes(p));
+                const order = present.length ? present : seatOrder;
+                const myIndex = Math.max(0, seatOrder.indexOf(activePlayerId));
+                // nächster Spieler in Sitzreihenfolge, der noch am Tisch ist
+                let nextPlayer = order[0];
+                for (let i = 1; i <= seatOrder.length; i++) { const c = seatOrder[(myIndex + i) % seatOrder.length]; if (order.includes(c)) { nextPlayer = c; break; } }
+                if (nextPlayer === user.uid && activePlayerId === user.uid) {
+                    const untap = (arr) => (arr || []).map(c => c.isTapped ? { ...c, isTapped: false } : c);
+                    updateMyState({ ...bfUpdates, battlefieldUpper: untap(bfUpdates.battlefieldUpper || myState.battlefieldUpper), battlefieldLower: untap(bfUpdates.battlefieldLower || myState.battlefieldLower) });
+                    addToast('🔄 Neuer Zug – alles enttappt', 'blue');
+                    return;
+                }
                 updateDoc(roomRef, { activePlayer: nextPlayer });
             };
 
+            // Zug beenden darf der aktive Spieler – oder jeder, wenn der aktive Spieler den Tisch verlassen hat
+            const canEndTurn = activePlayerId === user.uid || (!!activePlayerId && !(lobbyState?.players || []).includes(activePlayerId));
+
             const handleLeaveGame = () => {
+                if ((lobbyState?.players || []).length <= 1) { onLeave(); return; } // Solo-Tisch: ohne Wertung raus
                 setLeaveGameModal(true);
             };
 
@@ -4081,7 +4075,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         winner,
                         submittedBy: user.uid,
                         confirmed: false,
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        participants: Object.fromEntries((lobbyState?.players || []).map((p) => [p, lobbyState?.playerInfo?.[p] || {}]))
                     }
                 });
             };
@@ -4111,6 +4106,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 await updateDoc(roomRef, {
                     'gameResult.confirmed': true
                 });
+                reportResult(roomId, user.uid, lobbyState?.gameResult || gameResult, lobbyState?.playerInfo, lobbyState?.players);
                 setLeaveGameModal(false);
                 onLeave(); // This prop will handle cleanup
             };
@@ -4378,7 +4374,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             {isMine && isLand(card) && parseFetchAbility(card.oracle_text) && (
                                 <button
                                     onClick={(e) => { e.stopPropagation(); activateFetch(card, zone); }}
-                                    className="absolute bottom-1 inset-x-1 bg-green-700 hover:bg-green-500 text-white text-[10px] font-bold py-1 rounded opacity-0 group-hover/bfcard:opacity-100 transition-opacity shadow-lg z-10"
+                                    className="absolute bottom-1 inset-x-1 bg-green-700 hover:bg-green-500 text-white text-[10px] font-bold py-1 rounded opacity-0 group-hover/bfcard:opacity-100 touch-show transition-opacity shadow-lg z-10"
                                     title="Fetch-Fähigkeit aktivieren"
                                 >🔍 Suchen</button>
                             )}
@@ -4536,7 +4532,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     )}
                     {amIFirstPlayer && everyoneMulliganDone && everyonePregameDone && !startGameModalDismissed && (
                         <StartGameModal 
-                            pregameAnswers={allPlayersSeated.filter(uid => uid !== user.uid).map(uid => ({ uid, hasAction: lobbyState.pregameAction[uid] }))}
+                            pregameAnswers={allPlayersSeated.map(uid => ({ uid, hasAction: lobbyState.pregameAction[uid] }))}
                             getPlayerName={getPlayerName}
                             onDismiss={() => setStartGameModalDismissed(true)}
                         />
@@ -4721,7 +4717,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                                 <>
                                                                     {!isLand(entry.card) && (
                                                                         <>
-                                                                            <button onClick={() => moveStackCardToBattlefield(entry, 'lower')} className="bg-blue-600 hover:bg-blue-500 text-white text-[9px] font-bold py-0.5 px-1.5 rounded">Aufs Spielfeld</button>
+                                                                            {!/\b(Instant|Sorcery)\b/i.test((entry.card?.type_line || '').split(' // ')[0]) && <button onClick={() => moveStackCardToBattlefield(entry, 'lower')} className="bg-blue-600 hover:bg-blue-500 text-white text-[9px] font-bold py-0.5 px-1.5 rounded">Aufs Spielfeld</button>}
                                                                             <button onClick={() => moveStackCardToMyZone(entry, 'graveyard')} className="bg-gray-600 hover:bg-gray-500 text-white text-[9px] font-bold py-0.5 px-1.5 rounded">In den Friedhof</button>
                                                                             <button onClick={() => moveStackCardToMyZone(entry, 'exile')} className="bg-gray-700 hover:bg-gray-600 text-white text-[9px] font-bold py-0.5 px-1.5 rounded">Ins Exil</button>
                                                                         </>
@@ -4842,27 +4838,29 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     <div className="flex flex-wrap justify-center gap-3">
                                         <button onClick={() => { submitGameResult(user.uid); }} className="bg-green-600 hover:bg-green-500 px-6 py-3 rounded text-white font-bold">Ich habe gewonnen</button>
                                         {opponentIds.map(oppId => (
-                                            <button key={oppId} onClick={() => { submitGameResult(oppId); }} className="bg-red-600 hover:bg-red-500 px-6 py-3 rounded text-white font-bold">{getPlayerName(oppId)} Won</button>
+                                            <button key={oppId} onClick={() => { submitGameResult(oppId); }} className="bg-red-600 hover:bg-red-500 px-6 py-3 rounded text-white font-bold">{getPlayerName(oppId)} hat gewonnen</button>
                                         ))}
-                                        <button onClick={() => { submitGameResult('draw'); }} className="bg-gray-600 hover:bg-gray-500 px-6 py-3 rounded text-white font-bold">Ziehen</button>
+                                        <button onClick={() => { submitGameResult('draw'); }} className="bg-gray-600 hover:bg-gray-500 px-6 py-3 rounded text-white font-bold">Unentschieden</button>
                                     </div>
+                                    <button onClick={() => { setLeaveGameModal(false); onLeave(); }} className="text-gray-400 hover:text-gray-200 text-sm underline">Ohne Wertung verlassen</button>
                                 </div>
                             ) : lobbyState.gameResult.submittedBy === user.uid ? (
                                 <div className="flex flex-col items-center gap-4">
                                     <p className="text-white text-lg">Warte, bis der Tisch das Ergebnis bestätigt …</p>
                                     <div className="loader"></div>
+                                    <button onClick={() => { updateDoc(roomRef, { gameResult: null }).catch(console.error); }} className="text-gray-400 hover:text-gray-200 text-sm underline">Meldung zurückziehen</button>
                                 </div>
                             ) : (
                                 <div className="flex flex-col items-center gap-4">
                                     <p className="text-white text-lg">
-                                        {gameResult.winner === user.uid ? 'You won!' : 
-                                         gameResult.winner === 'draw' ? 'Game was a draw' :
-                                         `${getPlayerName(gameResult.winner)} won!`}
+                                        {gameResult.winner === user.uid ? 'Du hast gewonnen!' : 
+                                         gameResult.winner === 'draw' ? 'Unentschieden' :
+                                         `${getPlayerName(gameResult.winner)} hat gewonnen!`}
                                     </p>
                                     <p className="text-gray-400">Bestätigst du dieses Ergebnis?</p>
                                     <div className="flex gap-4">
                                         <button onClick={confirmGameResult} className="bg-green-600 hover:bg-green-500 px-6 py-3 rounded text-white font-bold">Bestätigen</button>
-                                        <button onClick={() => setLeaveGameModal(false)} className="bg-red-600 hover:bg-red-500 px-6 py-3 rounded text-white font-bold">Widersprechen</button>
+                                        <button onClick={() => { setLeaveGameModal(false); updateDoc(roomRef, { gameResult: null }).catch(console.error); }} className="bg-red-600 hover:bg-red-500 px-6 py-3 rounded text-white font-bold">Widersprechen</button>
                                     </div>
                                 </div>
                             )}
@@ -5176,7 +5174,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                     />
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); playCardFromHand(card); }}
-                                                        className="absolute bottom-1 inset-x-1 bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-1 rounded opacity-0 group-hover/handcard:opacity-100 transition-opacity shadow-lg"
+                                                        className="absolute bottom-1 inset-x-1 bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-1 rounded opacity-0 group-hover/handcard:opacity-100 touch-show transition-opacity shadow-lg"
                                                         title={isLand(card) ? 'Auf dein Spielfeld' : 'Auf den Stack legen'}
                                                     >Spielen</button>
                                                 </div>
@@ -5198,8 +5196,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <div className="flex gap-1 mb-2">
                                     <button 
                                         onClick={endTurn} 
-                                        disabled={activePlayerId !== user.uid}
-                                        className={`flex-1 py-1.5 rounded text-xs font-bold transition-colors ${activePlayerId === user.uid ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
+                                        disabled={!canEndTurn}
+                                        className={`flex-1 py-1.5 rounded text-xs font-bold transition-colors ${canEndTurn ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
                                     >Zug beenden</button>
                                     <button
                                         onClick={() => {
@@ -5217,7 +5215,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                         }`}
                                     >
                                         {combatState?.phase === 'blocking' && combatState.attackerId !== user.uid
-                                            ? '🛡️ No Blocker'
+                                            ? '🛡️ Kein Blocker'
                                             : combatState ? '⚔️ Kampf beenden' : '⚔️ Angreifen'}
                                     </button>
                                 </div>
@@ -5225,7 +5223,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 {myEmblems.length > 0 && (
                                     <div className="flex flex-wrap gap-1 mb-2">
                                         {myEmblems.map(e => (
-                                            <span key={e.instanceId} className="bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[10px] font-bold px-1.5 py-0.5 rounded cursor-default" title={e.stage > 0 ? e.stageText[e.stage - 1] : 'Just created'}>
+                                            <span key={e.instanceId} className="bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[10px] font-bold px-1.5 py-0.5 rounded cursor-default" title={e.stage > 0 ? e.stageText[e.stage - 1] : 'Gerade erstellt'}>
                                                 {e.name} {e.maxStage > 1 ? `${e.stage}/${e.maxStage}` : ''}
                                             </span>
                                         ))}
@@ -5305,7 +5303,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                             />
                                             {card.isCommander && (
                                                 <div className="text-yellow-400 text-[10px] font-bold mt-0.5">
-                                                    Tax: +{(myState.cmdTax || {})[card.instanceId] || 0}
+                                                    Steuer: +{(myState.cmdTax || {})[card.instanceId] || 0}
                                                 </div>
                                             )}
                                             <button
@@ -5313,18 +5311,18 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                     e.stopPropagation();
                                                     // Commanders go to the stack like any non-land card, but leave
                                                     // the command zone (not the hand) - use playCard directly.
-                                                    const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: getDeckCommanderDisplayName(deck) || (user.displayName || 'Player'), timestamp: Date.now() };
+                                                    const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: user.displayName || getDeckCommanderDisplayName(deck) || 'Spieler', timestamp: Date.now() };
                                                     runTx(async (tx) => {
                                                         const snap = await tx.get(roomRef);
                                                         const currentStack = snap.exists() ? (snap.data().stack || []) : [];
                                                         tx.update(roomRef, { stack: [stackEntry, ...currentStack] });
-                                                    });
+                                                    }).catch(err => addToast(`❌ Commander konnte nicht gewirkt werden: ${err.message}`, 'red'));
                                                     updateMyState({
                                                         commandZone: myState.commandZone.filter(c => c.instanceId !== card.instanceId),
                                                         cmdTax: { ...(myState.cmdTax || {}), [card.instanceId]: ((myState.cmdTax || {})[card.instanceId] || 0) + 2 }
                                                     });
                                                 }}
-                                                className="w-full mt-0.5 bg-green-600 hover:bg-green-500 text-white text-[9px] font-bold py-0.5 rounded shadow opacity-0 group-hover/cmdcard:opacity-100 transition-opacity"
+                                                className="w-full mt-0.5 bg-green-600 hover:bg-green-500 text-white text-[9px] font-bold py-0.5 rounded shadow opacity-0 group-hover/cmdcard:opacity-100 touch-show transition-opacity"
                                                 title={`${card.name} aus der Commander-Zone wirken`}
                                             >Spielen</button>
                                         </div>
@@ -5332,7 +5330,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 </div>
                             </div>
 
-                            <button onClick={handleLeaveGame} className="w-full bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded text-sm font-bold flex-shrink-0 shadow-lg">Spiel verlassen</button>
+                            <button onClick={handleLeaveGame} style={{ marginBottom: 52 }} className="w-full bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded text-sm font-bold flex-shrink-0 shadow-lg">Spiel verlassen</button>
                         </div>
 
                         {/* Right sidebar (Library / GY / Exile / action buttons) — top to just above hand */}

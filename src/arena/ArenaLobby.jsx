@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { watchFriends } from '../friends'
-import { arenaBeta, cancelRoom, createRoom, joinRoom, leaveRoom, watchRooms } from './arenaRooms'
+import { arenaBeta, cancelRoom, createRoom, joinRoom, leaveRoom, startNow, watchRooms } from './arenaRooms'
 
 // Der eigentliche Spieltisch (aus der Lounge) wird erst beim Betreten geladen – er ist groß
 const ArenaScreen = lazy(() => import('./ArenaScreen'))
@@ -17,6 +17,17 @@ export default function ArenaLobby({ deck, decks, cards, uid, myName, onAddResul
   const [playing, setPlaying] = useState(null) // { roomId, deckId }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // Verlassen genau einmal ausführen (Spieltisch kann es mehrfach auslösen) und stabil halten
+  const leaving = useRef(false)
+  const playingRef = useRef(null); playingRef.current = playing
+  const onLeave = useCallback(async () => {
+    const r = playingRef.current; if (!r || leaving.current) return
+    leaving.current = true; setPlaying(null)
+    try { await leaveRoom(r.roomId, uid) } catch (e) { console.warn('Verlassen:', e) } finally { leaving.current = false }
+  }, [uid])
+  const onMinimize = useCallback(() => setPlaying(null), [])
+  const onResult = useCallback((r) => { const p = playingRef.current; if (p) onAddResult?.(p.deckId, r) }, [onAddResult])
+  const user = useMemo(() => ({ uid, displayName: myName || 'Ich' }), [uid, myName])
   const own = useMemo(() => Object.values(decks).filter((d) => d.kind !== 'binder').sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [decks])
   useEffect(() => watchRooms(uid, setRooms), [uid])
   useEffect(() => (beta ? watchFriends(uid, (l) => setFriends(l || {})) : undefined), [uid, beta])
@@ -27,10 +38,7 @@ export default function ArenaLobby({ deck, decks, cards, uid, myName, onAddResul
     return (
       <Suspense fallback={<p className="muted">Lade Spieltisch …</p>}>
         <ArenaScreen roomId={playing.roomId} deck={decks[playing.deckId]} cards={cards}
-          user={{ uid, displayName: name }}
-          onResult={(r) => onAddResult?.(playing.deckId, r)}
-          onLeave={async () => { const r = playing; setPlaying(null); await leaveRoom(r.roomId, uid) }}
-          onMinimize={() => setPlaying(null)} />
+          user={user} onResult={onResult} onLeave={onLeave} onMinimize={onMinimize} />
       </Suspense>
     )
   }
@@ -80,7 +88,12 @@ export default function ArenaLobby({ deck, decks, cards, uid, myName, onAddResul
           <b>{r.host === uid ? 'Dein Tisch' : `Tisch von ${r.hostName || '?'}`}</b>
           <span className="muted small">{(r.players || []).map((p) => r.playerInfo?.[p]?.name || '?').join(', ')} · {r.players.length}/{r.maxPlayers} Spieler{r.seatOrder ? ' · läuft' : ' · wartet'}</span>
           <button className="btn" onClick={() => setPlaying({ roomId: r.id, deckId: r.playerInfo?.[uid]?.deckId || deck.id })}>Weiterspielen</button>
-          {r.host === uid && <button className="btn ghost small" onClick={() => window.confirm('Tisch für alle auflösen?') && cancelRoom(r.id)}>Auflösen</button>}
+          {r.host === uid && !r.seatOrder && r.players.length >= 1 && r.players.length < (r.maxPlayers || 2) && (
+            <button className="btn small" title="Nicht alle Eingeladenen sind da – mit den Anwesenden beginnen" onClick={() => startNow(r.id)}>Jetzt starten ({r.players.length} Spieler)</button>
+          )}
+          {r.host === uid
+            ? <button className="btn ghost small" onClick={() => window.confirm('Tisch für alle auflösen?') && cancelRoom(r.id, uid)}>Auflösen</button>
+            : <button className="btn ghost small" onClick={() => window.confirm('Tisch verlassen? Das Spiel wird für dich nicht gewertet.') && leaveRoom(r.id, uid)}>Verlassen</button>}
         </div>
       ))}
       {beta && (
