@@ -18,7 +18,7 @@ async function toArenaDeck(deck, cards) {
     if (cmd.has(entryKey(e.id, e.finish))) { out.commanders.push(make(e)); continue }
     for (let i = 0; i < e.qty; i++) out.cards.push(make(e))
   }
-  return out
+  return JSON.parse(JSON.stringify(out)) // ohne undefined-Felder
 }
 
 export default function ArenaScreen({ roomId, deck, cards, user, onLeave, onMinimize, onResult }) {

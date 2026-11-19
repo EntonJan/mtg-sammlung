@@ -3,7 +3,7 @@
 // Firebase läuft über das Projekt mtg-sammlung; Optik über Tailwind (gescoped auf .arena-root, Onyx-Gold-Palette).
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { collection, doc, setDoc, getDocs, getDoc, deleteDoc, onSnapshot, addDoc, updateDoc, increment, query, where, runTransaction } from 'firebase/firestore'
+import { collection, doc, setDoc as fsSetDoc, getDocs, getDoc, deleteDoc, onSnapshot, addDoc as fsAddDoc, updateDoc as fsUpdateDoc, increment, query, where, runTransaction } from 'firebase/firestore'
 import { db } from '../firebase'
 import Icon from './Icon'
 
@@ -11,7 +11,25 @@ let arenaUser = null
 export const setArenaUser = (u) => { arenaUser = u }
 // Rückmeldungen an die App (Ergebnis speichern usw.)
 export const arenaHooks = {}
-const runTx = (fn) => runTransaction(db, fn)
+// Firestore lehnt „undefined“ ab (z. B. Karten ohne Stärke/Loyalität/Rückseite) – vor jedem Schreiben entfernen.
+// Sonderwerte wie increment() sind keine einfachen Objekte und bleiben unangetastet.
+const isPlain = (v) => v !== null && typeof v === 'object' && (Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype)
+const strip = (v) => {
+  if (Array.isArray(v)) return v.filter((x) => x !== undefined).map(strip)
+  if (!isPlain(v)) return v
+  const o = {}
+  for (const [k, x] of Object.entries(v)) if (x !== undefined) o[k] = strip(x)
+  return o
+}
+const setDoc = (ref, data, opt) => fsSetDoc(ref, strip(data), opt)
+const updateDoc = (ref, data) => fsUpdateDoc(ref, strip(data))
+const addDoc = (col, data) => fsAddDoc(col, strip(data))
+const runTx = (fn) => runTransaction(db, (tx) => fn({
+  get: (r) => tx.get(r),
+  update: (r, d) => tx.update(r, strip(d)),
+  set: (r, d, o) => tx.set(r, strip(d), o),
+  delete: (r) => tx.delete(r),
+}))
         
         const generateId = () => Math.random().toString(36).substring(2, 9);
         const ROOM_TIMEOUT_MS = 180000; // 180 seconds = 3 minutes
