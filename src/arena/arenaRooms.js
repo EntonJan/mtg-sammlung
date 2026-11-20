@@ -46,7 +46,14 @@ export async function leaveRoom(id, me) {
     if (r.activePlayer === me && Array.isArray(r.seatOrder)) {
       const i = r.seatOrder.indexOf(me)
       for (let k = 1; k <= r.seatOrder.length; k++) { const c = r.seatOrder[(i + k) % r.seatOrder.length]; if (rest.includes(c)) { patch.activePlayer = c; break } }
+      // Neuer Zug für den Nachfolger (Enttappen → Versorgung → Ziehen); mein Kampf und Haltebitten enden
+      if (patch.activePlayer) {
+        patch.phase = { step: 'untap', turn: (r.phase?.turn || 0) + 1, player: patch.activePlayer, at: Date.now() }
+        patch.hold = null
+        if (r.combat) patch.combat = null
+      }
     }
+    if (r.hold?.uid === me) patch.hold = null
     await updateDoc(ref, patch)
   }
 }

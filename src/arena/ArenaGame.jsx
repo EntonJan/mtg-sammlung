@@ -1249,7 +1249,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 >
                     {isChoosingMulligan && (
                         <div className="absolute inset-0 z-20 bg-black/70 flex items-center justify-center pointer-events-none">
-                            <span className="text-yellow-400 text-xs font-bold uppercase tracking-wide px-2 py-1 bg-black/60 rounded">{name} is choosing...</span>
+                            <span className="text-yellow-400 text-xs font-bold uppercase tracking-wide px-2 py-1 bg-black/60 rounded">{name} wählt die Starthand…</span>
                         </div>
                     )}
                     {/* Header: name, life, commander damage */}
@@ -1289,22 +1289,22 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     {/* Battlefield — split into the same zones as the player's own half so the opponent's
                         field is visually consistent. Cards within each zone are flowed (not free-positioned)
                         since each tile only gets a fraction of the screen. */}
-                    <div className="flex-grow flex flex-col overflow-hidden">
-                        {/* Creature zone — top, biggest area */}
-                        <div className="flex-grow border-b border-yellow-700/10 p-1 overflow-hidden">
+                    <div className="flex-grow flex flex-col-reverse overflow-hidden min-h-0">
+                        {/* Creature zone — gespiegelt wie auf meiner Hälfte: unten, zur Tischmitte hin; eine Reihe, bei Platzmangel als Fächer */}
+                        <div className="flex-grow border-t border-yellow-700/10 p-1 overflow-hidden flex flex-col justify-end min-h-0">
                             <div className="text-[8px] text-green-400/40 font-bold uppercase mb-0.5">Kreaturen</div>
-                            <div className="flex flex-wrap gap-0.5">
-                                {[...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])].filter(c => getCardZoneType(c) === 'creature').map(card => (
-                                    <div key={card.instanceId} className="relative">
+                            <div className="flex flex-nowrap overflow-hidden">
+                                {(() => { const cr = [...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])].filter(c => getCardZoneType(c) === 'creature'); return cr.map((card, i) => (
+                                    <div key={card.instanceId} className="relative" style={{ flex: i === cr.length - 1 ? '0 0 auto' : '0 1 auto', minWidth: 8, paddingRight: 2 }}>
                                         <CardImage src={card.image_url} className={`${cardSizeClass} card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
                                             onMouseEnter={(e) => { e.stopPropagation(); onHoverCard(card.image_url); }}
                                             onMouseLeave={() => onHoverCard(null)} />
                                     </div>
-                                ))}
+                                )); })()}
                             </div>
                         </div>
                         {/* Land + Planeswalker row */}
-                        <div className="flex border-b border-yellow-700/10 flex-shrink-0" style={{ minHeight: isExpanded ? 36 : 24 }}>
+                        <div className="flex border-t border-yellow-700/10 flex-shrink-0" style={{ minHeight: isExpanded ? 36 : 24 }}>
                             <div className="flex-[65] p-0.5 border-r border-yellow-700/10 overflow-hidden">
                                 <div className="text-[7px] text-yellow-400/40 font-bold uppercase">Länder</div>
                                 <div className="flex flex-wrap gap-0.5">
@@ -1540,9 +1540,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 window.addEventListener('mouseup', onUp);
             };
 
+            // Beim Angreifen müssen meine Kreaturen (oberste Reihe meiner Hälfte) frei anklickbar bleiben → ganz unten.
             const baseStyle = pos.x !== null
                 ? { position:'fixed', left: pos.x, top: pos.y, transform:'none', bottom:'auto', cursor:'grab' }
-                : { position:'fixed', bottom:80, left:'50%', transform:'translateX(-50%)', cursor:'grab' };
+                : { position:'fixed', bottom: mode === 'attacking' ? 8 : 80, left:'50%', transform:'translateX(-50%)', cursor:'grab' };
             const MANA_SYM = { W:'🌟', U:'💧', B:'💀', R:'🔥', G:'🌿' };
 
             if (mode === 'attacking') {
@@ -1552,7 +1553,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         <div style={{ color:'#f87171', fontWeight:'bold', marginBottom:8, fontSize:14 }}>⚔️ Angreifer erklären</div>
                         <div style={{ color:'#9ca3af', fontSize:12, marginBottom:8 }}>Ungetappte Kreaturen anklicken, dann jeweils das Ziel wählen.</div>
                         {attackers.length > 0 && (
-                            <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:12, maxHeight:200, overflowY:'auto' }}>
+                            <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:12, maxHeight:'clamp(56px, calc(50vh - 280px), 200px)', overflowY:'auto' }}>
                                 {attackers.map(a => (
                                     <div key={a.card.instanceId} style={{ display:'flex', alignItems:'center', gap:8, background:'#111827', borderRadius:6, padding:'6px 10px' }}>
                                         <img src={a.card.image_url} style={{ width:32, height:44, borderRadius:3, border:'2px solid #ef4444' }} alt={a.card.name} />
@@ -2020,6 +2021,188 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             );
         };
 
+        // ── ZUGPHASEN ─────────────────────────────────────────────────────────────
+        // Gemeinsamer Zustand im Raum-Dokument: phase = { step, turn, player, first?, at }.
+        // turn zählt die Züge am Tisch (1 = erster Zug des Spiels, 0 = Altspiel ohne Phasen), player ist der
+        // aktive Spieler, für den die Phase gilt. Fehlt das Feld (oder passt player nicht zu activePlayer),
+        // gilt „Hauptphase 1“ – so laufen alte Spiele weiter.
+        const PHASE_STEPS = ['untap', 'upkeep', 'draw', 'main1', 'combat_begin', 'combat_attack', 'combat_block', 'combat_damage', 'combat_end', 'main2', 'end', 'cleanup'];
+        const PHASE_LABEL = { untap: 'Enttappen', upkeep: 'Versorgung', draw: 'Ziehen', main1: 'Hauptphase 1', combat_begin: 'Beginn des Kampfes', combat_attack: 'Angreifer erklären', combat_block: 'Blocker erklären', combat_damage: 'Kampfschaden', combat_end: 'Kampfende', main2: 'Hauptphase 2', end: 'Endschritt', cleanup: 'Aufräumen' };
+        const PHASE_SHORT = { untap: 'Enttap.', upkeep: 'Versorg.', draw: 'Ziehen', main1: 'Haupt 1', combat_begin: 'Beginn', combat_attack: 'Angriff', combat_block: 'Blocker', combat_damage: 'Schaden', combat_end: 'Kampfende', main2: 'Haupt 2', end: 'Endschr.', cleanup: 'Aufr.' };
+        const PHASE_BLOCKS = [
+            { key: 'begin', label: 'Anfang', steps: ['untap', 'upkeep', 'draw'] },
+            { key: 'main1', label: 'Haupt 1', steps: ['main1'] },
+            { key: 'combat', label: 'Kampf', steps: ['combat_begin', 'combat_attack', 'combat_block', 'combat_damage', 'combat_end'] },
+            { key: 'main2', label: 'Haupt 2', steps: ['main2'] },
+            { key: 'end', label: 'Ende', steps: ['end', 'cleanup'] },
+        ];
+        const stepIdx = (s) => PHASE_STEPS.indexOf(s);
+        const isCombatStep = (s) => typeof s === 'string' && s.startsWith('combat_');
+        // Blocker und Schaden erreicht man nur über „Weiter“ (Angreifer bestätigen, Blocker abwarten).
+        const isJumpTarget = (s) => s !== 'combat_block' && s !== 'combat_damage';
+
+        // Kartengröße auf dem eigenen Spielfeld (unskaliert) und Höhe der Phasenleiste / des Hand-Reiters.
+        const CARD_W = 90;
+        const CARD_H = 120;
+        const PHASE_BAR_H = 28;
+        const HAND_TAB_H = 22;
+        // Geometrie meiner Spielfeldhälfte: Phasenleiste oben, darunter drei Reihen zu je einer Kartenhöhe
+        // (Kreaturen · Länder|Planeswalker · Verzauberungen|Artefakte), Rest unten frei für den Hand-Reiter.
+        // Passen drei Reihen nicht in die Höhe, werden die Karten skaliert (min. 0,75).
+        const computeBfGeom = (bfWidth, bfHeight, leftX, rightX) => {
+            const avail = bfHeight - PHASE_BAR_H - HAND_TAB_H - 6;
+            const scale = Math.max(0.75, Math.min(1, avail / (3 * CARD_H)));
+            const cw = CARD_W * scale, ch = CARD_H * scale;
+            const top1 = PHASE_BAR_H + 2, top2 = top1 + ch, top3 = top2 + ch;
+            const zW = Math.max(rightX - leftX, cw);
+            const landSplit = leftX + zW * 0.65, halfSplit = leftX + zW * 0.5;
+            // Seitenabstand, damit getappte (gedrehte) Karten nicht unter die Seitenleisten ragen
+            const pad = (ch - cw) / 2 + 2;
+            const zones = {
+                creature: { left: leftX, right: leftX + zW, top: top1, label: 'Kreaturen', color: 'rgba(74,222,128,0.3)', text: '#bbf7d0' },
+                land: { left: leftX, right: landSplit, top: top2, label: 'Länder', color: 'rgba(234,179,8,0.3)', text: '#fde68a' },
+                planeswalker: { left: landSplit, right: leftX + zW, top: top2, label: 'Planeswalker', color: 'rgba(239,68,68,0.3)', text: '#fca5a5' },
+                enchantment: { left: leftX, right: halfSplit, top: top3, label: 'Verzaubern', color: 'rgba(168,85,247,0.3)', text: '#d8b4fe' },
+                artifact: { left: halfSplit, right: leftX + zW, top: top3, label: 'Artefakte', color: 'rgba(249,115,22,0.3)', text: '#fed7aa' },
+            };
+            return { scale, cw, ch, pad, zones, bfWidth, bfHeight };
+        };
+        // x-Position des i-ten von n Karten in einer Zone: nebeneinander, bei Platzmangel enger zusammen (Fächer),
+        // nie eine zweite Reihe.
+        const fanX = (zone, geom, i, n) => {
+            const left = zone.left + geom.pad, width = Math.max(zone.right - zone.left - 2 * geom.pad, geom.cw);
+            if (n <= 1) return left;
+            const step = Math.min(geom.cw + 4, Math.max(0, (width - geom.cw) / (n - 1)));
+            return left + i * step;
+        };
+        // Pixel-Positionen aller Karten meines Spielfelds: Zone nach Kartentyp, Reihenfolge nach gespeichertem x.
+        const layoutMyCards = (cards, geom) => {
+            const byType = {};
+            cards.forEach((c, idx) => { const t = getCardZoneType(c); (byType[t] = byType[t] || []).push({ c, idx }); });
+            const out = {};
+            Object.entries(byType).forEach(([t, list]) => {
+                list.sort((a, b) => ((a.c.x ?? 0) - (b.c.x ?? 0)) || (a.idx - b.idx));
+                const zone = geom.zones[t] || geom.zones.creature;
+                list.forEach(({ c }, i) => { out[c.instanceId] = { px: fanX(zone, geom, i, list.length), py: zone.top, rank: i }; });
+            });
+            return out;
+        };
+
+        // ── TRIGGER-HINWEISE ──────────────────────────────────────────────────────
+        // Nur Erinnerungen: welche meiner Permanents laut Regeltext jetzt auslösen. Erinnerungstext in Klammern
+        // wird ignoriert, doppelseitige Karten liefern beide Seiten.
+        const hintText = (card) => {
+            const t = card?.oracle_text || (Array.isArray(card?.card_faces) ? card.card_faces.map(f => f?.oracle_text || '').filter(Boolean).join('\n') : '') || card?.ability || '';
+            return String(t).replace(/\([^)]*\)/g, '');
+        };
+        const hintSentences = (card) => hintText(card).split(/\n+|(?<=[.!])\s+(?=[A-Z•])/).map(s => s.trim()).filter(Boolean);
+        const hintCanDraw = (s) => /\bdraws? (?:a card|cards|\w+ cards)\b/i.test(s);
+        // „your“ nur im eigenen Zug, „each opponent's“ nur im Zug eines Gegners, „each“/„the next“ immer.
+        const whoseOk = (who, isMyTurn) => {
+            const w = (who || '').trim().toLowerCase();
+            if (w.startsWith('your')) return isMyTurn;
+            if (w.startsWith("each opponent") || w.startsWith('an opponent')) return !isMyTurn;
+            return true;
+        };
+        const STEP_HINT_RULES = {
+            upkeep: { re: /at the beginning of (your next |your |each opponent's |each player's |each |the next )upkeep/i, reason: 'Versorgung' },
+            draw: { re: /at the beginning of (your |each opponent's |each player's |each )draw step/i, reason: 'Ziehphase' },
+            combat_begin: { re: /at the beginning of (?:combat on (your |each opponent's )turn|(each )combat)/i, reason: 'Beginn des Kampfes' },
+            end: { re: /at the beginning of (your next |your |each opponent's |each player's |each |the next )end step/i, reason: 'Endschritt' },
+        };
+        const stepHintsFor = (card, step, isMyTurn) => {
+            const rule = STEP_HINT_RULES[step];
+            if (!rule) return [];
+            return hintSentences(card).filter(s => { const m = s.match(rule.re); return m && whoseOk(m[1] || m[2] || m[3] || 'each', isMyTurn); })
+                .map(s => ({ sentence: s, reason: rule.reason }));
+        };
+        // „Whenever … attacks“: eigene Angreifer (Name, Kurzname, „this creature“) oder „a creature you control attacks“.
+        const attackHintsFor = (card, isAttacking, anyAttack) => {
+            const name = (card?.name || '').split(' // ')[0].toLowerCase();
+            const short = name.split(',')[0].trim();
+            return hintSentences(card).filter(s => {
+                const m = s.match(/whenever (.+?) attacks?\b/i);
+                if (!m) return /whenever you attack\b/i.test(s) && anyAttack;
+                const subj = m[1].toLowerCase().trim();
+                if (/creatures? you control|you attack/.test(subj)) return anyAttack;
+                if (/equipped creature|enchanted creature/.test(subj)) return false; // über den Träger geprüft
+                if (subj === name || subj === short || /^(this creature|this vehicle|it|~)$/.test(subj)) return isAttacking;
+                return false;
+            }).map(s => ({ sentence: s, reason: 'Angriff' }));
+        };
+        const attachmentAttackHintsFor = (card) => hintSentences(card).filter(s => /whenever (equipped|enchanted) creature attacks/i.test(s)).map(s => ({ sentence: s, reason: 'Angriff (Träger)' }));
+        const combatEnterHintsFor = (card) => hintSentences(card).filter(s => /during combat/i.test(s) && /\benters?\b/i.test(s)).map(s => ({ sentence: s, reason: 'Kreatur kam im Kampf ins Spiel' }));
+
+        // Phasenleiste („Leiste 3“): fünf Blöcke in einer Reihe, der aktive klappt seine Schritte auf.
+        const PhaseBar = ({ step, ownerName, canControl, lockTitle, onJump, onNext, nextDisabled, nextTitle, extra, flash }) => {
+            const cur = stepIdx(step);
+            return (
+                <div data-testid="phase-bar" className={`h-7 flex items-center gap-1 px-1 rounded-b-lg bg-gray-950/90 border-solid border border-t-0 shadow-lg select-none transition-colors ${flash ? 'border-yellow-400' : 'border-yellow-700/60'}`} style={{ fontSize: 11 }}>
+                    {ownerName && (
+                        <span className="text-gray-400 whitespace-nowrap px-1 truncate flex-shrink min-w-0" style={{ maxWidth: 130 }} title={`Phase von ${ownerName}`}>Phase von <b className="text-yellow-300">{ownerName}</b></span>
+                    )}
+                    <div className="flex items-center gap-0.5 flex-1 min-w-0 justify-center">
+                        {PHASE_BLOCKS.map((b) => {
+                            const active = b.steps.includes(step);
+                            const past = stepIdx(b.steps[b.steps.length - 1]) < cur;
+                            const full = b.steps.map(s => PHASE_LABEL[s]).join(' · ');
+                            if (!active) {
+                                const can = canControl && !past;
+                                return (
+                                    <button key={b.key} disabled={!can} onClick={() => can && onJump(b.steps[0])}
+                                        title={past ? full : can ? `Springe zu: ${PHASE_LABEL[b.steps[0]]} (${full})` : (lockTitle || full)}
+                                        className={`px-1.5 py-0.5 rounded border-0 bg-transparent whitespace-nowrap ${past ? 'text-gray-600' : can ? 'text-gray-300 hover:bg-gray-800 hover:text-yellow-300' : 'text-gray-500'}`}
+                                    >{b.label}</button>
+                                );
+                            }
+                            return (
+                                <div key={b.key} className="flex items-center gap-0.5 rounded-md px-1 bg-yellow-900/40 border-solid border border-yellow-600/50 whitespace-nowrap" title={full}>
+                                    <span className="text-yellow-300 font-bold px-0.5">{b.label}</span>
+                                    {b.steps.map(s => {
+                                        const si = stepIdx(s);
+                                        const isCur = s === step;
+                                        const can = canControl && si > cur && isJumpTarget(s);
+                                        return (
+                                            <button key={s} data-step={s} disabled={!can && !isCur} onClick={() => can && onJump(s)}
+                                                title={isCur ? `Aktuell: ${PHASE_LABEL[s]}` : can ? `Springe zu: ${PHASE_LABEL[s]}` : si < cur ? PHASE_LABEL[s] : (!isJumpTarget(s) && canControl ? `${PHASE_LABEL[s]} – nur über „Weiter“` : (lockTitle || PHASE_LABEL[s]))}
+                                                className={`px-1.5 rounded-full border-0 leading-5 ${isCur ? 'bg-amber-400 text-gray-950 font-bold shadow' : si < cur ? 'bg-transparent text-gray-500' : can ? 'bg-transparent text-gray-200 hover:bg-gray-800' : 'bg-transparent text-gray-400'}`}
+                                            >{PHASE_SHORT[s]}</button>
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {extra}
+                    <button onClick={onNext} disabled={nextDisabled} title={nextTitle} aria-label="Nächster Schritt"
+                        className={`w-7 h-5 flex-shrink-0 rounded font-bold border-0 leading-none ${nextDisabled ? 'bg-gray-800 text-gray-600' : 'bg-yellow-600 hover:bg-yellow-500 text-gray-950'}`}
+                    >▸</button>
+                </div>
+            );
+        };
+
+        // Gestapelte Trigger-Hinweise (nur für den Besitzer der Karte), max. 4 sichtbar.
+        const HintStack = ({ hints, onDraw, onDismiss }) => {
+            if (!hints.length) return null;
+            const shown = hints.slice(-4);
+            return ReactDOM.createPortal(
+                <div data-testid="hint-stack" style={{ position: 'fixed', left: '50%', bottom: 'calc(50% + 6px)', transform: 'translateX(-50%)', zIndex: 600, display: 'flex', flexDirection: 'column', gap: 6, width: 400, maxWidth: 'calc(100vw - 500px)' }}>
+                    {hints.length > shown.length && <div style={{ color: '#a0967f', fontSize: 11, textAlign: 'center' }}>+{hints.length - shown.length} weitere</div>}
+                    {shown.map(h => (
+                        <div key={h.id} className="hint-card" style={{ background: 'rgba(21,20,17,0.96)', border: '1px solid #d4b46a', borderRadius: 8, padding: '6px 8px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)', color: '#ece4cf', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ flex: 1, minWidth: 0 }} title={h.sentence}>
+                                <div style={{ fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>⚡ {h.cardName}: <span style={{ color: '#e4c886' }}>{h.reason}</span></div>
+                                <div style={{ color: '#a0967f', fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.sentence}</div>
+                            </div>
+                            {h.canDraw && <button onClick={() => onDraw(h)} style={{ background: '#4e647b', color: 'white', border: 'none', borderRadius: 5, padding: '3px 8px', fontSize: 11, fontWeight: 'bold', whiteSpace: 'nowrap' }}>Karte ziehen</button>}
+                            <button onClick={() => onDismiss(h)} style={{ background: '#2f2c26', color: '#dcd1b6', border: '1px solid #5e4f2c', borderRadius: 5, padding: '3px 8px', fontSize: 11, fontWeight: 'bold' }}>OK</button>
+                        </div>
+                    ))}
+                </div>,
+                (document.getElementById('arena-portal') || document.body)
+            );
+        };
+
         const GameSim = ({ deck, onLeave, roomId }) => {
             // --- REFACTOR: State is now split ---
             const [lobbyState, setLobbyState] = useState(null); // Data from the main room doc
@@ -2213,7 +2396,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         const j = Math.floor(Math.random() * (i + 1));
                         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
                     }
-                    updateDoc(roomRef, { seatOrder: shuffled, activePlayer: shuffled[0] });
+                    // Erster Zug des Spiels beginnt mit Enttappen; first = true steuert das Überspringen des Ziehens (nur bei 2 Spielern).
+                    updateDoc(roomRef, { seatOrder: shuffled, activePlayer: shuffled[0], phase: { step: 'untap', turn: 1, player: shuffled[0], first: true, at: Date.now() }, hold: null });
                 }
             }, [lobbyState, user.uid, roomRef]);
 
@@ -2488,18 +2672,158 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 });
             }, [lobbyState?.loyaltyRequests, user.uid, myState]); // eslint-disable-line
 
-            const prevActivePlayerRef = useRef(activePlayerId);
+            // ── ZUGPHASEN: Enttappen, automatisches Ziehen, Manapool, Trigger-Hinweise ─────────────
+            // Enttappen passiert jetzt über die Phase „untap“ (früher beim Wechsel von activePlayer) – siehe unten.
+            const phaseRaw = lobbyState?.phase || null;
+            const phase = phaseRaw && phaseRaw.player === activePlayerId && PHASE_STEPS.includes(phaseRaw.step) ? phaseRaw : null;
+            const curStep = phase ? phase.step : 'main1';
+            const turnKey = phase ? `${phase.turn}-${phase.player}` : 'legacy';
+            const stepKey = `${turnKey}:${curStep}`;
+            const hasMyState = !!myState;
+
+            // Neuer Zug: der neue aktive Spieler enttappt seine Permanents (einmal pro Zug, auch nach Neuladen)
+            // und schaltet danach selbst in die Versorgung weiter.
+            const untapDoneRef = useRef(null);
             useEffect(() => {
-                const justBecameActive = activePlayerId === user.uid && prevActivePlayerRef.current !== user.uid;
-                prevActivePlayerRef.current = activePlayerId;
-                if (justBecameActive && myState) {
-                    const untap = (arr) => (arr || []).map(c => c.isTapped ? { ...c, isTapped: false } : c);
-                    updateDoc(myStateRef, {
-                        battlefieldUpper: untap(myState.battlefieldUpper),
-                        battlefieldLower: untap(myState.battlefieldLower)
-                    });
-                }
-            }, [activePlayerId, user.uid, myState]);
+                // Auch wenn jemand schneller weitergeschaltet hat (Weiter vor Abschluss der Transaktion), wird
+                // noch enttappt – lastUntapKey verhindert ein zweites Enttappen im selben Zug.
+                if (!phase || phase.player !== user.uid || !hasMyState || !(phase.turn >= 1)) return;
+                if (phase.step !== 'untap' && myState.lastUntapKey === turnKey) return;
+                const key = turnKey;
+                if (untapDoneRef.current === key) return;
+                untapDoneRef.current = key;
+                runTx(async (tx) => {
+                    const snap = await tx.get(myStateRef);
+                    const room = await tx.get(roomRef);
+                    if (!snap.exists() || !room.exists()) return 'retry';
+                    const d = snap.data(); const ph = room.data().phase;
+                    if (!ph || ph.player !== user.uid || `${ph.turn}-${ph.player}` !== key) return null;
+                    if (ph.step !== 'untap' && d.lastUntapKey === key) return null;
+                    let untapped = false;
+                    if (d.lastUntapKey !== key) {
+                        const untap = (arr) => (arr || []).map(c => {
+                            let n = c;
+                            if (c.isTapped) n = { ...n, isTapped: false };
+                            if ((n.attachments || []).some(a => a.isTapped)) n = { ...n, attachments: n.attachments.map(a => a.isTapped ? { ...a, isTapped: false } : a) };
+                            return n;
+                        });
+                        tx.update(myStateRef, { battlefieldLower: untap(d.battlefieldLower), battlefieldUpper: untap(d.battlefieldUpper), lastUntapKey: key });
+                        untapped = true;
+                    }
+                    if (ph.step === 'untap') tx.update(roomRef, { phase: { ...ph, step: 'upkeep', at: Date.now() }, hold: null });
+                    return untapped ? 'untapped' : null;
+                }).then(r => {
+                    if (r === 'retry') untapDoneRef.current = null;
+                    if (r === 'untapped' && (phase.turn || 0) > 1) addToast('🔄 Neuer Zug – alles enttappt', 'blue');
+                }).catch(() => { untapDoneRef.current = null; });
+            }, [phase?.step, turnKey, user.uid, hasMyState, myState?.lastUntapKey]);
+
+            // Ziehphase: der aktive Spieler zieht automatisch genau eine Karte. Abgesichert über lastDrawKey im
+            // eigenen Spielstand (Transaktion), damit Neuladen/mehrere Listener nie doppelt ziehen. Wer die
+            // Ziehphase überspringt (Sprung nach vorne), zieht trotzdem. Erster Zug bei genau 2 Spielern: kein Ziehen.
+            const drawDoneRef = useRef(null);
+            useEffect(() => {
+                if (!phase || phase.player !== user.uid || !hasMyState || !(phase.turn >= 1)) return;
+                if (stepIdx(phase.step) < stepIdx('draw')) return;
+                const key = turnKey;
+                if (myState.lastDrawKey === key || drawDoneRef.current === key) return;
+                drawDoneRef.current = key;
+                const skip = !!phase.first && (lobbyState?.players || []).length === 2;
+                runTx(async (tx) => {
+                    const snap = await tx.get(myStateRef);
+                    if (!snap.exists()) return 'retry';
+                    const d = snap.data();
+                    if (d.lastDrawKey === key) return null;
+                    if (skip) { tx.update(myStateRef, { lastDrawKey: key }); return 'skip'; }
+                    const lib = [...(d.library || [])];
+                    if (!lib.length) { tx.update(myStateRef, { lastDrawKey: key }); return 'empty'; }
+                    const card = lib.shift();
+                    tx.update(myStateRef, { library: lib, hand: [...(d.hand || []), card], lastDrawKey: key });
+                    return 'drawn';
+                }).then(r => {
+                    if (r === 'retry') drawDoneRef.current = null;
+                    if (r === 'drawn') addToast('📖 Karte gezogen (Ziehphase)', 'blue');
+                    if (r === 'skip') addToast('Erster Zug (2 Spieler): kein Ziehen', 'blue');
+                    if (r === 'empty') addToast('⚠️ Bibliothek leer – keine Karte gezogen', 'red');
+                }).catch(() => { drawDoneRef.current = null; });
+            }, [phase?.step, turnKey, user.uid, hasMyState, myState?.lastDrawKey]);
+
+            // Manapool leert sich bei jedem Schritt- und Zugwechsel (Regel 500.4) – jeder Client leert seinen eigenen.
+            // Dazu eine kurze Hervorhebung der Phasenleiste statt eines Toasts.
+            const prevStepKeyRef = useRef(null);
+            const [phaseFlash, setPhaseFlash] = useState(false);
+            useEffect(() => {
+                const prev = prevStepKeyRef.current;
+                prevStepKeyRef.current = stepKey;
+                if (prev === null || prev === stepKey) return;
+                clearMana();
+                setPhaseFlash(true);
+                const t = setTimeout(() => setPhaseFlash(false), 700);
+                return () => clearTimeout(t);
+            }, [stepKey]);
+            // Lokale Angriffsauswahl gehört zum Zug – beim Zugwechsel verwerfen.
+            useEffect(() => { setPendingAttackers([]); setPendingBlocker(null); }, [turnKey]);
+
+            // Trigger-Hinweise (nur Erinnerungen). Gesehene Schritte merken (sessionStorage), damit Neuladen nichts doppelt zeigt.
+            const [hints, setHints] = useState([]);
+            const seenHintKeysRef = useRef(null);
+            const hintSeen = (k) => {
+                if (!seenHintKeysRef.current) { try { seenHintKeysRef.current = new Set(JSON.parse(sessionStorage.getItem('arena-hints-' + roomId) || '[]')) } catch { seenHintKeysRef.current = new Set() } }
+                if (seenHintKeysRef.current.has(k)) return true;
+                seenHintKeysRef.current.add(k);
+                try { sessionStorage.setItem('arena-hints-' + roomId, JSON.stringify([...seenHintKeysRef.current].slice(-60))) } catch {}
+                return false;
+            };
+            const pushHints = (list) => {
+                if (!list.length) return;
+                setHints(prev => {
+                    const have = new Set(prev.map(h => h.key));
+                    return [...prev, ...list.filter(h => !have.has(h.key)).map(h => ({ ...h, id: generateId(), turnKey }))].slice(-12);
+                });
+            };
+            const myPermanents = () => [...(myState?.battlefieldLower || []), ...(myState?.battlefieldUpper || [])];
+            // Schrittbeginn: Versorgung, Ziehphase, Kampfbeginn, Endschritt
+            useEffect(() => {
+                if (!phase || !hasMyState || !STEP_HINT_RULES[curStep]) return;
+                if (hintSeen('step:' + stepKey)) return;
+                const isMyTurn = phase.player === user.uid;
+                const found = [];
+                myPermanents().forEach(card => stepHintsFor(card, curStep, isMyTurn).forEach(h => found.push({ ...h, key: `${stepKey}:${card.instanceId}:${h.sentence}`, cardName: card.name, canDraw: hintCanDraw(h.sentence) })));
+                pushHints(found);
+            }, [stepKey, hasMyState]);
+            // Angreifer erklärt (Kampf wechselt zu „blocking“): „Whenever … attacks“ meiner Angreifer
+            const attackSig = combatState && combatState.attackerId === user.uid && combatState.phase !== 'attacking' ? (combatState.attackers || []).map(a => a.instanceId).sort().join(',') : '';
+            useEffect(() => {
+                if (!attackSig || !hasMyState) return;
+                if (hintSeen(`atk:${turnKey}:${attackSig}`)) return;
+                const attacking = new Set(attackSig.split(','));
+                const found = [];
+                myPermanents().forEach(card => {
+                    attackHintsFor(card, attacking.has(card.instanceId), attacking.size > 0).forEach(h => found.push({ ...h, key: `atk:${turnKey}:${card.instanceId}:${h.sentence}`, cardName: card.name, canDraw: hintCanDraw(h.sentence) }));
+                    if (attacking.has(card.instanceId)) (card.attachments || []).forEach(a => attachmentAttackHintsFor(a.card || a).forEach(h => found.push({ ...h, key: `atk:${turnKey}:${a.instanceId}:${h.sentence}`, cardName: (a.card || a).name, canDraw: hintCanDraw(h.sentence) })));
+                });
+                pushHints(found);
+            }, [attackSig, hasMyState]);
+            // Ereignis im Kampf: eine nichtspielstein-Kreatur kommt unter meiner Kontrolle ins Spiel (z. B. The Blue Spirit)
+            const myBfIds = myPermanents().map(c => c.instanceId).join(',');
+            const prevBfIdsRef = useRef(null);
+            useEffect(() => {
+                if (!hasMyState) return;
+                const prev = prevBfIdsRef.current;
+                const cur = myPermanents();
+                prevBfIdsRef.current = new Set(cur.map(c => c.instanceId));
+                if (!prev || !phase || !isCombatStep(curStep)) return;
+                const entered = cur.filter(c => !prev.has(c.instanceId) && isCreatureLike(c) && !c.isToken);
+                if (!entered.length) return;
+                const found = [];
+                entered.forEach(e => cur.forEach(card => combatEnterHintsFor(card).forEach(h => {
+                    if (/\bnontoken\b/i.test(h.sentence) && e.isToken) return;
+                    found.push({ ...h, key: `etb:${turnKey}:${e.instanceId}:${card.instanceId}:${h.sentence}`, cardName: card.name, reason: `${h.reason} (${e.name})`, canDraw: hintCanDraw(h.sentence) });
+                })));
+                pushHints(found);
+            }, [myBfIds, hasMyState]);
+            // Alte Hinweise verschwinden beim Zugwechsel
+            useEffect(() => { setHints(prev => prev.filter(h => h.turnKey === turnKey)); }, [turnKey]);
 
             // Re-snaps every card on my battlefield to its correct zone slot after a window resize,
             // so cards don't drift into wrong zones when switching between fullscreen and windowed mode.
@@ -2519,41 +2843,18 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 if (!leftSidebarRect || !rightSidebarRect) return;
                 const leftSidebarRightX = leftSidebarRect.right - bfRect.left;
                 const rightSidebarLeftX = rightSidebarRect.left - bfRect.left;
-                const byType = {};
-                allCards.forEach(card => {
-                    const t = getCardZoneType(card);
-                    if (!byType[t]) byType[t] = [];
-                    byType[t].push(card);
-                });
-                Object.keys(byType).forEach(t => {
-                    byType[t].sort((a, b) => (a.x || 0) - (b.x || 0));
-                });
-                const getSlot = (zoneType, index) => {
-                    const zoneW = rightSidebarLeftX - leftSidebarRightX;
-                    const landSplit  = leftSidebarRightX + zoneW * 0.65;
-                    const halfSplit  = leftSidebarRightX + zoneW * 0.50;
-                    const rowBottom  = bfHeight - CARD_H;
-                    const row2Bottom = bfHeight;
-                    let zoneLeft, zoneRight, zoneTop, zoneBottom;
-                    if (zoneType === 'enchantment') { zoneLeft = leftSidebarRightX; zoneRight = halfSplit;        zoneTop = rowBottom - CARD_H; zoneBottom = row2Bottom; }
-                    else if (zoneType === 'planeswalker') { zoneLeft = landSplit;   zoneRight = rightSidebarLeftX; zoneTop = rowBottom - CARD_H; zoneBottom = rowBottom; }
-                    else if (zoneType === 'artifact')    { zoneLeft = halfSplit;    zoneRight = rightSidebarLeftX; zoneTop = rowBottom - CARD_H; zoneBottom = row2Bottom; }
-                    else if (zoneType === 'land')        { zoneLeft = leftSidebarRightX; zoneRight = landSplit;   zoneTop = rowBottom - CARD_H; zoneBottom = rowBottom; }
-                    else { zoneLeft = leftSidebarRightX; zoneRight = rightSidebarLeftX; zoneTop = 0; zoneBottom = rowBottom - CARD_H; }
-                    const slotsPerRow = Math.max(Math.floor(Math.max(zoneRight - zoneLeft, CARD_W) / CARD_W), 1);
-                    const pxX = zoneLeft + (index % slotsPerRow) * CARD_W;
-                    const pxY = Math.max(zoneBottom - CARD_H * (Math.floor(index / slotsPerRow) + 1), zoneTop);
-                    return { x: Math.min(Math.max((pxX / bfWidth) * 100, 0), 96), y: Math.min(Math.max((pxY / bfHeight) * 100, 0), 96) };
-                };
+                // Gleiche Reihen-Geometrie wie beim Zeichnen (computeBfGeom/layoutMyCards): Zone nach Kartentyp,
+                // Reihenfolge nach bisherigem x. Die Darstellung rechnet die Positionen ohnehin selbst aus; das
+                // Speichern hält nur die Reihenfolge und die Prozentwerte für alte Clients stimmig.
+                const geom = computeBfGeom(bfWidth, bfHeight, leftSidebarRightX, rightSidebarLeftX);
+                const laid = layoutMyCards(allCards, geom);
 
                 // Build a position map: instanceId → {x, y}
                 // This ONLY updates positions, never adds or removes cards from the arrays.
                 // This prevents dead cards from being resurrected if myState is stale.
                 const posMap = {};
-                Object.entries(byType).forEach(([t, cards]) => {
-                    cards.forEach((card, idx) => {
-                        posMap[card.instanceId] = getSlot(t, idx);
-                    });
+                Object.entries(laid).forEach(([id, p]) => {
+                    posMap[id] = { x: Math.min(Math.max((p.px / bfWidth) * 100, 0), 96), y: Math.min(Math.max((p.py / bfHeight) * 100, 0), 96) };
                 });
 
                 // Apply positions to each array individually using the current Firestore state
@@ -2763,66 +3064,33 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             //   │(free!) ├──────────┴──────────────────┴─────────┤      │
             //   │        │                HAND                   │      │
             //   └────────┴───────────────────────────────────────┴──────┘
-            const getDefaultSpawnPosition = (card) => {
+            // Aktuelle Geometrie meines Spielfelds (gemessen an den echten Seitenleisten), siehe computeBfGeom.
+            const measureMyGeom = () => {
                 const bfRect = playerLowerBattlefieldRef.current?.getBoundingClientRect();
                 const bfWidth = bfRect?.width || window.innerWidth;
                 const bfHeight = bfRect?.height || 300;
-
-                const handRect = myHandZoneRef.current?.getBoundingClientRect();
                 const leftSidebarRect = myLeftSidebarRef.current?.getBoundingClientRect();
                 const rightSidebarRect = myRightSidebarRef.current?.getBoundingClientRect();
-
-                const handTopY = handRect && bfRect ? Math.max(handRect.top - bfRect.top, 0) : bfHeight * 0.8;
-                const handBottomY = handRect && bfRect ? Math.min(handRect.bottom - bfRect.top, bfHeight) : bfHeight;
-                const handLeft = handRect && bfRect ? Math.max(handRect.left - bfRect.left, 0) : 0;
-                const handRight = handRect && bfRect ? Math.min(handRect.right - bfRect.left, bfWidth) : bfWidth;
                 const leftSidebarRightX = leftSidebarRect && bfRect ? Math.max(leftSidebarRect.right - bfRect.left, 0) : 232;
                 const rightSidebarLeftX = rightSidebarRect && bfRect ? Math.min(rightSidebarRect.left - bfRect.left, bfWidth) : (bfWidth - 232);
-
+                return computeBfGeom(bfWidth, bfHeight, leftSidebarRightX, rightSidebarLeftX);
+            };
+            // Nächster freier Platz in der Reihe des Kartentyps (als Prozentwert). Die endgültige Lage rechnet die
+            // Darstellung (layoutMyCards) aus – Kreaturen landen immer in der Kreaturenreihe, Länder in der Länderreihe usw.
+            const slotPercent = (card, excludeInstanceId = null) => {
+                const geom = measureMyGeom();
                 const zoneType = getCardZoneType(card);
-                // Find the next free slot — simple count of existing cards of same type.
-                // Gaps from dead cards are closed by renumberZones() after combat resolves.
-                const existingOfSameType = [...(myState.battlefieldLower || []), ...(myState.battlefieldUpper || [])]
-                    .filter(c => getCardZoneType(c) === zoneType).length;
-                // Land=65%, Planeswalker=35% (right portion); Enchant=50%, Artifact=50%.
-                // All bottom zones sit in the last 2 rows (bottom CARD_H*2 of battlefield).
-                const zoneW = rightSidebarLeftX - leftSidebarRightX;
-                const landSplit = leftSidebarRightX + zoneW * 0.65;
-                const halfSplit = leftSidebarRightX + zoneW * 0.50;
-                const rowBottom  = bfHeight - CARD_H;
-                const row2Bottom = bfHeight;
-                let zoneLeft, zoneRight, zoneTop, zoneBottom, numRows;
-                if (zoneType === 'enchantment') {
-                    zoneLeft = leftSidebarRightX; zoneRight = halfSplit;
-                    zoneTop = rowBottom - CARD_H; zoneBottom = row2Bottom; numRows = 2;
-                } else if (zoneType === 'planeswalker') {
-                    zoneLeft = landSplit; zoneRight = rightSidebarLeftX;
-                    zoneTop = rowBottom - CARD_H; zoneBottom = rowBottom; numRows = 1;
-                } else if (zoneType === 'artifact') {
-                    zoneLeft = halfSplit; zoneRight = rightSidebarLeftX;
-                    zoneTop = rowBottom - CARD_H; zoneBottom = row2Bottom; numRows = 2;
-                } else if (zoneType === 'land') {
-                    zoneLeft = leftSidebarRightX; zoneRight = landSplit;
-                    zoneTop = rowBottom - CARD_H; zoneBottom = rowBottom; numRows = 1;
-                } else {
-                    // Creatures: everything above the bottom two rows
-                    zoneLeft = leftSidebarRightX; zoneRight = rightSidebarLeftX;
-                    zoneTop = 0; zoneBottom = rowBottom - CARD_H; numRows = 1;
-                }
-
-                const zoneWidth = Math.max(zoneRight - zoneLeft, CARD_W);
-                const slotsPerRow = Math.max(Math.floor(zoneWidth / CARD_W), 1);
-                const slotsTotal = slotsPerRow * numRows;
-                const slotIndex = existingOfSameType % slotsTotal;
-                const col = slotIndex % slotsPerRow;
-                const row = Math.floor(slotIndex / slotsPerRow);
-
-                const pxX = zoneLeft + col * CARD_W;
-                const pxY = Math.max(zoneBottom - CARD_H * (row + 1), zoneTop);
-                const x = bfWidth > 0 ? Math.min(Math.max((pxX / bfWidth) * 100, 0), 96) : 50;
-                const y = bfHeight > 0 ? Math.min(Math.max((pxY / bfHeight) * 100, 0), 96) : 50;
+                const others = [...(myState.battlefieldLower || []), ...(myState.battlefieldUpper || [])]
+                    .filter(c => c.instanceId !== excludeInstanceId && getCardZoneType(c) === zoneType);
+                // ans Ende der Reihe: größer als jedes vorhandene x
+                const maxX = others.reduce((m, c) => Math.max(m, c.x ?? 0), -1);
+                const zone = geom.zones[zoneType] || geom.zones.creature;
+                const pxX = fanX(zone, geom, others.length, others.length + 1);
+                const x = Math.max(Math.min(Math.max((pxX / geom.bfWidth) * 100, 0), 96), Math.min(maxX + 0.01, 99));
+                const y = Math.min(Math.max((zone.top / geom.bfHeight) * 100, 0), 96);
                 return { x, y };
             };
+            const getDefaultSpawnPosition = (card) => slotPercent(card);
 
             const playCard = (card, fromZone, targetBattlefield, coords = null) => {
                 let x = coords?.x;
@@ -3545,11 +3813,36 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             };
 
             // ── COMBAT ───────────────────────────────────────────────────────────
+            // ── PHASEN-STEUERUNG ────────────────────────────────────────────────
+            // Springt (nur vorwärts) zu `target`. Eine Transaktion auf dem Raum: liest die aktuelle Phase, damit
+            // zwei schnelle Klicks nicht doppelt weiterschalten, und erledigt die Kampf-Nebenwirkungen:
+            //  - Eintritt in „Angreifer“: Kampf im Modus 'attacking' anlegen (wie bisher startCombat)
+            //  - Sprung zu/über Kampfende: laufenden Kampf sauber beenden (combat = null)
+            //  - „Schaden“ ohne offene Prioritäten (z. B. Verteidiger hat den Tisch verlassen): 'resolving'
+            // Die Haltebitte („Moment!“) wird bei jedem Schrittwechsel aufgehoben.
+            const goToStep = (target) => runTx(async (tx) => {
+                const snap = await tx.get(roomRef);
+                if (!snap.exists()) return false;
+                const r = snap.data();
+                const ph = r.phase && r.phase.player === r.activePlayer && PHASE_STEPS.includes(r.phase.step) ? r.phase : { step: 'main1', turn: r.phase?.turn || 0, player: r.activePlayer };
+                if (stepIdx(target) <= stepIdx(ph.step)) return false;
+                const upd = { phase: { ...ph, step: target, at: Date.now() }, hold: null };
+                const ti = stepIdx(target);
+                if (ti >= stepIdx('combat_end') || ti < stepIdx('combat_begin')) {
+                    if (r.combat) upd.combat = null;
+                } else if (target === 'combat_attack') {
+                    if (!r.combat) upd.combat = { phase: 'attacking', attackerId: r.activePlayer, attackers: [], blockerMap: {}, priorities: {} };
+                } else if (target === 'combat_damage' && r.combat?.phase === 'blocking') {
+                    upd.combat = { ...r.combat, phase: 'resolving' };
+                }
+                tx.update(roomRef, upd);
+                return upd;
+            }).catch(err => { addToast(`❌ Phase konnte nicht gewechselt werden: ${err.message}`, 'red'); return false; });
+
             const startCombat = () => {
                 setPendingAttackers([]);
                 setPendingBlocker(null);
-                updateDoc(roomRef, { combat: { phase: 'attacking', attackerId: user.uid, attackers: [], blockerMap: {}, priorities: {} } });
-                addToast('⚔️ Kampf – Kreaturen anklicken, dann Ziel wählen', 'red');
+                goToStep('combat_attack').then(ok => ok && addToast('⚔️ Kampf – Kreaturen anklicken, dann Ziel wählen', 'red'));
             };
 
             // Firestore rejects any field with value `undefined` — this recursively strips them out.
@@ -3589,10 +3882,13 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 opponentIds.forEach(id => { priorities[id] = 'pending'; });
                 const newCombat = sanitize({ phase: 'blocking', attackerId: user.uid, attackers: serialized, blockerMap: {}, priorities });
                 // Transaction guarantees atomic read-then-write — plain updateDoc can silently fail
+                // Zugleich Phase → „Blocker“ (Haltebitte aufheben).
                 runTx(async (tx) => {
                     const snap = await tx.get(roomRef);
                     if (!snap.exists()) throw new Error('Room not found');
-                    tx.update(roomRef, { combat: newCombat });
+                    const r = snap.data();
+                    const ph = r.phase && r.phase.player === r.activePlayer && PHASE_STEPS.includes(r.phase.step) ? r.phase : { step: 'main1', turn: r.phase?.turn || 0, player: r.activePlayer };
+                    tx.update(roomRef, { combat: newCombat, phase: { ...ph, step: 'combat_block', at: Date.now() }, hold: null });
                 })
                 .then(() => addToast('⚔️ Angreifer erklärt – Gegner kann blocken', 'red'))
                 .catch(err => addToast(`❌ Angriff fehlgeschlagen: ${err.message}`, 'red'));
@@ -3605,7 +3901,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 const priorities = sanitize({ ...(current.priorities || {}), [user.uid]: 'passed' });
                 // Check if ALL holders of priority have now passed
                 const holders = Object.keys(priorities);
-                const allPassed = holders.length > 0 && holders.every(id => priorities[id] === 'passed');
+                // Wer den Tisch verlassen hat, gilt als „gepasst“
+                const allPassed = holders.length > 0 && holders.every(id => priorities[id] === 'passed' || !(lobbyState?.players || []).includes(id));
                 console.log('[Combat] priority passed by', user.uid, '| allPassed:', allPassed);
                 const newCombat = sanitize({ ...current, priorities, phase: allPassed ? 'resolving' : 'blocking' });
                 updateDoc(roomRef, { combat: newCombat })
@@ -3632,7 +3929,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
                 const pwDamage = {}; // "pw_<instanceId>_<oppId>" → dmg
                 let myLifeGained = 0; // from lifelink
+                // Erstschlag (Regel 510.4): Gibt es Erst-/Doppelschlag im Kampf, teilen im Erstschlag-Schritt nur
+                // Kreaturen mit Erst-/Doppelschlag Schaden aus, im normalen Schritt nur die ohne Erstschlag plus
+                // Doppelschlag. Im Erstschlag-Schritt gestorbene Kreaturen teilen danach keinen Schaden mehr aus.
+                const anyFS = (combat.attackers||[]).some(a => hasFirstStrike(a)) || Object.values(combat.blockerMap||{}).some(b => hasFirstStrike(b));
+                const dealsNow = (c) => !anyFS || (firstStrikeOnly ? hasFirstStrike(c) : (!hasFirstStrike(c) || hasDoubleStrike(c)));
+                const myFieldIds = new Set([...(myState.battlefieldLower||[]), ...(myState.battlefieldUpper||[])].map(c => c.instanceId));
+                const stillThere = (c, ownerId) => {
+                    if (!anyFS || firstStrikeOnly) return true;
+                    if (ownerId === user.uid) return myFieldIds.has(c.instanceId);
+                    const os = opponentStates[ownerId];
+                    return !os || [...(os.battlefieldLower||[]), ...(os.battlefieldUpper||[])].some(x => x.instanceId === c.instanceId);
+                };
                 const attackersThisStep = (combat.attackers||[]).filter(atk => {
+                    if (!stillThere(atk, combat.attackerId)) return false;
                     if (!firstStrikeOnly) return true;
                     // First strike step: only attackers WITH first/double strike deal damage
                     const blocker = combat.blockerMap?.[atk.instanceId];
@@ -3647,8 +3957,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     const lifelink = kw(atk, 'lifelink');
                     const target = atk.targetPlayerId;
                     const isPWTarget = target?.startsWith('pw_');
+                    const atkDeals = dealsNow(atk);
+                    const blockerAlive = !!blocker && stillThere(blocker, blocker.blockerOwnerId);
                     // In first-strike step: blocker only deals damage if IT has first strike
-                    const blockerDealsDmgThisStep = !firstStrikeOnly || (blocker && hasFirstStrike(blocker));
+                    const blockerDealsDmgThisStep = blockerAlive && dealsNow(blocker);
                     const applyDmgToTarget = (dmg) => {
                         if (!dmg || dmg <= 0) return;
                         if (lifelink) myLifeGained += dmg;
@@ -3666,7 +3978,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     if (blocker) {
                         const [blkP, blkT] = getPT(blocker);
                         const blkIndestructible = blocker.oracle_text?.toLowerCase().includes('indestructible');
-                        const assignedToBlocker = (damageAssign[atk.instanceId]?.[blocker.instanceId]) ?? atkP;
+                        const assignedToBlocker = !atkDeals || !blockerAlive ? 0 : ((damageAssign[atk.instanceId]?.[blocker.instanceId]) ?? atkP);
 
                         // Phyrexian Vindicator: damage to it is prevented and redirected
                         // "If damage would be dealt to this creature, prevent that damage.
@@ -3688,7 +4000,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         }
 
                         // Does blocker die?
-                        const blockerLethal = deathtouch ? dmgToBlocker >= 1 : dmgToBlocker >= blkT;
+                        const blockerLethal = blockerAlive && (deathtouch ? dmgToBlocker >= 1 : dmgToBlocker >= blkT);
                         if (blockerLethal && !blkIndestructible) {
                             const blockerOwner = blocker.blockerOwnerId;
                             if (blockerOwner === user.uid) {
@@ -3714,12 +4026,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         }
 
                         // Trample excess
-                        if (trample && assignedToBlocker < atkP) {
+                        if (trample && atkDeals && assignedToBlocker < atkP) {
                             const excess = atkP - assignedToBlocker;
                             applyDmgToTarget(excess);
                             addToast(`⚡ ${atk.name} trampelt ${excess} durch`, 'orange');
                         }
-                    } else {
+                    } else if (atkDeals) {
                         applyDmgToTarget(atkP);
                         addToast(`⚔️ ${atk.name} — ${atkP} ungeblockter Schaden`, 'red');
                     }
@@ -3849,14 +4161,28 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }
 
                 if (!firstStrikeOnly) {
-                    updateDoc(roomRef, { combat: null });
+                    finishCombat();
                     addToast('✅ Kampf abgeschlossen', 'green');
                 } else {
                     addToast('⚡ Erstschlag erledigt – jetzt normalen Schaden verteilen', 'yellow');
                 }
             };
 
-            const endCombat = () => { updateDoc(roomRef, { combat: null }); setPendingAttackers([]); setPendingBlocker(null); };
+            // Kampf beenden (Schaden aufgelöst, „Abbrechen“, „Kampf beenden“): combat = null und – falls die Phase
+            // noch in einem Kampfschritt davor steht – weiter zu „Kampfende“.
+            const finishCombat = () => runTx(async (tx) => {
+                const snap = await tx.get(roomRef);
+                if (!snap.exists()) return;
+                const r = snap.data();
+                const upd = { combat: null };
+                const ph = r.phase;
+                if (ph && ph.player === r.activePlayer && isCombatStep(ph.step) && stepIdx(ph.step) < stepIdx('combat_end')) {
+                    upd.phase = { ...ph, step: 'combat_end', at: Date.now() };
+                    upd.hold = null;
+                }
+                tx.update(roomRef, upd);
+            }).catch(err => addToast(`❌ Kampf konnte nicht beendet werden: ${err.message}`, 'red'));
+            const endCombat = () => { finishCombat(); setPendingAttackers([]); setPendingBlocker(null); };
 
             const assignBlock = (blockerCard, attackerCard) => {
                 const current = lobbyState?.combat;
@@ -4108,17 +4434,98 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 // nächster Spieler in Sitzreihenfolge, der noch am Tisch ist
                 let nextPlayer = order[0];
                 for (let i = 1; i <= seatOrder.length; i++) { const c = seatOrder[(myIndex + i) % seatOrder.length]; if (order.includes(c)) { nextPlayer = c; break; } }
-                if (nextPlayer === user.uid && activePlayerId === user.uid) {
-                    const untap = (arr) => (arr || []).map(c => c.isTapped ? { ...c, isTapped: false } : c);
-                    updateMyState({ ...bfUpdates, battlefieldUpper: untap(bfUpdates.battlefieldUpper || myState.battlefieldUpper), battlefieldLower: untap(bfUpdates.battlefieldLower || myState.battlefieldLower) });
-                    addToast('🔄 Neuer Zug – alles enttappt', 'blue');
-                    return;
-                }
-                updateDoc(roomRef, { activePlayer: nextPlayer });
+                // Zugwechsel (auch allein am Tisch): Phase → Enttappen des nächsten Spielers. Dessen Client enttappt,
+                // schaltet in die Versorgung und zieht in der Ziehphase automatisch. Laufender Kampf und Haltebitte enden.
+                setPendingAttackers([]); setPendingBlocker(null);
+                // Transaktion: nur wenn der Zug noch derselbe ist – zwei gleichzeitige Klicks (z. B. zwei Spieler,
+                // nachdem der aktive gegangen ist) schalten so nicht zwei Züge weiter.
+                const expectActive = activePlayerId, expectTurn = lobbyState?.phase?.turn || 0;
+                runTx(async (tx) => {
+                    const snap = await tx.get(roomRef);
+                    if (!snap.exists()) return;
+                    const r = snap.data();
+                    if (r.activePlayer !== expectActive || (r.phase?.turn || 0) !== expectTurn) return;
+                    tx.update(roomRef, {
+                        activePlayer: nextPlayer,
+                        phase: { step: 'untap', turn: expectTurn + 1, player: nextPlayer, at: Date.now() },
+                        hold: null,
+                        ...(r.combat ? { combat: null } : {})
+                    });
+                }).catch(err => addToast(`❌ Zug konnte nicht beendet werden: ${err.message}`, 'red'));
             };
 
             // Zug beenden darf der aktive Spieler – oder jeder, wenn der aktive Spieler den Tisch verlassen hat
-            const canEndTurn = activePlayerId === user.uid || (!!activePlayerId && !(lobbyState?.players || []).includes(activePlayerId));
+            const mayControlTurn = activePlayerId === user.uid || (!!activePlayerId && !(lobbyState?.players || []).includes(activePlayerId));
+
+            // „Moment!“: ein nicht aktiver Spieler bittet ums Anhalten (hold = { uid, name, at } im Raum). Solange
+            // sie gilt, sind Weiter/Zug beenden/Leiste des aktiven Spielers gesperrt. Verlässt der Haltende den
+            // Tisch, gilt sie nicht mehr.
+            const holdRaw = lobbyState?.hold || null;
+            const hold = holdRaw && holdRaw.uid && holdRaw.uid !== activePlayerId && (lobbyState?.players || []).includes(holdRaw.uid) ? holdRaw : null;
+            const iHold = hold?.uid === user.uid;
+            const holdBlocksMe = !!hold && !iHold;
+            const holdTitle = hold ? `${hold.name || getPlayerName(hold.uid)} möchte reagieren` : '';
+            const requestHold = () => updateDoc(roomRef, { hold: { uid: user.uid, name: getPlayerName(user.uid), at: Date.now() } }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+            const releaseHold = () => updateDoc(roomRef, { hold: null }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+
+            const canEndTurn = mayControlTurn && !holdBlocksMe;
+            const canControlPhase = canEndTurn;
+
+            // Kampf-Zustand für „Weiter“
+            const presentPlayers = lobbyState?.players || [];
+            const pendingDefenders = combatState ? Object.entries(combatState.priorities || {}).filter(([id, v]) => v !== 'passed' && presentPlayers.includes(id)).map(([id]) => id) : [];
+            const blockersDone = !combatState || combatState.phase === 'resolving' || pendingDefenders.length === 0;
+            const amDefending = !!combatState && combatState.phase === 'blocking' && combatState.attackerId !== user.uid && (combatState.priorities || {})[user.uid] !== undefined;
+            const myPriorityPending = amDefending && (combatState.priorities || {})[user.uid] !== 'passed';
+
+            // „Weiter“ des aktiven Spielers: ein Schritt vor; im Angriffsschritt = Angreifer bestätigen
+            // (ohne Angreifer direkt zum Kampfende), im Blockerschritt erst wenn alle Verteidiger gepasst haben,
+            // im Aufräumschritt = Zug beenden.
+            const nextStep = () => {
+                if (!canControlPhase) return;
+                const s = curStep;
+                if (s === 'cleanup') { endTurn(); return; }
+                if (s === 'combat_begin') { startCombat(); return; }
+                if (s === 'combat_attack') {
+                    if (combatState?.phase === 'attacking' && combatState.attackerId === user.uid && pendingAttackers.length > 0) {
+                        let atks = pendingAttackers;
+                        if (atks.some(a => !a.targetPlayerId)) {
+                            const opps = seatedOpponentIds.filter(id => presentPlayers.includes(id));
+                            if (opps.length === 1) atks = atks.map(a => a.targetPlayerId ? a : { ...a, targetPlayerId: opps[0] });
+                            else if (opps.length > 1) { addToast('🎯 Erst für jeden Angreifer ein Ziel wählen', 'yellow'); return; }
+                        }
+                        declareAttackers(atks);
+                        return;
+                    }
+                    // keine Angreifer → kein Blocken, kein Schaden
+                    setPendingAttackers([]);
+                    goToStep('combat_end');
+                    return;
+                }
+                if (s === 'combat_block') { if (!blockersDone) return; goToStep('combat_damage'); return; }
+                if (s === 'combat_damage' && combatState) { addToast('Erst den Kampfschaden verteilen', 'yellow'); return; }
+                goToStep(PHASE_STEPS[stepIdx(s) + 1]);
+            };
+            const jumpToStep = (target) => {
+                if (!canControlPhase || stepIdx(target) <= stepIdx(curStep) || !isJumpTarget(target)) return;
+                if (target === 'combat_attack') { startCombat(); return; }
+                // Erklärte Angreifer, Schaden noch nicht verteilt: Sprung über den Kampf nur nach Rückfrage
+                if (stepIdx(target) > stepIdx('combat_damage') && combatState && (combatState.attackers || []).length > 0 && combatState.phase !== 'attacking'
+                    && !window.confirm('Kampf abbrechen? Der Kampfschaden wurde noch nicht verteilt.')) return;
+                if (stepIdx(target) >= stepIdx('combat_end')) { setPendingAttackers([]); setPendingBlocker(null); }
+                goToStep(target);
+            };
+            const activeName = getPlayerName(activePlayerId);
+            const nextInfo = (() => {
+                if (!mayControlTurn) return { label: 'Weiter ▸', disabled: true, title: `Nur ${activeName} kann weiterschalten` };
+                if (holdBlocksMe) return { label: 'Weiter ▸', disabled: true, title: holdTitle };
+                if (curStep === 'combat_attack' && pendingAttackers.length > 0) return { label: 'Angriff ▸', disabled: false, title: `${pendingAttackers.length} Angreifer bestätigen` };
+                if (curStep === 'combat_attack') return { label: 'Weiter ▸', disabled: false, title: 'Ohne Angreifer weiter zum Kampfende' };
+                if (curStep === 'combat_block' && !blockersDone) return { label: '⏳ Warte…', disabled: true, title: `Warte auf Blocker… (${pendingDefenders.map(getPlayerName).join(', ')})` };
+                if (curStep === 'combat_damage' && combatState) return { label: 'Weiter ▸', disabled: true, title: 'Erst den Kampfschaden verteilen' };
+                if (curStep === 'cleanup') return { label: 'Weiter ▸', disabled: false, title: 'Zug beenden' };
+                return { label: 'Weiter ▸', disabled: false, title: `Weiter: ${PHASE_LABEL[PHASE_STEPS[stepIdx(curStep) + 1]]}` };
+            })();
 
             // ⋯ menu of the left console, anchored to the right of its button and kept inside the viewport.
             const MY_MENU_H = 84;
@@ -4190,57 +4597,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
             const handleDragStart = (e, card, fromZone, hostInfo = null) => setDraggedCard({ card, fromZone, hostInfo });
             
-            // Card dimensions as used by renderBattlefieldCard (w-[90px] h-[120px]) - needed to keep
-            // cards fully inside the battlefield when converting a drop position to a percentage.
-            const CARD_W = 90;
-            const CARD_H = 120;
-
-            // Calculates the correct slot position for a card based on its type and the current number of
-            // cards of that type already on the battlefield, then returns {x, y} percentages. Used both when
-            // a card is first played (via getDefaultSpawnPosition) and when snapping a dropped card to its
-            // zone after a manual drag. `excludeInstanceId` lets us ignore the card being moved itself so
-            // it doesn't count as "already there" when recalculating its own target slot.
-            const snapCardToZone = (card, excludeInstanceId = null) => {
-                const bfRect = playerLowerBattlefieldRef.current?.getBoundingClientRect();
-                if (!bfRect) return null;
-                const bfWidth = bfRect.width, bfHeight = bfRect.height;
-                const leftSidebarRect = myLeftSidebarRef.current?.getBoundingClientRect();
-                const rightSidebarRect = myRightSidebarRef.current?.getBoundingClientRect();
-                const leftSidebarRightX = leftSidebarRect ? leftSidebarRect.right - bfRect.left : 232;
-                const rightSidebarLeftX = rightSidebarRect ? rightSidebarRect.left - bfRect.left : bfWidth - 232;
-                const zoneType = getCardZoneType(card);
-                const allCards = [...(myState.battlefieldLower || []), ...(myState.battlefieldUpper || [])];
-                const existingOfSameType = allCards.filter(c => c.instanceId !== excludeInstanceId && getCardZoneType(c) === zoneType).length;
-                const zoneW2 = rightSidebarLeftX - leftSidebarRightX;
-                const landSplit2  = leftSidebarRightX + zoneW2 * 0.65;
-                const halfSplit2  = leftSidebarRightX + zoneW2 * 0.50;
-                const rowBottom2  = bfHeight - CARD_H;
-                const row2Bottom2 = bfHeight;
-                let zoneLeft, zoneRight, zoneTop, zoneBottom, numRows;
-                if (zoneType === 'enchantment') {
-                    zoneLeft = leftSidebarRightX; zoneRight = halfSplit2; zoneTop = rowBottom2 - CARD_H; zoneBottom = row2Bottom2; numRows = 2;
-                } else if (zoneType === 'planeswalker') {
-                    zoneLeft = landSplit2; zoneRight = rightSidebarLeftX; zoneTop = rowBottom2 - CARD_H; zoneBottom = rowBottom2; numRows = 1;
-                } else if (zoneType === 'artifact') {
-                    zoneLeft = halfSplit2; zoneRight = rightSidebarLeftX; zoneTop = rowBottom2 - CARD_H; zoneBottom = row2Bottom2; numRows = 2;
-                } else if (zoneType === 'land') {
-                    zoneLeft = leftSidebarRightX; zoneRight = landSplit2; zoneTop = rowBottom2 - CARD_H; zoneBottom = rowBottom2; numRows = 1;
-                } else {
-                    zoneLeft = leftSidebarRightX; zoneRight = rightSidebarLeftX; zoneTop = 0; zoneBottom = rowBottom2 - CARD_H; numRows = 1;
-                }
-                const zoneWidth = Math.max(zoneRight - zoneLeft, CARD_W);
-                const slotsPerRow = Math.max(Math.floor(zoneWidth / CARD_W), 1);
-                const slotsTotal = slotsPerRow * numRows;
-                const slotIndex = existingOfSameType % slotsTotal;
-                const col = slotIndex % slotsPerRow;
-                const row = Math.floor(slotIndex / slotsPerRow);
-                const pxX = zoneLeft + col * CARD_W;
-                const pxY = Math.max(zoneBottom - CARD_H * (row + 1), zoneTop);
-                return {
-                    x: bfWidth > 0 ? Math.min(Math.max((pxX / bfWidth) * 100, 0), 96) : 50,
-                    y: bfHeight > 0 ? Math.min(Math.max((pxY / bfHeight) * 100, 0), 96) : 50
-                };
-            };
+            // Zielplatz einer verschobenen/gelegten Karte: immer die Reihe ihres Kartentyps (Ende der Reihe).
+            const snapCardToZone = (card, excludeInstanceId = null) => (playerLowerBattlefieldRef.current ? slotPercent(card, excludeInstanceId) : null);
 
             // Re-snaps ALL cards currently on my battlefield to their correct zone slots based on their type.
             // Called on window resize so cards stay in their zones even after the layout changes size.
@@ -4268,10 +4626,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     updates.battlefieldUpper = (myState.battlefieldUpper || []).filter(c => c.instanceId !== draggedCard.card.instanceId);
                     updates.battlefieldLower = (myState.battlefieldLower || []).filter(c => c.instanceId !== draggedCard.card.instanceId);
 
-                    // Snap to zone slot instead of dropping at the raw mouse position, so cards stay
-                    // neatly in their zones even when dropped imprecisely.
+                    // Die Reihe ergibt sich aus dem Kartentyp; das x der Drop-Position bestimmt nur die
+                    // Reihenfolge innerhalb der Reihe (so lassen sich Karten umsortieren).
                     const snapped = snapCardToZone(draggedCard.card, draggedCard.card.instanceId);
-                    const finalX = snapped ? snapped.x : x;
+                    const finalX = x;
                     const finalY = snapped ? snapped.y : y;
                     const movedCard = { ...draggedCard.card, x: finalX, y: finalY };
                     if (targetBattlefield === 'upper') {
@@ -4347,7 +4705,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 setDraggedCard(null);
             };
 
-            const renderBattlefieldCard = (card, zone, isMine = false) => {
+            const renderBattlefieldCard = (card, zone, isMine = false, pos = null, geom = null) => {
                 const zoneName = isMine ? zone : `opponent_${zone}`;
                 // card.x / card.y are stored as percentages (0-100) of the battlefield container's own size,
                 // not absolute pixels. This way a card's position always maps correctly onto every viewer's
@@ -4364,12 +4722,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     <div 
                         key={card.instanceId} 
                         className="absolute cursor-pointer"
-                        style={{ left: leftStyle, top: isMine ? topStyle : (zone === 'battlefieldLower' ? undefined : topStyle), bottom: isMine ? undefined : (zone === 'battlefieldLower' ? topStyle : undefined) }}
+                        style={pos && geom
+                            // eigenes Feld: Reihe/Platz aus layoutMyCards, Größe über scale (kleine Fenster)
+                            ? { left: pos.px, top: pos.py, transform: geom.scale !== 1 ? `scale(${geom.scale})` : undefined, transformOrigin: 'top left', zIndex: 10 + pos.rank }
+                            : { left: leftStyle, top: isMine ? topStyle : (zone === 'battlefieldLower' ? undefined : topStyle), bottom: isMine ? undefined : (zone === 'battlefieldLower' ? topStyle : undefined) }}
                         draggable={isMine}
                         onDragStart={(e) => isMine && handleDragStart(e, card, zone)}
                         onDragOver={(e) => isMine && e.preventDefault()}
                         onDrop={(e) => {
                             if (!isMine || !draggedCard) return;
+                            // Nur Anlegen (Aura vom Stack, Ausrüstung) wird auf der Karte behandelt; alles andere
+                            // (z. B. ein Land aus der Hand auf eine Kreatur im vollen Fächer) geht ans Spielfeld weiter.
+                            const { card: src, fromZone: fz } = draggedCard;
+                            const attachDrag = (fz === 'stack' && isAuraCard(src)) || ((fz === 'battlefieldUpper' || fz === 'battlefieldLower' || (fz || '').endsWith('_attachment')) && isEquipmentCard(src));
+                            if (!attachDrag) return;
                             e.preventDefault();
                             e.stopPropagation(); // Don't let the battlefield's own onDrop also fire for this same drop
                             handleDropOnCard(card, zone);
@@ -4510,10 +4876,19 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 );
             };
 
+            // Reihen-Layout meiner Hälfte (bei jedem Rendern aus der gemessenen Größe berechnet – alte, frei
+            // gespeicherte Positionen landen so automatisch in der richtigen Reihe).
+            const myGeom = zoneBounds ? computeBfGeom(zoneBounds.bfWidth, zoneBounds.bfHeight, zoneBounds.leftSidebarRightX, zoneBounds.rightSidebarLeftX) : null;
+            const myLayout = myGeom ? layoutMyCards(myPermanents(), myGeom) : {};
+            const oppScale = myGeom ? myGeom.scale : 1;
+
             return (
                 <div className="h-full w-full relative bg-gray-900 overflow-hidden flex flex-col">
                     {/* Global notification toasts */}
                     <NotificationToasts />
+                    <HintStack hints={hints}
+                        onDraw={(h) => { drawCard(); addToast(`📖 ${h.cardName}: Karte gezogen`, 'blue'); setHints(p => p.filter(x => x.id !== h.id)); }}
+                        onDismiss={(h) => setHints(p => p.filter(x => x.id !== h.id))} />
 
                     {/* Mana color choice popup for dual lands */}
                     {manaChoice && ReactDOM.createPortal(
@@ -4573,7 +4948,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             onToast={addToast}
                         />
                     )}
-                    {combatState?.phase === 'resolving' && combatState.attackerId === user.uid && (
+                    {combatState?.phase === 'resolving' && combatState.attackerId === user.uid && (!phase || curStep === 'combat_damage') && (
                         <CombatOverlay mode="resolving"
                             attackers={combatState.attackers||[]}
                             onResolveCombat={resolveCombat}
@@ -4972,7 +5347,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                             onMouseLeave={() => setHoveredCard(null)}
                                         >
                                             <CardImage src={card.image_url}
-                                                className={`w-[72px] h-[100px] card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
+                                                className={`card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
+                                                style={{ width: Math.round(72 * oppScale), height: Math.round(100 * oppScale) }}
                                             />
                                             {card.counters?.length > 0 && (
                                                 <div className="absolute top-0 right-0 flex flex-col gap-0.5">
@@ -4989,36 +5365,44 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                         </div>
                                         );
                                     };
+                                    // Gleiche Reihen wie auf meiner Hälfte, gespiegelt (Kreaturen zur Tischmitte hin), skaliert wie meine Karten.
+                                    // Zu viele Karten in einer Reihe → Fächer (überlappend) statt Umbruch.
+                                    const rowH = Math.round(100 * oppScale) + 14;
+                                    const fan = (cards) => (
+                                        <div className="flex flex-nowrap overflow-hidden">
+                                            {cards.map((c, i) => (
+                                                <div key={c.instanceId} style={{ flex: i === cards.length - 1 ? '0 0 auto' : '0 1 auto', width: Math.round(72 * oppScale) + 4, minWidth: 10 }}>{oppCard(c)}</div>
+                                            ))}
+                                        </div>
+                                    );
                                     return (
                                         // Indent by 240px on each side to leave room for the sidebars
                                         <div className="flex flex-col-reverse h-full overflow-hidden" style={{ paddingLeft: 244, paddingRight: 244 }}>
                                             {/* Creature zone — at the BOTTOM of opponent half (adjacent to our creatures) */}
-                                            <div className="flex-grow border-t border-yellow-700/10 p-1 overflow-hidden">
-                                                <div className="text-[8px] text-green-400/40 font-bold uppercase mb-0.5">Kreaturen</div>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {byZone('creature').map(oppCard)}
-                                                </div>
+                                            <div className="flex-shrink-0 border-t border-yellow-700/10 px-1 overflow-hidden" style={{ height: rowH }}>
+                                                <div className="text-[8px] text-green-400/40 font-bold uppercase leading-3">Kreaturen</div>
+                                                {fan(byZone('creature'))}
                                             </div>
                                             {/* Land + Planeswalker row — middle */}
-                                            <div className="flex border-t border-yellow-700/10 flex-shrink-0" style={{ minHeight: CARD_H + 8 }}>
-                                                <div style={{ flex: '65 1 0' }} className="p-1 border-r border-yellow-700/10 overflow-hidden">
-                                                    <div className="text-[7px] text-yellow-400/40 font-bold uppercase">Länder</div>
-                                                    <div className="flex flex-wrap gap-1">{byZone('land').map(oppCard)}</div>
+                                            <div className="flex border-t border-yellow-700/10 flex-shrink-0" style={{ height: rowH }}>
+                                                <div style={{ flex: '65 1 0' }} className="px-1 border-r border-yellow-700/10 overflow-hidden min-w-0">
+                                                    <div className="text-[7px] text-yellow-400/40 font-bold uppercase leading-3">Länder</div>
+                                                    {fan(byZone('land'))}
                                                 </div>
-                                                <div style={{ flex: '35 1 0' }} className="p-1 overflow-hidden">
-                                                    <div className="text-[7px] text-red-300/40 font-bold uppercase">Planeswalker</div>
-                                                    <div className="flex flex-wrap gap-1">{byZone('planeswalker').map(oppCard)}</div>
+                                                <div style={{ flex: '35 1 0' }} className="px-1 overflow-hidden min-w-0">
+                                                    <div className="text-[7px] text-red-300/40 font-bold uppercase leading-3">Planeswalker</div>
+                                                    {fan(byZone('planeswalker'))}
                                                 </div>
                                             </div>
                                             {/* Enchantment + Artifact row — at the TOP (far from us) */}
-                                            <div className="flex flex-shrink-0" style={{ minHeight: CARD_H + 8 }}>
-                                                <div className="flex-1 p-1 border-r border-yellow-700/10 overflow-hidden">
-                                                    <div className="text-[7px] text-purple-400/40 font-bold uppercase">Verzaubern</div>
-                                                    <div className="flex flex-wrap gap-1">{byZone('enchantment').map(oppCard)}</div>
+                                            <div className="flex flex-shrink-0" style={{ height: rowH }}>
+                                                <div className="flex-1 px-1 border-r border-yellow-700/10 overflow-hidden min-w-0">
+                                                    <div className="text-[7px] text-purple-400/40 font-bold uppercase leading-3">Verzaubern</div>
+                                                    {fan(byZone('enchantment'))}
                                                 </div>
-                                                <div className="flex-1 p-1 overflow-hidden">
-                                                    <div className="text-[7px] text-orange-400/40 font-bold uppercase">Artefakte</div>
-                                                    <div className="flex flex-wrap gap-1">{byZone('artifact').map(oppCard)}</div>
+                                                <div className="flex-1 px-1 overflow-hidden min-w-0">
+                                                    <div className="text-[7px] text-orange-400/40 font-bold uppercase leading-3">Artefakte</div>
+                                                    {fan(byZone('artifact'))}
                                                 </div>
                                             </div>
                                         </div>
@@ -5032,7 +5416,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <>
                                     {/* Opponent Left Sidebar — runs from top of opponent half to just above
                                         the hand toggle button (which sits at the very bottom of the half) */}
-                                    <div className="absolute top-2 left-2 z-40 w-56 flex flex-col gap-2 pointer-events-none scrollbar-hide" style={{ maxHeight: 'calc(50vh - 52px)', overflowY: 'auto' }}>
+                                    <div className="absolute top-2 left-2 z-40 w-56 flex flex-col gap-2 pointer-events-none scrollbar-hide" style={{ maxHeight: 'calc(50vh - 16px)', overflowY: 'auto' }}>
                                         <div className="pointer-events-auto bg-gray-900/80 backdrop-blur-sm p-4 rounded-lg border border-yellow-700/50 flex-shrink-0 shadow-lg">
                                             <div className="flex justify-between items-center mb-2">
                                                 <h4 className="text-red-400 text-sm font-bold">{getPlayerName(opponentIds[0])}</h4>
@@ -5085,7 +5469,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                         <button
                                             ref={oppHandBtnRef}
                                             onClick={() => setOppHandMinimized(o => !o)}
-                                            className="pointer-events-auto w-full flex items-center justify-between px-3 py-2 bg-gray-800/80 hover:bg-red-700 border border-yellow-700/60 rounded-lg text-red-300 font-bold text-sm shadow-lg transition-colors flex-shrink-0"
+                                            className="pointer-events-auto sticky bottom-0 w-full flex items-center justify-between px-3 py-2 bg-gray-800 hover:bg-red-700 border border-yellow-700/60 rounded-lg text-red-300 font-bold text-sm shadow-lg transition-colors flex-shrink-0"
                                         >
                                             <span>Hand ({opponentStates[opponentIds[0]].hand?.length || 0})</span>
                                             <span>{oppHandMinimized ? '▶' : '◀'}</span>
@@ -5188,29 +5572,54 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         <div 
                             ref={playerLowerBattlefieldRef}
                             className="absolute inset-0"
+                            style={{ zIndex: 0 }}
                             onDrop={(e) => handleDropOnBattlefield(e, 'lower', playerLowerBattlefieldRef)}
                             onDragOver={(e) => e.preventDefault()}
                         >
-                            {zoneBounds && (() => {
-                                const { leftSidebarRightX, rightSidebarLeftX, bfWidth, bfHeight } = zoneBounds;
-                                const label = (text, color) => <span style={{ fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.5, whiteSpace: 'nowrap', position: 'absolute', top: 2, left: 4, color }}>{text}</span>;
-                                const box = (style, color, children) => <div style={{ position: 'absolute', border: `1px dashed ${color}`, borderRadius: 3, pointerEvents: 'none', ...style }}>{children}</div>;
-                                const zW = rightSidebarLeftX - leftSidebarRightX;
-                                const landSplit = leftSidebarRightX + zW * 0.65;
-                                const halfSplit = leftSidebarRightX + zW * 0.50;
-                                const rowBottom = bfHeight - CARD_H;
-                                return (
-                                    <div className="absolute inset-0 pointer-events-none z-0">
-                                        {box({ left: leftSidebarRightX, width: zW, top: 0, height: rowBottom - CARD_H }, 'rgba(74,222,128,0.3)', label('Kreaturen', '#bbf7d0'))}
-                                        {box({ left: leftSidebarRightX, width: landSplit - leftSidebarRightX, top: rowBottom - CARD_H, height: CARD_H }, 'rgba(234,179,8,0.3)', label('Länder', '#fde68a'))}
-                                        {box({ left: landSplit, width: rightSidebarLeftX - landSplit, top: rowBottom - CARD_H, height: CARD_H }, 'rgba(239,68,68,0.3)', label('Planeswalker', '#fca5a5'))}
-                                        {box({ left: leftSidebarRightX, width: halfSplit - leftSidebarRightX, top: rowBottom, height: CARD_H }, 'rgba(168,85,247,0.3)', label('Verzaubern', '#d8b4fe'))}
-                                        {box({ left: halfSplit, width: rightSidebarLeftX - halfSplit, top: rowBottom, height: CARD_H }, 'rgba(249,115,22,0.3)', label('Artefakte', '#fed7aa'))}
-                                    </div>
-                                );
-                            })()}
-                            {(myState.battlefieldLower || []).map(card => renderBattlefieldCard(card, 'battlefieldLower', true))}
-                            {(myState.battlefieldUpper || []).map(card => renderBattlefieldCard(card, 'battlefieldUpper', true))}
+                            {myGeom && (
+                                <div className="absolute inset-0 pointer-events-none z-0">
+                                    {Object.entries(myGeom.zones).map(([t, z]) => (
+                                        <div key={t} data-zone={t} style={{ position: 'absolute', left: z.left, width: z.right - z.left, top: z.top, height: myGeom.ch, border: `1px dashed ${z.color}`, borderRadius: 3, pointerEvents: 'none' }}>
+                                            <span style={{ fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.5, whiteSpace: 'nowrap', position: 'absolute', top: 2, right: 4, color: z.text }}>{z.label}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {(myState.battlefieldLower || []).map(card => renderBattlefieldCard(card, 'battlefieldLower', true, myLayout[card.instanceId], myGeom))}
+                            {(myState.battlefieldUpper || []).map(card => renderBattlefieldCard(card, 'battlefieldUpper', true, myLayout[card.instanceId], myGeom))}
+                        </div>
+
+                        {/* Phasenleiste – oben in meiner Hälfte zwischen den Seitenleisten. Zeigt die Phase des AKTIVEN
+                            Spielers; steuern darf nur er (oder jeder, wenn er den Tisch verlassen hat). */}
+                        <div style={{ position: 'absolute', top: 0, left: 240, right: 240, height: PHASE_BAR_H, zIndex: 45 }}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => handleDropOnBattlefield(e, 'lower', playerLowerBattlefieldRef)}
+                        >
+                            <PhaseBar
+                                step={curStep}
+                                ownerName={activePlayerId && activePlayerId !== user.uid ? activeName : null}
+                                canControl={canControlPhase}
+                                lockTitle={!mayControlTurn ? `Nur ${activeName} kann die Phase wechseln` : holdTitle}
+                                onJump={jumpToStep}
+                                onNext={nextStep}
+                                nextDisabled={nextInfo.disabled}
+                                nextTitle={nextInfo.title}
+                                flash={phaseFlash}
+                                extra={
+                                    hold ? (
+                                        iHold
+                                            ? <button onClick={releaseHold} title="Haltebitte aufheben – der aktive Spieler kann weitermachen" className="flex-shrink-0 px-2 h-5 rounded border-0 font-bold whitespace-nowrap bg-yellow-600 hover:bg-yellow-500 text-gray-950">Weiter geben</button>
+                                            : (
+                                                <span className="flex items-center gap-1 flex-shrink-0 whitespace-nowrap">
+                                                    <span className="text-yellow-300 font-bold timer-warning" title={holdTitle}>✋ {hold.name || getPlayerName(hold.uid)}</span>
+                                                    {mayControlTurn && <button onClick={releaseHold} title={`${holdTitle} – trotzdem fortsetzen (z. B. wenn niemand reagiert)`} className="px-1.5 h-5 rounded border-solid border border-yellow-700/60 bg-gray-900 hover:bg-gray-800 text-yellow-300">Fortsetzen</button>}
+                                                </span>
+                                            )
+                                    ) : (!mayControlTurn && activePlayerId && (
+                                        <button onClick={requestHold} title={`${activeName} bitten, kurz anzuhalten – du möchtest reagieren`} className="flex-shrink-0 px-2 h-5 rounded border-solid border border-yellow-700/60 bg-gray-900 hover:bg-gray-800 text-yellow-300 whitespace-nowrap">✋ Moment!</button>
+                                    ))
+                                }
+                            />
                         </div>
 
                         {/* ── PLAYER UI OVERLAYS ─────────────────────────────────────── */}
@@ -5222,6 +5631,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         <div style={{ position: 'absolute', bottom: 0, left: 240, right: 240 }} className="z-50 flex flex-col items-center pointer-events-none">
                             <button
                                 onClick={() => setMyHandMinimized(!myHandMinimized)}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => handleDropOnZone(e, 'hand')}
                                 title={myHandMinimized ? 'Hand zeigen' : 'Hand verbergen'}
                                 className={`pointer-events-auto bg-gray-900/90 hover:bg-gray-800 backdrop-blur-sm border-solid border-0 border-t border-x border-yellow-700/60 rounded-t-lg px-4 py-0.5 flex items-center gap-2 text-yellow-400 font-bold text-xs shadow-lg transition-colors ${myHandMinimized ? 'border-b' : ''}`}
                             >
@@ -5293,38 +5704,35 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 )}
                             </div>
 
-                            {/* Action row: end turn, combat, ⋯ menu */}
+                            {/* Action row: Weiter (bzw. „Kein Blocker“ als Verteidiger), Zug beenden, ⋯ menu */}
                             <div className="flex gap-1 flex-shrink-0">
+                                {myPriorityPending ? (
+                                    <button
+                                        onClick={passPriority}
+                                        title="Kein Blocker / Priorität abgeben"
+                                        aria-label="Kein Blocker"
+                                        className="flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer"
+                                    >🛡️ Kein Blocker</button>
+                                ) : amDefending ? (
+                                    <button disabled title="Du hast gepasst – warte auf den Angreifer" aria-label="Gepasst"
+                                        className="flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold shadow bg-gray-700 text-gray-400 cursor-not-allowed"
+                                    >✓ Gepasst</button>
+                                ) : (
+                                    <button
+                                        onClick={nextStep}
+                                        disabled={nextInfo.disabled}
+                                        title={nextInfo.title}
+                                        aria-label="Weiter"
+                                        className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${nextInfo.disabled ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-400 text-gray-950 cursor-pointer'}`}
+                                    >{nextInfo.label}</button>
+                                )}
                                 <button
                                     onClick={endTurn}
                                     disabled={!canEndTurn}
-                                    title="Zug beenden"
+                                    title={!mayControlTurn ? `Nur ${activeName} kann den Zug beenden` : holdBlocksMe ? holdTitle : 'Zug beenden'}
                                     aria-label="Zug beenden"
-                                    className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${canEndTurn ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
+                                    className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${canEndTurn ? 'bg-yellow-700 hover:bg-yellow-600 text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
                                 >⏭ Zug beenden</button>
-                                {(() => {
-                                    const isBlocking = combatState?.phase === 'blocking' && combatState.attackerId !== user.uid;
-                                    const combatLabel = isBlocking ? 'Kein Blocker' : combatState ? 'Kampf beenden' : 'Angreifen';
-                                    return (
-                                        <button
-                                            onClick={() => {
-                                                if (!combatState) startCombat();
-                                                else if (isBlocking) passPriority();
-                                                else endCombat();
-                                            }}
-                                            disabled={activePlayerId !== user.uid && !isBlocking}
-                                            title={combatLabel}
-                                            aria-label={combatLabel}
-                                            className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${
-                                                isBlocking
-                                                    ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer'
-                                                    : activePlayerId !== user.uid
-                                                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                                    : combatState ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-gray-900 hover:bg-red-700 text-red-300 border border-solid border-red-700/50'
-                                            }`}
-                                        >{isBlocking ? '🛡️' : '⚔️'} {combatLabel}</button>
-                                    );
-                                })()}
                                 {(() => {
                                     const maxCmdDmg = Math.max(0, ...Object.values(myState.commanderDamage || {}));
                                     return (
