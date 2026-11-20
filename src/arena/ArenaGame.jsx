@@ -1463,8 +1463,37 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
         // ── MANA DISPLAY ──────────────────────────────────────────────────────────
         const MANA_COLORS = { W: { bg: '#fef9c3', text: '#78350f', label: 'W' }, U: { bg: '#1e40af', text: '#bfdbfe', label: 'U' }, B: { bg: '#1c1917', text: '#d4d4d8', label: 'B' }, R: { bg: '#991b1b', text: '#fecaca', label: 'R' }, G: { bg: '#14532d', text: '#bbf7d0', label: 'G' }, C: { bg: '#374151', text: '#d1d5db', label: 'C' } };
-        const ManaPool = ({ pool, onAdd, onRemove, onClear }) => {
+        // compact: one row of six pips for the left console (click = +1, right-click or the small − = −1,
+        // ✕ clears) so the sidebar fits without scrolling. The default layout keeps separate +/− buttons.
+        const ManaPool = ({ pool, onAdd, onRemove, onClear, compact = false }) => {
             const total = Object.values(pool).reduce((s, n) => s + n, 0);
+            if (compact) return (
+                <div style={{ position: 'relative', background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '5px 18px 3px 5px' }}>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                        {Object.entries(MANA_COLORS).map(([sym, c]) => (
+                            <div key={sym} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flex: 1 }}>
+                                <button
+                                    onClick={() => onAdd(sym)}
+                                    onContextMenu={(e) => { e.preventDefault(); onRemove(sym); }}
+                                    title={`${c.label}-Mana · Klick: +1 · Rechtsklick: −1`}
+                                    style={{ width: 22, height: 22, borderRadius: '50%', background: c.bg, color: c.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 'bold', border: pool[sym] > 0 ? '1px solid #d4b46a' : '1px solid rgba(255,255,255,0.2)', position: 'relative', cursor: 'pointer', padding: 0 }}
+                                >
+                                    {c.label}
+                                    {pool[sym] > 0 && (
+                                        <span style={{ position: 'absolute', top: -4, right: -5, background: '#f59e0b', color: '#000', borderRadius: 7, minWidth: 13, height: 13, padding: '0 2px', fontSize: 8, fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                                            {pool[sym]}
+                                        </span>
+                                    )}
+                                </button>
+                                <button onClick={() => onRemove(sym)} disabled={!pool[sym]} title={`${c.label}-Mana −1`} style={{ width: '100%', height: 9, background: '#374151', border: 'none', color: '#9ca3af', fontSize: 8, cursor: pool[sym] ? 'pointer' : 'default', borderRadius: 2, lineHeight: 1, padding: 0, opacity: pool[sym] ? 1 : 0.3 }}>−</button>
+                            </div>
+                        ))}
+                    </div>
+                    {total > 0 && (
+                        <button onClick={onClear} title="Manapool leeren" style={{ position: 'absolute', top: 3, right: 3, width: 13, height: 13, color: '#9ca3af', fontSize: 9, background: 'rgba(55,65,81,0.8)', border: 'none', borderRadius: 3, cursor: 'pointer', padding: 0, lineHeight: 1 }}>✕</button>
+                    )}
+                </div>
+            );
             return (
                 <div style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '5px 6px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
@@ -2041,6 +2070,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // { card, fromZone, type: 'shock'|'check'|'bounce'|'pain'|'reveal'|'scry'|'surveil'|'slow'|'fast' } // triggers waiting to be ordered onto stack
             const isResolvingCombatRef = React.useRef(false);
             const [cmdDmgOpen, setCmdDmgOpen] = useState(false);
+            // Fixed viewport position of the commander damage popover ({ left, top }), computed when it opens.
+            const [cmdDmgPos, setCmdDmgPos] = useState({ left: 244, top: 8 });
+            // ⋯ menu of the left console: null = closed, otherwise its fixed viewport position { left, top }.
+            const [myMenuPos, setMyMenuPos] = useState(null);
+            const myMenuBtnRef = useRef(null);
+            const myMenuRef = useRef(null);
 
             // ── MANA POOL ─────────────────────────────────────────────────────────
             const [manaPool, setManaPool] = useState({ W:0, U:0, B:0, R:0, G:0, C:0 });
@@ -2249,6 +2284,28 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     return next;
                 });
             }); // intentionally no dep array — measures DOM on every render, but bails early if unchanged
+
+            // A window resize doesn't necessarily re-render GameSim, so the effect above would keep stale
+            // sidebar/battlefield positions. Force a render on resize so zoneBounds is re-measured.
+            const [, setViewportTick] = useState(0);
+            useEffect(() => {
+                const onResize = () => setViewportTick(t => t + 1);
+                window.addEventListener('resize', onResize);
+                return () => window.removeEventListener('resize', onResize);
+            }, []);
+
+            // ⋯ menu: close on click outside the menu/its button and on Escape.
+            useEffect(() => {
+                if (!myMenuPos) return;
+                const onDown = (e) => {
+                    if (myMenuRef.current?.contains(e.target) || myMenuBtnRef.current?.contains(e.target)) return;
+                    setMyMenuPos(null);
+                };
+                const onKey = (e) => { if (e.key === 'Escape') setMyMenuPos(null); };
+                document.addEventListener('mousedown', onDown);
+                document.addEventListener('keydown', onKey);
+                return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+            }, [myMenuPos]);
 
             // Track the cursor position while a card preview is showing, so the big preview image can
             // follow the mouse instead of sitting in a fixed corner of the screen.
@@ -4063,6 +4120,26 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // Zug beenden darf der aktive Spieler – oder jeder, wenn der aktive Spieler den Tisch verlassen hat
             const canEndTurn = activePlayerId === user.uid || (!!activePlayerId && !(lobbyState?.players || []).includes(activePlayerId));
 
+            // ⋯ menu of the left console, anchored to the right of its button and kept inside the viewport.
+            const MY_MENU_H = 84;
+            const toggleMyMenu = () => {
+                if (myMenuPos) { setMyMenuPos(null); return; }
+                const r = myMenuBtnRef.current?.getBoundingClientRect();
+                if (!r) return;
+                setMyMenuPos({ left: r.right + 6, top: Math.max(8, Math.min(r.top, window.innerHeight - MY_MENU_H - 8)) });
+            };
+            // Commander damage popover: right of the left sidebar, top at the ⋯ button, but never below the
+            // viewport (its maxHeight is 45vh, so it is pulled up as far as needed).
+            const openCmdDmg = () => {
+                const sb = myLeftSidebarRef.current?.getBoundingClientRect();
+                const btn = myMenuBtnRef.current?.getBoundingClientRect();
+                const maxH = window.innerHeight * 0.45;
+                const top = btn ? Math.max(8, Math.min(btn.top, window.innerHeight - maxH - 8)) : 8;
+                setCmdDmgPos({ left: (sb ? sb.right : 232) + 8, top });
+                setCmdDmgOpen(true);
+                setMyMenuPos(null);
+            };
+
             const handleLeaveGame = () => {
                 if ((lobbyState?.players || []).length <= 1) { onLeave(); return; } // Solo-Tisch: ohne Wertung raus
                 setLeaveGameModal(true);
@@ -5138,20 +5215,21 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
                         {/* ── PLAYER UI OVERLAYS ─────────────────────────────────────── */}
 
-                        {/* Hand toggle button — always visible in the bottom-left free area next to the You sidebar */}
-                        <button
-                            onClick={() => setMyHandMinimized(!myHandMinimized)}
-                            style={{ position: 'absolute', bottom: 8, left: 8, width: 224 }}
-                            className="z-50 bg-gray-800/90 hover:bg-blue-700 backdrop-blur-sm border border-yellow-700/60 rounded-lg py-2 px-3 flex items-center justify-between text-blue-300 font-bold text-sm shadow-lg transition-colors"
-                        >
-                            <span>Hand ({myState.hand.length})</span>
-                            <span className="text-lg">{myHandMinimized ? '▶' : '◀'}</span>
-                        </button>
-
-                        {/* Hand zone — slides in from the left when open */}
-                        {!myHandMinimized && (
-                            <div style={{ position: 'absolute', bottom: 0, left: 240 }} className="z-50">
-                                <div className="bg-gray-900/90 backdrop-blur-sm px-4 py-2 rounded-t-lg border-t border-x border-yellow-700/50 relative shadow-xl max-w-[calc(100vw-464px)]"
+                        {/* Hand — a tab centered on the bottom edge between the two sidebars. When open, the
+                            hand panel sits directly below the tab (the tab stays on top of the panel). The
+                            wrapper spans the free width between the sidebars (8px margin + w-56 + 8px gap each
+                            side) and lets clicks through; only the tab and the panel catch the mouse. */}
+                        <div style={{ position: 'absolute', bottom: 0, left: 240, right: 240 }} className="z-50 flex flex-col items-center pointer-events-none">
+                            <button
+                                onClick={() => setMyHandMinimized(!myHandMinimized)}
+                                title={myHandMinimized ? 'Hand zeigen' : 'Hand verbergen'}
+                                className={`pointer-events-auto bg-gray-900/90 hover:bg-gray-800 backdrop-blur-sm border-solid border-0 border-t border-x border-yellow-700/60 rounded-t-lg px-4 py-0.5 flex items-center gap-2 text-yellow-400 font-bold text-xs shadow-lg transition-colors ${myHandMinimized ? 'border-b' : ''}`}
+                            >
+                                <span>{myHandMinimized ? '▲' : '▼'}</span>
+                                <span>Hand ({myState.hand.length})</span>
+                            </button>
+                            {!myHandMinimized && (
+                                <div className="pointer-events-auto bg-gray-900/90 backdrop-blur-sm px-4 py-2 rounded-t-lg border-t border-x border-yellow-700/50 relative shadow-xl max-w-full min-w-[200px]"
                                     ref={myHandZoneRef}
                                     onDrop={(e) => handleDropOnZone(e, 'hand')}
                                     onDragOver={(e) => e.preventDefault()}
@@ -5159,20 +5237,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     <div className="flex gap-2 items-center h-[18vh] overflow-x-auto" style={{ scrollbarWidth:'thin', scrollbarColor:'rgba(99,102,241,0.5) rgba(30,27,75,0.3)' }}>
                                         <div className="flex overflow-x-visible gap-2 h-full flex-grow items-center" style={{ minWidth: 'max-content' }}>
                                             {myState.hand.map(card => (
-                                                <div 
+                                                <div
                                                     key={card.instanceId}
                                                     draggable
                                                     onDragStart={(e) => handleDragStart(e, card, 'hand')}
                                                     className="relative group/handcard cursor-pointer flex-shrink-0"
                                                 >
-                                                    <CardImage 
-                                                        src={card.image_url} 
+                                                    <CardImage
+                                                        src={card.image_url}
                                                         style={{ width: 'calc((18vh - 8px) * 0.714)', height: 'calc(18vh - 8px)' }}
                                                         className="group-hover/handcard:brightness-110 transition-[filter]"
                                                         onMouseEnter={() => setHoveredCard(card.image_url)}
                                                         onMouseLeave={() => setHoveredCard(null)}
                                                     />
-                                                    <button 
+                                                    <button
                                                         onClick={(e) => { e.stopPropagation(); playCardFromHand(card); }}
                                                         className="absolute bottom-1 inset-x-1 bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-1 rounded opacity-0 group-hover/handcard:opacity-100 touch-show transition-opacity shadow-lg"
                                                         title={isLand(card) ? 'Auf dein Spielfeld' : 'Auf den Stack legen'}
@@ -5182,122 +5260,148 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
+                        </div>
 
-                        {/* Left sidebar (You / Life / Command Zone) — top to just above hand */}
-                        <div ref={myLeftSidebarRef} style={{ position: 'absolute', top: 4, bottom: 4, left: 8 }} className="z-40 w-56 overflow-y-auto flex flex-col gap-2 scrollbar-hide">
-                            {/* You / Life / Commander Damage */}
-                            <div className="bg-gray-900/80 backdrop-blur-sm p-4 rounded-lg border border-yellow-700/50 flex-shrink-0 shadow-lg">
-                                <div className="flex justify-between items-center mb-2">
+                        {/* Left sidebar — compact console (life, mana, emblems), action row, Commander-Zone.
+                            Sized to fit the full height of my half without scrolling (the Commander-Zone card
+                            absorbs the remaining height); overflow-y-auto is only a fallback for tiny windows. */}
+                        <div ref={myLeftSidebarRef} style={{ position: 'absolute', top: 4, bottom: 4, left: 8 }} className="z-40 w-56 overflow-y-auto scrollbar-hide flex flex-col gap-1.5">
+                            {/* Console: Du + turn badge, life, mana pool, emblems */}
+                            <div className="bg-gray-900/80 backdrop-blur-sm px-3 py-2 rounded-lg border border-yellow-700/50 flex-shrink-0 shadow-lg">
+                                <div className="flex justify-between items-center h-5">
                                     <h4 className="text-blue-400 text-sm font-bold">Du</h4>
                                     {activePlayerId === user.uid && <ActiveTurnBadge />}
                                 </div>
-                                <div className="flex gap-1 mb-2">
-                                    <button 
-                                        onClick={endTurn} 
-                                        disabled={!canEndTurn}
-                                        className={`flex-1 py-1.5 rounded text-xs font-bold transition-colors ${canEndTurn ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
-                                    >Zug beenden</button>
-                                    <button
-                                        onClick={() => {
-                                            if (!combatState) startCombat();
-                                            else if (combatState.phase === 'blocking' && combatState.attackerId !== user.uid) passPriority();
-                                            else endCombat();
-                                        }}
-                                        disabled={activePlayerId !== user.uid && !(combatState?.phase === 'blocking' && combatState.attackerId !== user.uid)}
-                                        className={`flex-1 py-1.5 rounded text-xs font-bold transition-colors ${
-                                            combatState?.phase === 'blocking' && combatState.attackerId !== user.uid
-                                                ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer'
-                                                : activePlayerId !== user.uid
-                                                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                                : combatState ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-gray-900 hover:bg-red-700 text-red-300'
-                                        }`}
-                                    >
-                                        {combatState?.phase === 'blocking' && combatState.attackerId !== user.uid
-                                            ? '🛡️ Kein Blocker'
-                                            : combatState ? '⚔️ Kampf beenden' : '⚔️ Angreifen'}
-                                    </button>
+                                <div className="flex items-center justify-between my-1">
+                                    <button onClick={() => updateMyState({ life: myState.life - 1 })} title="Leben −1" aria-label="Leben −1" className="w-8 h-8 rounded-full bg-red-700 hover:bg-red-600 border border-solid border-red-500/60 text-white text-lg font-bold leading-none shadow">−</button>
+                                    <div className="flex flex-col items-center leading-none">
+                                        <span className="text-green-400 font-title font-bold text-3xl">{myState.life}</span>
+                                        <span className="text-gray-400 text-[9px] uppercase tracking-wider mt-0.5">Leben</span>
+                                    </div>
+                                    <button onClick={() => updateMyState({ life: myState.life + 1 })} title="Leben +1" aria-label="Leben +1" className="w-8 h-8 rounded-full bg-green-700 hover:bg-green-600 border border-solid border-green-500/60 text-white text-lg font-bold leading-none shadow">+</button>
                                 </div>
-                                <ManaPool pool={manaPool} onAdd={addMana} onRemove={removeMana} onClear={clearMana} />
+                                <ManaPool compact pool={manaPool} onAdd={addMana} onRemove={removeMana} onClear={clearMana} />
                                 {myEmblems.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mb-2">
+                                    <div className="flex gap-1 mt-1.5 overflow-hidden whitespace-nowrap">
                                         {myEmblems.map(e => (
-                                            <span key={e.instanceId} className="bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[10px] font-bold px-1.5 py-0.5 rounded cursor-default" title={e.stage > 0 ? e.stageText[e.stage - 1] : 'Gerade erstellt'}>
+                                            <span key={e.instanceId} className="min-w-0 truncate bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[10px] font-bold px-1.5 py-0.5 rounded cursor-default" title={`${e.name}: ${e.stage > 0 ? e.stageText[e.stage - 1] : 'Gerade erstellt'}`}>
                                                 {e.name} {e.maxStage > 1 ? `${e.stage}/${e.maxStage}` : ''}
                                             </span>
                                         ))}
                                     </div>
                                 )}
-                                <div className="text-white text-sm space-y-1">
-                                    <div className="flex items-center justify-between">
-                                        <span>Leben:</span>
-                                        <span className="text-green-400 font-bold text-lg">{myState.life}</span>
-                                    </div>
-                                    <div className="flex gap-1 mb-2">
-                                        <button onClick={() => updateMyState({ life: myState.life + 1 })} className="flex-1 bg-green-600 px-2 py-1 rounded text-xs hover:bg-green-500">+</button>
-                                        <button onClick={() => updateMyState({ life: myState.life - 1 })} className="flex-1 bg-red-600 px-2 py-1 rounded text-xs hover:bg-red-500">-</button>
-                                    </div>
-                                </div>
                             </div>
+
+                            {/* Action row: end turn, combat, ⋯ menu */}
+                            <div className="flex gap-1 flex-shrink-0">
+                                <button
+                                    onClick={endTurn}
+                                    disabled={!canEndTurn}
+                                    title="Zug beenden"
+                                    aria-label="Zug beenden"
+                                    className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${canEndTurn ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
+                                >⏭ Zug beenden</button>
+                                {(() => {
+                                    const isBlocking = combatState?.phase === 'blocking' && combatState.attackerId !== user.uid;
+                                    const combatLabel = isBlocking ? 'Kein Blocker' : combatState ? 'Kampf beenden' : 'Angreifen';
+                                    return (
+                                        <button
+                                            onClick={() => {
+                                                if (!combatState) startCombat();
+                                                else if (isBlocking) passPriority();
+                                                else endCombat();
+                                            }}
+                                            disabled={activePlayerId !== user.uid && !isBlocking}
+                                            title={combatLabel}
+                                            aria-label={combatLabel}
+                                            className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${
+                                                isBlocking
+                                                    ? 'bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer'
+                                                    : activePlayerId !== user.uid
+                                                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                                    : combatState ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-gray-900 hover:bg-red-700 text-red-300 border border-solid border-red-700/50'
+                                            }`}
+                                        >{isBlocking ? '🛡️' : '⚔️'} {combatLabel}</button>
+                                    );
+                                })()}
+                                {(() => {
+                                    const maxCmdDmg = Math.max(0, ...Object.values(myState.commanderDamage || {}));
+                                    return (
+                                        <button
+                                            ref={myMenuBtnRef}
+                                            onClick={toggleMyMenu}
+                                            title="Weitere Aktionen"
+                                            aria-label="Weitere Aktionen"
+                                            aria-expanded={!!myMenuPos}
+                                            className={`relative w-8 flex-shrink-0 py-1.5 rounded text-sm font-bold leading-none border border-solid transition-colors shadow ${myMenuPos ? 'bg-gray-800 border-yellow-500 text-yellow-300' : 'bg-gray-900/80 border-yellow-700/50 text-yellow-400 hover:bg-gray-800'}`}
+                                        >
+                                            ⋯
+                                            {maxCmdDmg >= 15 && (
+                                                <span title={`Höchster Commander-Schaden: ${maxCmdDmg}`} className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">{maxCmdDmg}</span>
+                                            )}
+                                        </button>
+                                    );
+                                })()}
+                            </div>
+                            {myMenuPos && ReactDOM.createPortal(
+                                <div ref={myMenuRef} role="menu" style={{ position: 'fixed', zIndex: 9999, left: myMenuPos.left, top: myMenuPos.top, width: 180 }}
+                                    className="bg-gray-900 border border-solid border-yellow-700/60 rounded-lg shadow-2xl p-1 flex flex-col gap-1"
+                                >
+                                    <button role="menuitem" onClick={openCmdDmg} className="w-full text-left px-3 py-1.5 rounded text-sm font-bold text-blue-400 bg-transparent border-0 hover:bg-gray-800 transition-colors">Commander-Schaden</button>
+                                    <button role="menuitem" onClick={() => { setMyMenuPos(null); handleLeaveGame(); }} className="w-full text-left px-3 py-1.5 rounded text-sm font-bold text-white bg-red-600 hover:bg-red-500 border-0 transition-colors">Spiel verlassen</button>
+                                </div>,
+                                (document.getElementById('arena-portal') || document.body)
+                            )}
 
                             {/* Commander Damage — rendered via React portal into (document.getElementById('arena-portal') || document.body) to escape
-                                the overflow:hidden on the GameSim root div that clips fixed children */}
-                            <div className="relative flex-shrink-0">
-                                <button
-                                    onClick={() => setCmdDmgOpen(o => !o)}
-                                    className="w-full flex items-center justify-between px-3 py-2 bg-gray-900/80 backdrop-blur-sm rounded-lg border border-yellow-700/50 text-blue-400 text-sm font-bold hover:bg-gray-800/60 transition-colors shadow-lg"
-                                >
-                                    <span>Commander-Schaden</span>
-                                    <span>{cmdDmgOpen ? '◀' : '▶'}</span>
-                                </button>
-                                {cmdDmgOpen && ReactDOM.createPortal(
-                                    <div style={{ position: 'fixed', zIndex: 9999, left: 244, top: 'calc(50% + 4px)', width: 260, maxHeight: '45vh', overflowY: 'auto', background: '#111827', border: '2px solid #3b82f6', borderRadius: 8, padding: 12, boxShadow: '0 25px 50px rgba(0,0,0,0.8)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span style={{ color: '#60a5fa', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Commander-Schaden</span>
-                                            <button onClick={() => setCmdDmgOpen(false)} style={{ color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14 }}>✕</button>
-                                        </div>
-                                        {seatedOpponentIds.length === 0 && (
-                                            <p style={{ color: '#6b7280', fontSize: 11, textAlign: 'center', padding: '8px 0' }}>Noch keine Gegner am Tisch</p>
-                                        )}
-                                        {seatedOpponentIds.map(oppId => {
-                                            const oppState = opponentStates[oppId];
-                                            const commanders = oppState ? getCommandersOf(oppState) : [];
-                                            if (!oppState) return <p key={oppId} style={{ color: '#9ca3af', fontSize: 11 }}>Waiting for {getPlayerName(oppId)}...</p>;
-                                            if (commanders.length === 0) return <p key={oppId} style={{ color: '#9ca3af', fontSize: 11, borderTop: '1px solid #374151', paddingTop: 8 }}>{getPlayerName(oppId)}: game not started yet</p>;
-                                            return commanders.map(cmdr => {
-                                                const dmg = (myState.commanderDamage || {})[cmdr.instanceId] || 0;
-                                                return (
-                                                    <div key={cmdr.instanceId} style={{ borderTop: '1px solid #374151', paddingTop: 8 }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                                                            <span style={{ color: 'white', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }} title={cmdr.name}>{cmdr.name}</span>
-                                                            <span style={{ color: dmg >= 21 ? '#f87171' : '#fca5a5', fontWeight: 'bold', flexShrink: 0 }}>{dmg}{dmg >= 21 ? ' ☠' : ''}</span>
-                                                        </div>
-                                                        <div style={{ display: 'flex', gap: 4 }}>
-                                                            <button onClick={() => updateMyState({ commanderDamage: { ...(myState.commanderDamage || {}), [cmdr.instanceId]: dmg + 1 }, life: myState.life - 1 })} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: 4, padding: '4px 0', cursor: 'pointer', fontSize: 11 }}>+</button>
-                                                            <button onClick={() => { if (dmg > 0) updateMyState({ commanderDamage: { ...(myState.commanderDamage || {}), [cmdr.instanceId]: dmg - 1 }, life: myState.life + 1 }); }} style={{ flex: 1, background: '#16a34a', color: 'white', border: 'none', borderRadius: 4, padding: '4px 0', cursor: dmg > 0 ? 'pointer' : 'not-allowed', opacity: dmg > 0 ? 1 : 0.4, fontSize: 11 }} disabled={!(dmg > 0)}>-</button>
-                                                        </div>
+                                the overflow:hidden on the GameSim root div that clips fixed children. Opened from the ⋯ menu. */}
+                            {cmdDmgOpen && ReactDOM.createPortal(
+                                <div style={{ position: 'fixed', zIndex: 9999, left: cmdDmgPos.left, top: cmdDmgPos.top, width: 260, maxHeight: '45vh', overflowY: 'auto', background: '#111827', border: '2px solid #3b82f6', borderRadius: 8, padding: 12, boxShadow: '0 25px 50px rgba(0,0,0,0.8)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ color: '#60a5fa', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Commander-Schaden</span>
+                                        <button onClick={() => setCmdDmgOpen(false)} style={{ color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                                    </div>
+                                    {seatedOpponentIds.length === 0 && (
+                                        <p style={{ color: '#6b7280', fontSize: 11, textAlign: 'center', padding: '8px 0' }}>Noch keine Gegner am Tisch</p>
+                                    )}
+                                    {seatedOpponentIds.map(oppId => {
+                                        const oppState = opponentStates[oppId];
+                                        const commanders = oppState ? getCommandersOf(oppState) : [];
+                                        if (!oppState) return <p key={oppId} style={{ color: '#9ca3af', fontSize: 11 }}>Warte auf {getPlayerName(oppId)} …</p>;
+                                        if (commanders.length === 0) return <p key={oppId} style={{ color: '#9ca3af', fontSize: 11, borderTop: '1px solid #374151', paddingTop: 8 }}>{getPlayerName(oppId)}: Spiel noch nicht gestartet</p>;
+                                        return commanders.map(cmdr => {
+                                            const dmg = (myState.commanderDamage || {})[cmdr.instanceId] || 0;
+                                            return (
+                                                <div key={cmdr.instanceId} style={{ borderTop: '1px solid #374151', paddingTop: 8 }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                                        <span style={{ color: 'white', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }} title={cmdr.name}>{cmdr.name}</span>
+                                                        <span style={{ color: dmg >= 21 ? '#f87171' : '#fca5a5', fontWeight: 'bold', flexShrink: 0 }}>{dmg}{dmg >= 21 ? ' ☠' : ''}</span>
                                                     </div>
-                                                );
-                                            });
-                                        })}
-                                    </div>,
-                                    (document.getElementById('arena-portal') || document.body)
-                                )}
-                            </div>
+                                                    <div style={{ display: 'flex', gap: 4 }}>
+                                                        <button onClick={() => updateMyState({ commanderDamage: { ...(myState.commanderDamage || {}), [cmdr.instanceId]: dmg + 1 }, life: myState.life - 1 })} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: 4, padding: '4px 0', cursor: 'pointer', fontSize: 11 }}>+</button>
+                                                        <button onClick={() => { if (dmg > 0) updateMyState({ commanderDamage: { ...(myState.commanderDamage || {}), [cmdr.instanceId]: dmg - 1 }, life: myState.life + 1 }); }} style={{ flex: 1, background: '#16a34a', color: 'white', border: 'none', borderRadius: 4, padding: '4px 0', cursor: dmg > 0 ? 'pointer' : 'not-allowed', opacity: dmg > 0 ? 1 : 0.4, fontSize: 11 }} disabled={!(dmg > 0)}>-</button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        });
+                                    })}
+                                </div>,
+                                (document.getElementById('arena-portal') || document.body)
+                            )}
 
-                            {/* Command Zone */}
-                            <div className="bg-gray-900/80 backdrop-blur-sm p-3 rounded-lg border border-yellow-700/50 flex-shrink-0 shadow-lg"
+                            {/* Command Zone — fills the remaining height; two partner commanders fit side by side */}
+                            <div className="bg-gray-900/80 backdrop-blur-sm px-3 py-2 rounded-lg border border-yellow-700/50 flex-1 min-h-0 overflow-hidden flex flex-col shadow-lg"
                                 onDrop={(e) => handleDropOnZone(e, 'command')}
                                 onDragOver={(e) => e.preventDefault()}
                             >
-                                <h4 className="text-blue-400 text-sm font-bold mb-2">Commander-Zone</h4>
-                                <div className="flex flex-wrap gap-2 content-start">
+                                <h4 className="text-blue-400 text-sm font-bold mb-1 flex-shrink-0">Commander-Zone</h4>
+                                <div className="flex flex-wrap gap-2 content-start justify-center min-h-0">
                                     {myState.commandZone.map(card => (
                                         <div key={card.instanceId} draggable onDragStart={(e) => handleDragStart(e, card, 'command')} className="cursor-pointer flex-shrink-0 flex flex-col items-center group/cmdcard relative">
-                                            <CardImage 
-                                                src={card.image_url} 
-                                                className="w-16 h-[90px] hover:brightness-110 transition-[filter] border border-yellow-500"
+                                            <CardImage
+                                                src={card.image_url}
+                                                className="w-14 h-[78px] hover:brightness-110 transition-[filter] border border-yellow-500"
                                                 onMouseEnter={() => setHoveredCard(card.image_url)}
                                                 onMouseLeave={() => setHoveredCard(null)}
                                             />
@@ -5322,28 +5426,26 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                         cmdTax: { ...(myState.cmdTax || {}), [card.instanceId]: ((myState.cmdTax || {})[card.instanceId] || 0) + 2 }
                                                     });
                                                 }}
-                                                className="w-full mt-0.5 bg-green-600 hover:bg-green-500 text-white text-[9px] font-bold py-0.5 rounded shadow opacity-0 group-hover/cmdcard:opacity-100 touch-show transition-opacity"
+                                                className="absolute left-0.5 right-0.5 top-[60px] bg-green-600 hover:bg-green-500 text-white text-[9px] font-bold py-0.5 rounded shadow opacity-0 group-hover/cmdcard:opacity-100 touch-show transition-opacity"
                                                 title={`${card.name} aus der Commander-Zone wirken`}
                                             >Spielen</button>
                                         </div>
                                     ))}
                                 </div>
                             </div>
-
-                            <button onClick={handleLeaveGame} style={{ marginBottom: 52 }} className="w-full bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded text-sm font-bold flex-shrink-0 shadow-lg">Spiel verlassen</button>
                         </div>
 
                         {/* Right sidebar (Library / GY / Exile / action buttons) — top to just above hand */}
-                        <div ref={myRightSidebarRef} style={{ position: 'absolute', top: 4, bottom: 4, right: 8 }} className="z-40 w-56 overflow-y-auto flex flex-col gap-2 scrollbar-hide">
+                        <div ref={myRightSidebarRef} style={{ position: 'absolute', top: 4, bottom: 4, right: 8 }} className="z-40 w-56 overflow-y-auto flex flex-col gap-1.5 scrollbar-hide">
                             {/* Library */}
                             <div 
-                                className="bg-gray-900/80 backdrop-blur-sm p-3 rounded-lg border border-yellow-700/50 cursor-pointer hover:bg-gray-900 flex-shrink-0 flex flex-col items-center justify-center relative shadow-lg"
+                                className="bg-gray-900/80 backdrop-blur-sm p-2 rounded-lg border border-yellow-700/50 cursor-pointer hover:bg-gray-900 flex-shrink-0 flex flex-col items-center justify-center relative shadow-lg"
                                 onClick={(e) => setLibraryMenu({ x: e.clientX, y: e.clientY })}
                                 onDrop={(e) => handleDropOnZone(e, 'library')}
                                 onDragOver={(e) => e.preventDefault()}
                             >
-                                <h4 className="text-blue-400 text-sm font-bold mb-2">Bibliothek ({myState.library.length})</h4>
-                                <CardImage isBack={true} className="w-20 h-28" />
+                                <h4 className="text-blue-400 text-sm font-bold mb-1">Bibliothek ({myState.library.length})</h4>
+                                <CardImage isBack={true} className="w-[60px] h-[84px]" />
                             </div>
 
                             {/* Graveyard + Exile */}
@@ -5378,11 +5480,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
                             {/* Action buttons */}
                             <div className="flex gap-2 flex-shrink-0">
-                                <button onClick={drawCard} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-xs font-bold shadow-lg">Ziehen</button>
-                                <button onClick={() => setTokenModalOpen(true)} className="flex-1 bg-green-600 hover:bg-green-500 text-white px-3 py-2 rounded text-xs font-bold shadow-lg">Token</button>
-                                <button onClick={shuffleLibrary} className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-2 rounded text-xs font-bold shadow-lg">Mischen</button>
+                                <button onClick={drawCard} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Ziehen</button>
+                                <button onClick={() => setTokenModalOpen(true)} className="flex-1 bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Token</button>
+                                <button onClick={shuffleLibrary} className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Mischen</button>
                             </div>
-                            <button onClick={() => setEmblemModalOpen(true)} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded text-xs font-bold shadow-lg flex-shrink-0">
+                            <button onClick={() => setEmblemModalOpen(true)} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg flex-shrink-0">
                                 Embleme{myEmblems.length > 0 ? ` (${myEmblems.length})` : ''}
                             </button>
                         </div>
