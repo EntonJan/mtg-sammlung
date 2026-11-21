@@ -1235,7 +1235,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const [viewingZoneLocal, setViewingZoneLocal] = React.useState(null); // 'graveyard' | 'exile' | null
             if (!state) {
                 return (
-                    <div className="flex-1 min-w-0 bg-gray-900/10 border border-yellow-700/20 rounded-lg flex items-center justify-center text-red-500/30 text-xs font-bold uppercase tracking-widest">
+                    <div className="flex-1 min-w-0 bg-gray-900/10 border border-solid border-yellow-700/20 rounded-lg flex items-center justify-center text-red-500/30 text-xs font-bold uppercase tracking-widest">
                         Warte auf Spieler …
                     </div>
                 );
@@ -1245,7 +1245,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             return (
                 <div 
                     onClick={onClick}
-                    className={`relative flex-1 min-w-0 bg-gray-900/10 border rounded-lg flex flex-col overflow-hidden cursor-pointer transition-all ${isActivePlayer ? 'border-green-400 ring-2 ring-green-400/60' : 'border-yellow-700/30'}`}
+                    className={`relative flex-1 min-w-0 bg-gray-900/10 border border-solid rounded-lg flex flex-col overflow-hidden cursor-pointer transition-all ${isActivePlayer ? 'border-green-400 ring-2 ring-green-400/60' : 'border-yellow-700/30'}`}
                 >
                     {isChoosingMulligan && (
                         <div className="absolute inset-0 z-20 bg-black/70 flex items-center justify-center pointer-events-none">
@@ -1465,8 +1465,30 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         const MANA_COLORS = { W: { bg: '#fef9c3', text: '#78350f', label: 'W' }, U: { bg: '#1e40af', text: '#bfdbfe', label: 'U' }, B: { bg: '#1c1917', text: '#d4d4d8', label: 'B' }, R: { bg: '#991b1b', text: '#fecaca', label: 'R' }, G: { bg: '#14532d', text: '#bbf7d0', label: 'G' }, C: { bg: '#374151', text: '#d1d5db', label: 'C' } };
         // compact: one row of six pips for the left console (click = +1, right-click or the small − = −1,
         // ✕ clears) so the sidebar fits without scrolling. The default layout keeps separate +/− buttons.
-        const ManaPool = ({ pool, onAdd, onRemove, onClear, compact = false }) => {
+        const ManaPool = ({ pool, onAdd, onRemove, onClear, compact = false, readOnly = false, ownerName = '' }) => {
             const total = Object.values(pool).reduce((s, n) => s + n, 0);
+            // Nur-Lese-Variante (Manapool eines Gegners): gleiche Maße wie die eigene, aber ohne Bedienung.
+            if (compact && readOnly) return (
+                <div data-testid="mana-pool-ro" style={{ position: 'relative', background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '5px 18px 3px 5px' }}>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                        {Object.entries(MANA_COLORS).map(([sym, c]) => (
+                            <div key={sym} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flex: 1 }}>
+                                <span title={`${ownerName ? ownerName + ': ' : ''}${c.label}-Mana ${pool[sym] || 0}`}
+                                    style={{ width: 22, height: 22, borderRadius: '50%', background: c.bg, color: c.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 'bold', border: pool[sym] > 0 ? '1px solid #d4b46a' : '1px solid rgba(255,255,255,0.2)', position: 'relative', opacity: pool[sym] > 0 ? 1 : 0.55, boxSizing: 'border-box' }}
+                                >
+                                    {c.label}
+                                    {pool[sym] > 0 && (
+                                        <span style={{ position: 'absolute', top: -4, right: -5, background: '#f59e0b', color: '#000', borderRadius: 7, minWidth: 13, height: 13, padding: '0 2px', fontSize: 8, fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                                            {pool[sym]}
+                                        </span>
+                                    )}
+                                </span>
+                                <span style={{ width: '100%', height: 9 }} />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
             if (compact) return (
                 <div style={{ position: 'relative', background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '5px 18px 3px 5px' }}>
                     <div style={{ display: 'flex', gap: 3 }}>
@@ -2045,15 +2067,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         const CARD_W = 90;
         const CARD_H = 120;
         const PHASE_BAR_H = 28;
+        // Abstand der Phasenleiste zur Tischmitte, damit ihr Goldrand auch oben vollständig sichtbar ist.
+        const PHASE_BAR_TOP = 4;
         const HAND_TAB_H = 22;
+        // Grüner Rahmen der Hälfte des aktiven Spielers. Als Inline-Schatten, weil die Tailwind-ring-Klassen ohne
+        // Preflight/Base (keine --tw-ring-*-Startwerte) keinen gültigen box-shadow ergeben.
+        const ACTIVE_RING = 'inset 0 0 0 4px rgba(120, 171, 111, 0.7)';
         // Geometrie meiner Spielfeldhälfte: Phasenleiste oben, darunter drei Reihen zu je einer Kartenhöhe
         // (Kreaturen · Länder|Planeswalker · Verzauberungen|Artefakte), Rest unten frei für den Hand-Reiter.
         // Passen drei Reihen nicht in die Höhe, werden die Karten skaliert (min. 0,75).
         const computeBfGeom = (bfWidth, bfHeight, leftX, rightX) => {
-            const avail = bfHeight - PHASE_BAR_H - HAND_TAB_H - 6;
+            const avail = bfHeight - PHASE_BAR_TOP - PHASE_BAR_H - HAND_TAB_H - 6;
             const scale = Math.max(0.75, Math.min(1, avail / (3 * CARD_H)));
             const cw = CARD_W * scale, ch = CARD_H * scale;
-            const top1 = PHASE_BAR_H + 2, top2 = top1 + ch, top3 = top2 + ch;
+            const top1 = PHASE_BAR_TOP + PHASE_BAR_H + 2, top2 = top1 + ch, top3 = top2 + ch;
             const zW = Math.max(rightX - leftX, cw);
             const landSplit = leftX + zW * 0.65, halfSplit = leftX + zW * 0.5;
             // Seitenabstand, damit getappte (gedrehte) Karten nicht unter die Seitenleisten ragen
@@ -2067,6 +2094,13 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             };
             return { scale, cw, ch, pad, zones, bfWidth, bfHeight };
         };
+        // Gegnerhälfte = meine Hälfte vertikal gespiegelt: gleiche Breiten, Höhen und Skalierung, aber die
+        // Kreaturenreihe liegt unten (zur Tischmitte hin), Verzauberungen/Artefakte oben am Bildschirmrand.
+        const mirrorBfGeom = (geom) => ({
+            ...geom,
+            mirrored: true,
+            zones: Object.fromEntries(Object.entries(geom.zones).map(([t, z]) => [t, { ...z, top: geom.bfHeight - z.top - geom.ch }])),
+        });
         // x-Position des i-ten von n Karten in einer Zone: nebeneinander, bei Platzmangel enger zusammen (Fächer),
         // nie eine zweite Reihe.
         const fanX = (zone, geom, i, n) => {
@@ -2137,7 +2171,9 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         const PhaseBar = ({ step, ownerName, canControl, lockTitle, onJump, onNext, nextDisabled, nextTitle, extra, flash }) => {
             const cur = stepIdx(step);
             return (
-                <div data-testid="phase-bar" className={`h-7 flex items-center gap-1 px-1 rounded-b-lg bg-gray-950/90 border-solid border border-t-0 shadow-lg select-none transition-colors ${flash ? 'border-yellow-400' : 'border-yellow-700/60'}`} style={{ fontSize: 11 }}>
+                // Randfarbe inline: die globale Regel „.arena-root .rounded-lg.border“ (arena.css) würde sonst die
+                // Tailwind-Farbe überstimmen – der Aufblitz-Effekt beim Phasenwechsel wäre unsichtbar.
+                <div data-testid="phase-bar" className="h-7 flex items-center gap-1 px-1 rounded-lg bg-gray-950/90 border-solid border shadow-lg select-none transition-colors" style={{ fontSize: 11, borderColor: flash ? '#dcbd76' : 'rgba(212, 180, 106, 0.55)' }}>
                     {ownerName && (
                         <span className="text-gray-400 whitespace-nowrap px-1 truncate flex-shrink min-w-0" style={{ maxWidth: 130 }} title={`Phase von ${ownerName}`}>Phase von <b className="text-yellow-300">{ownerName}</b></span>
                     )}
@@ -2153,6 +2189,16 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                         title={past ? full : can ? `Springe zu: ${PHASE_LABEL[b.steps[0]]} (${full})` : (lockTitle || full)}
                                         className={`px-1.5 py-0.5 rounded border-0 bg-transparent whitespace-nowrap ${past ? 'text-gray-600' : can ? 'text-gray-300 hover:bg-gray-800 hover:text-yellow-300' : 'text-gray-500'}`}
                                     >{b.label}</button>
+                                );
+                            }
+                            // Ein-Schritt-Block (Haupt 1 / Haupt 2): nur eine hervorgehobene Pille, kein doppelter Name.
+                            if (b.steps.length === 1) {
+                                return (
+                                    <div key={b.key} className="flex items-center rounded-md px-0.5 bg-yellow-900/40 border-solid border border-yellow-600/50 whitespace-nowrap" title={full}>
+                                        <button data-step={b.steps[0]} title={`Aktuell: ${full}`} style={{ cursor: 'default' }}
+                                            className="px-2 rounded-full border-0 leading-5 bg-amber-400 text-gray-950 font-bold shadow"
+                                        >{b.label}</button>
+                                    </div>
                                 );
                             }
                             return (
@@ -2225,8 +2271,6 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const [libraryActionModal, setLibraryActionModal] = useState(null);
             // { mode: 'scry'|'surveil'|'look', cards: [...], decisions: {instanceId: 'top'|'bottom'|'hand'|'graveyard'|'reveal'} }
             const [myHandMinimized, setMyHandMinimized] = useState(false);
-            const [oppHandMinimized, setOppHandMinimized] = useState(true);
-            const oppHandBtnRef = React.useRef(null);
 
             const [leaveGameModal, setLeaveGameModal] = useState(false);
             const [gameResult, setGameResult] = useState({ winner: '', confirmed: false });
@@ -2246,6 +2290,9 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const [ringAdvancePrompt, setRingAdvancePrompt] = useState(null);
             // null = no discard needed; otherwise shown when a player tries to end their turn with >7 cards.
             const [discardModal, setDiscardModal] = useState(false);
+            // Reset the discard prompt once the hand is back to 7 or fewer (otherwise drawing to 8 later reopens it).
+            const myHandLen = myState?.hand?.length ?? 0;
+            useEffect(() => { if (discardModal && myHandLen <= 7) setDiscardModal(false); }, [discardModal, myHandLen]);
             const [snapPending, setSnapPending] = useState(false);
             const [pendingTriggers, setPendingTriggers] = useState([]);
             const [landETBModal, setLandETBModal] = useState(null);
@@ -2896,6 +2943,66 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }
             }, [bfLowerLen, bfUpperLen, snapAllCardsToZones]);
 
+            // Manapool an den Tisch melden (nur Anzeige für die Gegner, die ihn read-only sehen). Kurz entprellt;
+            // ein leerer Pool beim Start wird nicht geschrieben.
+            const lastPoolRef = useRef(null);
+            useEffect(() => {
+                if (!hasMyState) return;
+                const json = JSON.stringify(manaPool);
+                // Startwert = was im Dokument steht (nach Neuladen/„Zur App“ kann dort noch ein alter Pool liegen,
+                // der dann mit dem leeren lokalen Pool überschrieben wird).
+                if (lastPoolRef.current === null) {
+                    const d = myState?.manaPool || {};
+                    lastPoolRef.current = JSON.stringify(Object.fromEntries(Object.keys(manaPool).map(s => [s, d[s] || 0])));
+                }
+                if (lastPoolRef.current === json) return;
+                const t = setTimeout(() => { lastPoolRef.current = json; updateDoc(myStateRef, { manaPool }).catch(() => {}); }, 250);
+                return () => clearTimeout(t);
+            }, [manaPool, hasMyState, myStateRef]);
+
+            // ── TASTENKÜRZEL ──────────────────────────────────────────────────────
+            // Ein globaler keydown-Listener, solange der Spieltisch offen ist. Die eigentlichen Aktionen (mit denselben
+            // Sperren wie die Buttons) legt jedes Rendern in kbRef ab, damit der Listener nie veraltete Werte sieht.
+            const [showKeys, setShowKeys] = useState(false);
+            const kbRef = useRef(null);
+            useEffect(() => {
+                // Offenes Fenster mit Abdunklung (Modal, Kontextmenü, Schadensverteilung …) → Kürzel aus.
+                const overlayOpen = (root) => !!root.querySelector('.fixed.inset-0')
+                    || [...root.querySelectorAll('[style*="inset"]')].some(el => el.style.inset === '0px' && getComputedStyle(el).position === 'fixed');
+                const onKey = (e) => {
+                    const k = kbRef.current;
+                    if (!k || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+                    const root = document.querySelector('.arena-root');
+                    if (!root || getComputedStyle(root).display === 'none') return;
+                    const t = e.target;
+                    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return;
+                    if (e.key === 'Escape') { k.escape(); return; }
+                    const isSpace = e.code === 'Space' || e.key === ' ';
+                    // Nur e.key (Layout-unabhängig): auf deutscher Tastatur ist „?“ Umschalt+ß (code Minus) und
+                    // Umschalt+„-“ (code Slash) ergibt „_“ – ein code-Fallback würde dort falsch auslösen.
+                    const isHelp = e.key === '?';
+                    if (overlayOpen(root)) return;
+                    const key = (e.key || '').toLowerCase();
+                    const plus = e.key === '+' || e.key === '=' || e.code === 'NumpadAdd';
+                    const minus = e.key === '-' || e.key === '−' || e.code === 'NumpadSubtract';
+                    if (plus || minus) { e.preventDefault(); k.life(plus ? 1 : -1); return; }
+                    // Gedrückt halten: nur +/− wiederholen; Leertaste nur Scrollen verhindern
+                    if (e.repeat) { if (isSpace || isHelp) e.preventDefault(); return; }
+                    if (isHelp) { e.preventDefault(); k.toggleHelp(); return; }
+                    if (isSpace) {
+                        e.preventDefault(); // Seite nicht scrollen
+                        // Fokussierter Button würde beim Loslassen zusätzlich „geklickt“
+                        if (document.activeElement && document.activeElement !== document.body && document.activeElement.tagName === 'BUTTON') document.activeElement.blur();
+                        if (!e.repeat) k.space();
+                        return;
+                    }
+                    const map = { d: k.draw, e: k.endTurn, h: k.toggleHand, m: k.shuffle, t: k.token, x: k.hold };
+                    if (map[key]) { e.preventDefault(); map[key](); }
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, []);
+
             if (loading || !myState) {
                 return <div className="h-full flex flex-col items-center justify-center text-yellow-400"><div className="loader mb-4"></div><p>Spielstand wird geladen …</p></div>;
             }
@@ -2920,6 +3027,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     [newLib[i], newLib[j]] = [newLib[j], newLib[i]];
                 }
                 updateMyState({ library: newLib });
+                addToast('🔀 Bibliothek gemischt', 'purple');
             };
 
             // Opens the Scry/Surveil/Look overlay for the top N cards of the library.
@@ -4528,7 +4636,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             })();
 
             // ⋯ menu of the left console, anchored to the right of its button and kept inside the viewport.
-            const MY_MENU_H = 84;
+            const MY_MENU_H = 122;
             const toggleMyMenu = () => {
                 if (myMenuPos) { setMyMenuPos(null); return; }
                 const r = myMenuBtnRef.current?.getBoundingClientRect();
@@ -4728,9 +4836,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             : { left: leftStyle, top: isMine ? topStyle : (zone === 'battlefieldLower' ? undefined : topStyle), bottom: isMine ? undefined : (zone === 'battlefieldLower' ? topStyle : undefined) }}
                         draggable={isMine}
                         onDragStart={(e) => isMine && handleDragStart(e, card, zone)}
-                        onDragOver={(e) => isMine && e.preventDefault()}
+                        onDragOver={(e) => (isMine || (draggedCard?.fromZone === 'stack' && isAuraCard(draggedCard.card))) && e.preventDefault()}
                         onDrop={(e) => {
-                            if (!isMine || !draggedCard) return;
+                            if (!draggedCard) return;
+                            // Gegnerkarten: nur eine Aura vom Stack darf darauf abgelegt werden
+                            if (!isMine && !(draggedCard.fromZone === 'stack' && isAuraCard(draggedCard.card))) return;
                             // Nur Anlegen (Aura vom Stack, Ausrüstung) wird auf der Karte behandelt; alles andere
                             // (z. B. ein Land aus der Hand auf eine Kreatur im vollen Fächer) geht ans Spielfeld weiter.
                             const { card: src, fromZone: fz } = draggedCard;
@@ -4794,7 +4904,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         <div className="relative group/bfcard">
                             <CardImage 
                                 src={card.image_url} 
-                                className={`w-[90px] h-[120px] card-shadow ${card.isTapped ? 'tapped' : 'untapped'} ${!isMine && zone === 'battlefieldUpper' ? 'border-2 border-yellow-700/50' : ''}
+                                className={`w-[90px] h-[120px] card-shadow ${card.isTapped ? 'tapped' : 'untapped'}
                                     ${isMine && pendingAttackers.find(a=>a.card.instanceId===card.instanceId) ? 'border-4 border-red-500 brightness-110' : ''}
                                     ${isMine && combatState?.phase==='blocking' && pendingBlocker?.instanceId===card.instanceId ? 'border-4 border-yellow-400 brightness-110' : ''}
                                 `}
@@ -4880,7 +4990,49 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // gespeicherte Positionen landen so automatisch in der richtigen Reihe).
             const myGeom = zoneBounds ? computeBfGeom(zoneBounds.bfWidth, zoneBounds.bfHeight, zoneBounds.leftSidebarRightX, zoneBounds.rightSidebarLeftX) : null;
             const myLayout = myGeom ? layoutMyCards(myPermanents(), myGeom) : {};
-            const oppScale = myGeom ? myGeom.scale : 1;
+            const oppGeom = myGeom ? mirrorBfGeom(myGeom) : null;
+
+            // Aktionen für die Tastenkürzel – exakt dieselben Wege und Sperren wie die Buttons.
+            kbRef.current = {
+                escape: () => { setShowKeys(false); setMyMenuPos(null); setCardMenu(null); setLibraryMenu(null); setCmdDmgOpen(false); setManaChoice(null); setViewingZone(null); setTopCardView(null); },
+                toggleHelp: () => setShowKeys(v => !v),
+                space: () => {
+                    if (myPriorityPending) { passPriority(); return; }
+                    if (amDefending) return;
+                    if (nextInfo.disabled) return;
+                    // Per Taste nicht versehentlich an offenen Zaubern/Fähigkeiten vorbeischalten (Button geht weiterhin)
+                    if (allStackCards.length) { addToast('Erst den Stack auflösen', 'yellow'); return; }
+                    nextStep();
+                },
+                draw: () => { if (!myState.library.length) { addToast('Bibliothek ist leer', 'yellow'); return; } drawCard(); },
+                endTurn: () => {
+                    if (!canEndTurn) return;
+                    if (allStackCards.length) { addToast('Erst den Stack auflösen', 'yellow'); return; }
+                    endTurn();
+                },
+                toggleHand: () => setMyHandMinimized(v => !v),
+                shuffle: shuffleLibrary,
+                token: () => setTokenModalOpen(true),
+                // increment statt myState.life + d: beim Gedrückthalten (Auto-Repeat) kommen Tasten schneller als
+                // der Snapshot zurück – mit dem lokalen Wert gingen Schritte verloren.
+                life: (d) => updateMyState({ life: increment(d) }),
+                hold: () => {
+                    if (hold) { if (iHold || mayControlTurn) releaseHold(); return; }
+                    if (!mayControlTurn && activePlayerId) requestHold();
+                },
+            };
+            const KEY_LIST = [
+                ['Leertaste', 'Weiter (als Verteidiger: Kein Blocker)'],
+                ['E', 'Zug beenden'],
+                ['D', 'Karte ziehen'],
+                ['H', 'Hand ein/aus'],
+                ['M', 'Bibliothek mischen'],
+                ['T', 'Token erstellen'],
+                ['+ / −', 'Leben +1 / −1'],
+                ['X', 'Moment! / Weiter geben'],
+                ['Esc', 'Menüs und Fenster schließen'],
+                ['?', 'Diese Übersicht ein/aus'],
+            ];
 
             return (
                 <div className="h-full w-full relative bg-gray-900 overflow-hidden flex flex-col">
@@ -4889,6 +5041,28 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     <HintStack hints={hints}
                         onDraw={(h) => { drawCard(); addToast(`📖 ${h.cardName}: Karte gezogen`, 'blue'); setHints(p => p.filter(x => x.id !== h.id)); }}
                         onDismiss={(h) => setHints(p => p.filter(x => x.id !== h.id))} />
+
+                    {/* Kürzel-Übersicht (? / ⋯-Menü) – kein Modal, das Spiel bleibt bedienbar */}
+                    {showKeys && ReactDOM.createPortal(
+                        <div data-testid="kbd-help" className="bg-gray-950/95 border-solid border border-yellow-600/70 rounded-xl shadow-2xl"
+                            style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 9000, width: 340, padding: '12px 14px', color: '#ece4cf' }}
+                        >
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="font-title text-yellow-400 font-bold tracking-wide" style={{ fontSize: 14 }}>Tastenkürzel</span>
+                                <button onClick={() => setShowKeys(false)} aria-label="Schließen" title="Schließen (Esc)" className="bg-transparent border-0 text-gray-400 hover:text-yellow-300" style={{ fontSize: 14 }}>✕</button>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                {KEY_LIST.map(([k, d]) => (
+                                    <div key={k} className="flex items-center gap-3" style={{ fontSize: 12 }}>
+                                        <kbd className="inline-block text-center font-bold text-yellow-300 bg-gray-800 border-solid border border-yellow-700/60 rounded" style={{ minWidth: 74, padding: '1px 6px', fontFamily: 'inherit', fontSize: 11 }}>{k}</kbd>
+                                        <span className="text-gray-200">{d}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="text-gray-500 mt-2 mb-0" style={{ fontSize: 10.5 }}>Nicht aktiv beim Tippen in Feldern und bei offenen Fenstern.</p>
+                        </div>,
+                        (document.getElementById('arena-portal') || document.body)
+                    )}
 
                     {/* Mana color choice popup for dual lands */}
                     {manaChoice && ReactDOM.createPortal(
@@ -5319,242 +5493,6 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         </Modal>
                     )}
 
-                    {/* --- OPPONENT AREA: rich single-opponent layout for 2-player games, compact grid for 3-4 players --- */}
-                    {opponentIds.length <= 1 ? (
-                        <>
-                            {/* --- OPPONENT ZONE (TOP HALF) --- */}
-                            <div className={`absolute top-0 left-0 w-full h-1/2 border-b-2 z-0 transition-all duration-200 flex flex-col ${
-                                activePlayerId === opponentIds[0] ? 'ring-4 ring-green-400/70 ring-inset bg-green-900/10 border-green-500/30' : 'bg-gray-900/10 border-yellow-700/30'
-                            }`}>
-                                {opponentStates[opponentIds[0]] ? (() => {
-                                    const opp = opponentStates[opponentIds[0]];
-                                    const allBF = [...(opp.battlefieldLower || []), ...(opp.battlefieldUpper || [])];
-                                    const byZone = (t) => allBF.filter(c => getCardZoneType(c) === t);
-                                    // Render a card as a simple image-in-flow (not absolute positioned).
-                                    // Tapped cards get a 90° rotation via CSS.
-                                    const oppCard = (card) => {
-                                        const [p, t] = getPT(card);
-                                        const showPT = isCreatureLike(card) || (/\bVehicle\b/i.test(card.type_line||'') && card.isTapped);
-                                        const plus = (card.counters||[]).filter(c=>c.type==='+1/+1').reduce((s,c)=>s+c.count,0);
-                                        const minus = (card.counters||[]).filter(c=>c.type==='-1/-1').reduce((s,c)=>s+c.count,0);
-                                        const dispP = p + plus - minus;
-                                        const dispT = t + plus - minus;
-                                        // Show PT if it's a creature-like card — including 0/0 creatures
-                                        const hasPT = showPT && getPTString(card) !== '';
-                                        return (
-                                        <div key={card.instanceId} className="relative flex-shrink-0"
-                                            onMouseEnter={() => setHoveredCard(card.image_url)}
-                                            onMouseLeave={() => setHoveredCard(null)}
-                                        >
-                                            <CardImage src={card.image_url}
-                                                className={`card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
-                                                style={{ width: Math.round(72 * oppScale), height: Math.round(100 * oppScale) }}
-                                            />
-                                            {card.counters?.length > 0 && (
-                                                <div className="absolute top-0 right-0 flex flex-col gap-0.5">
-                                                    {card.counters.map(c => (
-                                                        <span key={c.type} className="bg-black/80 text-white text-[8px] px-1 rounded">{c.type} {c.count}</span>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {hasPT && (
-                                                <div style={{ position:'absolute', bottom:3, right:4, background: dispT<=0 ? 'rgba(127,29,29,0.9)' : 'rgba(0,0,0,0.82)', border:`1px solid ${dispT<=0?'#ef4444':'rgba(255,255,255,0.25)'}`, borderRadius:4, padding:'1px 5px', color: dispT<=0?'#fca5a5':'white', fontSize:11, fontWeight:'bold', lineHeight:1.3, pointerEvents:'none', zIndex:5 }}>
-                                                    {dispP}/{dispT}
-                                                </div>
-                                            )}
-                                        </div>
-                                        );
-                                    };
-                                    // Gleiche Reihen wie auf meiner Hälfte, gespiegelt (Kreaturen zur Tischmitte hin), skaliert wie meine Karten.
-                                    // Zu viele Karten in einer Reihe → Fächer (überlappend) statt Umbruch.
-                                    const rowH = Math.round(100 * oppScale) + 14;
-                                    const fan = (cards) => (
-                                        <div className="flex flex-nowrap overflow-hidden">
-                                            {cards.map((c, i) => (
-                                                <div key={c.instanceId} style={{ flex: i === cards.length - 1 ? '0 0 auto' : '0 1 auto', width: Math.round(72 * oppScale) + 4, minWidth: 10 }}>{oppCard(c)}</div>
-                                            ))}
-                                        </div>
-                                    );
-                                    return (
-                                        // Indent by 240px on each side to leave room for the sidebars
-                                        <div className="flex flex-col-reverse h-full overflow-hidden" style={{ paddingLeft: 244, paddingRight: 244 }}>
-                                            {/* Creature zone — at the BOTTOM of opponent half (adjacent to our creatures) */}
-                                            <div className="flex-shrink-0 border-t border-yellow-700/10 px-1 overflow-hidden" style={{ height: rowH }}>
-                                                <div className="text-[8px] text-green-400/40 font-bold uppercase leading-3">Kreaturen</div>
-                                                {fan(byZone('creature'))}
-                                            </div>
-                                            {/* Land + Planeswalker row — middle */}
-                                            <div className="flex border-t border-yellow-700/10 flex-shrink-0" style={{ height: rowH }}>
-                                                <div style={{ flex: '65 1 0' }} className="px-1 border-r border-yellow-700/10 overflow-hidden min-w-0">
-                                                    <div className="text-[7px] text-yellow-400/40 font-bold uppercase leading-3">Länder</div>
-                                                    {fan(byZone('land'))}
-                                                </div>
-                                                <div style={{ flex: '35 1 0' }} className="px-1 overflow-hidden min-w-0">
-                                                    <div className="text-[7px] text-red-300/40 font-bold uppercase leading-3">Planeswalker</div>
-                                                    {fan(byZone('planeswalker'))}
-                                                </div>
-                                            </div>
-                                            {/* Enchantment + Artifact row — at the TOP (far from us) */}
-                                            <div className="flex flex-shrink-0" style={{ height: rowH }}>
-                                                <div className="flex-1 px-1 border-r border-yellow-700/10 overflow-hidden min-w-0">
-                                                    <div className="text-[7px] text-purple-400/40 font-bold uppercase leading-3">Verzaubern</div>
-                                                    {fan(byZone('enchantment'))}
-                                                </div>
-                                                <div className="flex-1 px-1 overflow-hidden min-w-0">
-                                                    <div className="text-[7px] text-orange-400/40 font-bold uppercase leading-3">Artefakte</div>
-                                                    {fan(byZone('artifact'))}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })() : (
-                                    <div className="flex items-center justify-center h-full text-red-500/20 text-sm font-bold uppercase tracking-widest">Gegnerseite</div>
-                                )}
-                            </div>
-
-                            {opponentStates[opponentIds[0]] && (
-                                <>
-                                    {/* Opponent Left Sidebar — runs from top of opponent half to just above
-                                        the hand toggle button (which sits at the very bottom of the half) */}
-                                    <div className="absolute top-2 left-2 z-40 w-56 flex flex-col gap-2 pointer-events-none scrollbar-hide" style={{ maxHeight: 'calc(50vh - 16px)', overflowY: 'auto' }}>
-                                        <div className="pointer-events-auto bg-gray-900/80 backdrop-blur-sm p-4 rounded-lg border border-yellow-700/50 flex-shrink-0 shadow-lg">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <h4 className="text-red-400 text-sm font-bold">{getPlayerName(opponentIds[0])}</h4>
-                                                {activePlayerId === opponentIds[0] && <ActiveTurnBadge />}
-                                            </div>
-                                            {!!lobbyState?.seatOrder && !lobbyState?.mulliganStatus?.[opponentIds[0]]?.completed && (
-                                                <p className="text-yellow-400 text-xs font-bold uppercase tracking-wide mb-1">Wählt Mulligan …</p>
-                                            )}
-                                            {(opponentStates[opponentIds[0]].emblems || []).length > 0 && (
-                                                <div className="flex flex-wrap gap-1 mb-1">
-                                                    {opponentStates[opponentIds[0]].emblems.map(e => (
-                                                        <span key={e.instanceId} className="bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                                                            {e.name} {e.maxStage > 1 ? `${e.stage}/${e.maxStage}` : ''}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            <div className="text-white text-sm space-y-1">
-                                                <div>Leben: <span className="text-green-400 font-bold text-lg">{opponentStates[opponentIds[0]].life}</span></div>
-                                                {getCommandersOf(myState).map(cmdr => (
-                                                    <div key={cmdr.instanceId} className="text-xs truncate" title={`Schaden durch ${cmdr.name}`}>
-                                                        {cmdr.name}: <span className="text-red-400 font-bold">{(opponentStates[opponentIds[0]].commanderDamage || {})[cmdr.instanceId] || 0}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {opponentStates[opponentIds[0]].commandZone?.length > 0 && (
-                                            <div className="pointer-events-auto bg-gray-900/80 backdrop-blur-sm p-3 rounded-lg border border-yellow-700/50 flex-shrink-0 shadow-lg">
-                                                <h4 className="text-red-400 text-sm font-bold mb-2">Commander-Zone</h4>
-                                                <div className="flex flex-wrap gap-2 content-start">
-                                                    {opponentStates[opponentIds[0]].commandZone.map(card => (
-                                                        <div key={card.instanceId} className="flex flex-col items-center">
-                                                            <CardImage
-                                                                src={card.image_url}
-                                                                className="w-14 h-20 border border-yellow-500 flex-shrink-0"
-                                                                onMouseEnter={() => setHoveredCard(card.image_url)}
-                                                                onMouseLeave={() => setHoveredCard(null)}
-                                                            />
-                                                            {card.isCommander && (opponentStates[opponentIds[0]].cmdTax || {})[card.instanceId] !== undefined && (
-                                                                <span className="text-yellow-400 text-[9px] font-bold">+{(opponentStates[opponentIds[0]].cmdTax || {})[card.instanceId] || 0}</span>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Hand toggle — ref'd so portal can measure its position */}
-                                        <button
-                                            ref={oppHandBtnRef}
-                                            onClick={() => setOppHandMinimized(o => !o)}
-                                            className="pointer-events-auto sticky bottom-0 w-full flex items-center justify-between px-3 py-2 bg-gray-800 hover:bg-red-700 border border-yellow-700/60 rounded-lg text-red-300 font-bold text-sm shadow-lg transition-colors flex-shrink-0"
-                                        >
-                                            <span>Hand ({opponentStates[opponentIds[0]].hand?.length || 0})</span>
-                                            <span>{oppHandMinimized ? '▶' : '◀'}</span>
-                                        </button>
-                                    </div>
-
-                                    {/* Opponent Hand — portal into (document.getElementById('arena-portal') || document.body) to escape overflow clipping,
-                                        positioned via the button ref so it sits flush-right of the toggle */}
-                                    {!oppHandMinimized && oppHandBtnRef.current && ReactDOM.createPortal(
-                                        (() => {
-                                            const r = oppHandBtnRef.current.getBoundingClientRect();
-                                            return (
-                                                <div style={{ position: 'fixed', zIndex: 9998, left: r.right + 8, top: r.top, maxWidth: `calc(100vw - ${r.right + 16}px)` }}>
-                                                    <div style={{ background: 'rgba(127,29,29,0.95)', backdropFilter: 'blur(8px)', border: '1px solid rgba(239,68,68,0.5)', borderRadius: 8, padding: '8px 16px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}>
-                                                        <div className="flex gap-2 items-center h-[18vh] overflow-x-auto scrollbar-hide">
-                                                            {Array(Math.min(opponentStates[opponentIds[0]].hand?.length || 0, 20)).fill(0).map((_, i) => (
-                                                                <CardImage key={i} isBack={true} className="flex-shrink-0" style={{ width: 'calc((18vh - 8px) * 0.714)', height: 'calc(18vh - 8px)' }} />
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })(),
-                                        (document.getElementById('arena-portal') || document.body)
-                                    )}
-                                    {/* Opponent Right Sidebar — full height of opponent half */}
-                                    <div className="absolute top-2 right-2 z-40 w-56 flex flex-col gap-2 pointer-events-none scrollbar-hide" style={{ bottom: 'calc(50% + 8px)', overflowY: 'auto' }}>
-                                        <div className="pointer-events-auto bg-gray-900/80 backdrop-blur-sm p-3 rounded-lg border border-yellow-700/50 flex flex-col items-center justify-center shadow-lg">
-                                            <h4 className="text-red-400 text-sm font-bold mb-1">Bibliothek ({opponentStates[opponentIds[0]].library?.length || 0})</h4>
-                                            <CardImage isBack={true} className="w-16 h-20" />
-                                        </div>
-                                        <div className="pointer-events-auto flex gap-2 flex-shrink-0">
-                                            <div onClick={() => setViewingZone({ zone: 'graveyard', playerId: opponentIds[0] })} className="flex-1 bg-gray-900/80 backdrop-blur-sm p-2 rounded-lg border border-yellow-700/50 flex flex-col items-center cursor-pointer hover:bg-red-800 shadow-lg">
-                                                <h4 className="text-red-400 text-xs font-bold mb-1">Friedhof ({opponentStates[opponentIds[0]].graveyard?.length || 0})</h4>
-                                                {opponentStates[opponentIds[0]].graveyard?.[0] ? <CardImage src={opponentStates[opponentIds[0]].graveyard[0].image_url} className="w-12 h-16" /> : <div className="w-12 h-16 bg-black/50 rounded border border-gray-600"></div>}
-                                            </div>
-                                            <div onClick={() => setViewingZone({ zone: 'exile', playerId: opponentIds[0] })} className="flex-1 bg-gray-900/80 backdrop-blur-sm p-2 rounded-lg border border-yellow-700/50 flex flex-col items-center cursor-pointer hover:bg-red-800 shadow-lg">
-                                                <h4 className="text-red-400 text-xs font-bold mb-1">Exil ({opponentStates[opponentIds[0]].exile?.length || 0})</h4>
-                                                {opponentStates[opponentIds[0]].exile?.[0] ? <CardImage src={opponentStates[opponentIds[0]].exile[0].image_url} className="w-12 h-16" /> : <div className="w-12 h-16 bg-black/50 rounded border border-gray-600"></div>}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </>
-                    ) : (
-                        /* --- 3-4 PLAYER LAYOUT ---
-                           Top 50% of the screen, split among however many opponents are actually seated:
-                           - Grid mode (expandedOpponentId === null): all opponent tiles equal width.
-                           - Expanded mode: the clicked opponent takes 80% width, the rest share the remaining
-                             20% between them (so they never disappear when one tile is enlarged) - per the
-                             spec: 10% each at 4 players (3 others), 20% as one tile at 3 players (2 others,
-                             so 10% each there too - the remaining tiles always split the 20% evenly).
-                           My own battlefield (bottom 50%) merges battlefieldUpper+battlefieldLower into a
-                           single unified drop zone - no more internal split on my own side. */
-                        <div className="absolute top-0 left-0 w-full h-1/2 bg-gray-950/40 border-b-2 border-yellow-700/30 z-0 flex gap-1 p-1">
-                            {seatedOpponentIds.map(oppId => {
-                                const isThisExpanded = expandedOpponentId === oppId;
-                                const otherCount = seatedOpponentIds.length - 1;
-                                let widthStyle;
-                                if (!expandedOpponentId) {
-                                    widthStyle = { width: `${100 / seatedOpponentIds.length}%` };
-                                } else if (isThisExpanded) {
-                                    widthStyle = { width: '80%' };
-                                } else {
-                                    widthStyle = { width: `${otherCount > 0 ? 20 / otherCount : 20}%` };
-                                }
-                                return (
-                                    <div key={oppId} style={widthStyle} className="h-full transition-all duration-200">
-                                        <OpponentTile 
-                                            name={getPlayerName(oppId)}
-                                            state={opponentStates[oppId]}
-                                            isActivePlayer={activePlayerId === oppId}
-                                            isChoosingMulligan={!!lobbyState?.seatOrder && !lobbyState?.mulliganStatus?.[oppId]?.completed}
-                                            isExpanded={isThisExpanded}
-                                            onClick={() => setExpandedOpponentId(isThisExpanded ? null : oppId)}
-                                            onHoverCard={setHoveredCard}
-                                            myCommanders={getCommandersOf(myState)}
-                                        />
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-
                     {/* --- BOTTOM ZONE (MY BATTLEFIELD) ---
                         Now a flat 50% of the screen for both the 2-player and 3-4-player layouts - the old
                         shared middle zone is gone, so battlefieldUpper and battlefieldLower both render here
@@ -5565,8 +5503,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                          This wrapper owns the bottom 50% of the screen. Everything inside
                          (battlefield, hand, sidebars) uses absolute positioning relative to
                          THIS div, so top:0 = my top edge, bottom:0 = screen bottom.       */}
-                    <div style={{ position: 'absolute', top: '50%', bottom: 0, left: 0, right: 0 }}
-                        className={`transition-all duration-200 ${activePlayerId === user.uid ? 'ring-4 ring-green-400/70 ring-inset bg-green-900/10' : 'bg-gray-900/20'}`}
+                    <div data-testid="my-half" style={{ position: 'absolute', top: '50%', bottom: 0, left: 0, right: 0, boxShadow: activePlayerId === user.uid ? ACTIVE_RING : undefined }}
+                        className={`transition-all duration-200 ${activePlayerId === user.uid ? 'bg-green-900/10' : 'bg-gray-900/20'}`}
                     >
                         {/* Battlefield drop surface */}
                         <div 
@@ -5591,7 +5529,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
                         {/* Phasenleiste – oben in meiner Hälfte zwischen den Seitenleisten. Zeigt die Phase des AKTIVEN
                             Spielers; steuern darf nur er (oder jeder, wenn er den Tisch verlassen hat). */}
-                        <div style={{ position: 'absolute', top: 0, left: 240, right: 240, height: PHASE_BAR_H, zIndex: 45 }}
+                        <div style={{ position: 'absolute', top: PHASE_BAR_TOP, left: 240, right: 240, height: PHASE_BAR_H, zIndex: 45 }}
                             onDragOver={(e) => e.preventDefault()}
                             onDrop={(e) => handleDropOnBattlefield(e, 'lower', playerLowerBattlefieldRef)}
                         >
@@ -5603,20 +5541,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 onJump={jumpToStep}
                                 onNext={nextStep}
                                 nextDisabled={nextInfo.disabled}
-                                nextTitle={nextInfo.title}
+                                nextTitle={`${nextInfo.title} (Leertaste)`}
                                 flash={phaseFlash}
                                 extra={
                                     hold ? (
                                         iHold
-                                            ? <button onClick={releaseHold} title="Haltebitte aufheben – der aktive Spieler kann weitermachen" className="flex-shrink-0 px-2 h-5 rounded border-0 font-bold whitespace-nowrap bg-yellow-600 hover:bg-yellow-500 text-gray-950">Weiter geben</button>
+                                            ? <button onClick={releaseHold} title="Haltebitte aufheben – der aktive Spieler kann weitermachen (X)" className="flex-shrink-0 px-2 h-5 rounded border-0 font-bold whitespace-nowrap bg-yellow-600 hover:bg-yellow-500 text-gray-950">Weiter geben</button>
                                             : (
                                                 <span className="flex items-center gap-1 flex-shrink-0 whitespace-nowrap">
                                                     <span className="text-yellow-300 font-bold timer-warning" title={holdTitle}>✋ {hold.name || getPlayerName(hold.uid)}</span>
-                                                    {mayControlTurn && <button onClick={releaseHold} title={`${holdTitle} – trotzdem fortsetzen (z. B. wenn niemand reagiert)`} className="px-1.5 h-5 rounded border-solid border border-yellow-700/60 bg-gray-900 hover:bg-gray-800 text-yellow-300">Fortsetzen</button>}
+                                                    {mayControlTurn && <button onClick={releaseHold} title={`${holdTitle} – trotzdem fortsetzen (z. B. wenn niemand reagiert) (X)`} className="px-1.5 h-5 rounded border-solid border border-yellow-700/60 bg-gray-900 hover:bg-gray-800 text-yellow-300">Fortsetzen</button>}
                                                 </span>
                                             )
                                     ) : (!mayControlTurn && activePlayerId && (
-                                        <button onClick={requestHold} title={`${activeName} bitten, kurz anzuhalten – du möchtest reagieren`} className="flex-shrink-0 px-2 h-5 rounded border-solid border border-yellow-700/60 bg-gray-900 hover:bg-gray-800 text-yellow-300 whitespace-nowrap">✋ Moment!</button>
+                                        <button onClick={requestHold} title={`${activeName} bitten, kurz anzuhalten – du möchtest reagieren (X)`} className="flex-shrink-0 px-2 h-5 rounded border-solid border border-yellow-700/60 bg-gray-900 hover:bg-gray-800 text-yellow-300 whitespace-nowrap">✋ Moment!</button>
                                     ))
                                 }
                             />
@@ -5633,7 +5571,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 onClick={() => setMyHandMinimized(!myHandMinimized)}
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDropOnZone(e, 'hand')}
-                                title={myHandMinimized ? 'Hand zeigen' : 'Hand verbergen'}
+                                title={myHandMinimized ? 'Hand zeigen (H)' : 'Hand verbergen (H)'}
                                 className={`pointer-events-auto bg-gray-900/90 hover:bg-gray-800 backdrop-blur-sm border-solid border-0 border-t border-x border-yellow-700/60 rounded-t-lg px-4 py-0.5 flex items-center gap-2 text-yellow-400 font-bold text-xs shadow-lg transition-colors ${myHandMinimized ? 'border-b' : ''}`}
                             >
                                 <span>{myHandMinimized ? '▲' : '▼'}</span>
@@ -5685,12 +5623,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     {activePlayerId === user.uid && <ActiveTurnBadge />}
                                 </div>
                                 <div className="flex items-center justify-between my-1">
-                                    <button onClick={() => updateMyState({ life: myState.life - 1 })} title="Leben −1" aria-label="Leben −1" className="w-8 h-8 rounded-full bg-red-700 hover:bg-red-600 border border-solid border-red-500/60 text-white text-lg font-bold leading-none shadow">−</button>
+                                    <button onClick={() => updateMyState({ life: myState.life - 1 })} title="Leben −1 (−)" aria-label="Leben −1" className="w-8 h-8 rounded-full bg-red-700 hover:bg-red-600 border border-solid border-red-500/60 text-white text-lg font-bold leading-none shadow">−</button>
                                     <div className="flex flex-col items-center leading-none">
                                         <span className="text-green-400 font-title font-bold text-3xl">{myState.life}</span>
                                         <span className="text-gray-400 text-[9px] uppercase tracking-wider mt-0.5">Leben</span>
                                     </div>
-                                    <button onClick={() => updateMyState({ life: myState.life + 1 })} title="Leben +1" aria-label="Leben +1" className="w-8 h-8 rounded-full bg-green-700 hover:bg-green-600 border border-solid border-green-500/60 text-white text-lg font-bold leading-none shadow">+</button>
+                                    <button onClick={() => updateMyState({ life: myState.life + 1 })} title="Leben +1 (+)" aria-label="Leben +1" className="w-8 h-8 rounded-full bg-green-700 hover:bg-green-600 border border-solid border-green-500/60 text-white text-lg font-bold leading-none shadow">+</button>
                                 </div>
                                 <ManaPool compact pool={manaPool} onAdd={addMana} onRemove={removeMana} onClear={clearMana} />
                                 {myEmblems.length > 0 && (
@@ -5709,7 +5647,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 {myPriorityPending ? (
                                     <button
                                         onClick={passPriority}
-                                        title="Kein Blocker / Priorität abgeben"
+                                        title="Kein Blocker / Priorität abgeben (Leertaste)"
                                         aria-label="Kein Blocker"
                                         className="flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow bg-yellow-600 hover:bg-yellow-500 text-white cursor-pointer"
                                     >🛡️ Kein Blocker</button>
@@ -5721,7 +5659,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     <button
                                         onClick={nextStep}
                                         disabled={nextInfo.disabled}
-                                        title={nextInfo.title}
+                                        title={`${nextInfo.title} (Leertaste)`}
                                         aria-label="Weiter"
                                         className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${nextInfo.disabled ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-400 text-gray-950 cursor-pointer'}`}
                                     >{nextInfo.label}</button>
@@ -5729,7 +5667,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <button
                                     onClick={endTurn}
                                     disabled={!canEndTurn}
-                                    title={!mayControlTurn ? `Nur ${activeName} kann den Zug beenden` : holdBlocksMe ? holdTitle : 'Zug beenden'}
+                                    title={!mayControlTurn ? `Nur ${activeName} kann den Zug beenden` : holdBlocksMe ? holdTitle : 'Zug beenden (E)'}
                                     aria-label="Zug beenden"
                                     className={`flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold transition-colors shadow ${canEndTurn ? 'bg-yellow-700 hover:bg-yellow-600 text-white cursor-pointer' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
                                 >⏭ Zug beenden</button>
@@ -5757,6 +5695,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     className="bg-gray-900 border border-solid border-yellow-700/60 rounded-lg shadow-2xl p-1 flex flex-col gap-1"
                                 >
                                     <button role="menuitem" onClick={openCmdDmg} className="w-full text-left px-3 py-1.5 rounded text-sm font-bold text-blue-400 bg-transparent border-0 hover:bg-gray-800 transition-colors">Commander-Schaden</button>
+                                    <button role="menuitem" onClick={() => { setMyMenuPos(null); setShowKeys(true); }} className="w-full text-left px-3 py-1.5 rounded text-sm font-bold text-yellow-300 bg-transparent border-0 hover:bg-gray-800 transition-colors">Tastenkürzel (?)</button>
                                     <button role="menuitem" onClick={() => { setMyMenuPos(null); handleLeaveGame(); }} className="w-full text-left px-3 py-1.5 rounded text-sm font-bold text-white bg-red-600 hover:bg-red-500 border-0 transition-colors">Spiel verlassen</button>
                                 </div>,
                                 (document.getElementById('arena-portal') || document.body)
@@ -5888,15 +5827,198 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
                             {/* Action buttons */}
                             <div className="flex gap-2 flex-shrink-0">
-                                <button onClick={drawCard} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Ziehen</button>
-                                <button onClick={() => setTokenModalOpen(true)} className="flex-1 bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Token</button>
-                                <button onClick={shuffleLibrary} className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Mischen</button>
+                                <button onClick={drawCard} title="Karte ziehen (D)" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Ziehen</button>
+                                <button onClick={() => setTokenModalOpen(true)} title="Token erstellen (T)" className="flex-1 bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Token</button>
+                                <button onClick={shuffleLibrary} title="Bibliothek mischen (M)" className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg">Mischen</button>
                             </div>
                             <button onClick={() => setEmblemModalOpen(true)} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded text-xs font-bold shadow-lg flex-shrink-0">
                                 Embleme{myEmblems.length > 0 ? ` (${myEmblems.length})` : ''}
                             </button>
                         </div>
                     </div>{/* ── END MY HALF ── */}
+                    {/* --- OPPONENT AREA (oben) ---
+                        2 Spieler: exaktes Spiegelbild meiner Hälfte (gleiche Seitenleisten, Reihen-Geometrie und Skalierung
+                        aus computeBfGeom, nur vertikal gespiegelt: Konsole und Kreaturen zur Tischmitte, Commander-Zone und
+                        Verzauberungen/Artefakte zum Bildschirmrand). 3–4 Spieler: Kachelansicht. Steht im DOM nach meiner
+                        Hälfte, damit Selektoren wie [data-zone] zuerst mein Feld finden. */}
+                    {opponentIds.length <= 1 ? (() => {
+                        const oppId = opponentIds[0];
+                        const opp = oppId ? opponentStates[oppId] : null;
+                        const oppActive = !!oppId && activePlayerId === oppId;
+                        const oppName = oppId ? getPlayerName(oppId) : 'Gegner';
+                        const oppChoosingMulligan = !!opp && !!lobbyState?.seatOrder && !lobbyState?.mulliganStatus?.[oppId]?.completed;
+                        const oppLayout = opp && oppGeom ? layoutMyCards([...(opp.battlefieldLower || []), ...(opp.battlefieldUpper || [])], oppGeom) : {};
+                        const oppEmblems = opp?.emblems || [];
+                        const myCmdrs = getCommandersOf(myState);
+                        const cmdDmgTo = myCmdrs.map(c => ({ name: c.name, dmg: (opp?.commanderDamage || {})[c.instanceId] || 0 }));
+                        const maxCmdDmgTo = Math.max(0, ...cmdDmgTo.map(x => x.dmg));
+                        const chip = 'flex-1 min-w-0 truncate px-1 py-1.5 rounded text-[11px] font-bold shadow bg-gray-800 text-gray-200';
+                        return (
+                            <>
+                                <div data-testid="opp-half" style={{ boxShadow: oppActive ? ACTIVE_RING : undefined }} className={`absolute top-0 left-0 w-full h-1/2 z-0 transition-all duration-200 ${oppActive ? 'bg-green-900/10' : 'bg-gray-900/20'}`}>
+                                    {!opp ? (
+                                        <div className="flex items-center justify-center h-full text-red-500/20 text-sm font-bold uppercase tracking-widest">Gegnerseite</div>
+                                    ) : (
+                                        <>
+                                            {/* Spielfeld des Gegners: gespiegelte Reihen, gleiche Kartengröße wie meine */}
+                                            <div className="absolute inset-0" style={{ zIndex: 0 }}>
+                                                {oppGeom && (
+                                                    <div className="absolute inset-0 pointer-events-none z-0">
+                                                        {Object.entries(oppGeom.zones).map(([t, z]) => (
+                                                            <div key={t} data-opp-zone={t} style={{ position: 'absolute', left: z.left, width: z.right - z.left, top: z.top, height: oppGeom.ch, border: `1px dashed ${z.color}`, borderRadius: 3, pointerEvents: 'none' }}>
+                                                                <span style={{ fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.5, whiteSpace: 'nowrap', position: 'absolute', bottom: 2, right: 4, color: z.text }}>{z.label}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {oppGeom && (opp.battlefieldLower || []).map(card => renderBattlefieldCard(card, 'battlefieldLower', false, oppLayout[card.instanceId], oppGeom))}
+                                                {oppGeom && (opp.battlefieldUpper || []).map(card => renderBattlefieldCard(card, 'battlefieldUpper', false, oppLayout[card.instanceId], oppGeom))}
+                                            </div>
+
+                                            {/* Gespiegelter Streifen an Stelle der Phasenleiste (gleiche Höhe, nur Anzeige) */}
+                                            <div data-testid="opp-strip" style={{ position: 'absolute', bottom: PHASE_BAR_TOP, left: 240, right: 240, height: PHASE_BAR_H, zIndex: 45, fontSize: 11 }}
+                                                className="flex items-center justify-center gap-2 px-2 rounded-lg bg-gray-950/60 border-solid border border-yellow-700/30 text-gray-400 select-none whitespace-nowrap overflow-hidden"
+                                            >
+                                                <b className="text-red-300 truncate min-w-0">{oppName}</b>
+                                                {oppActive
+                                                    ? <span className="text-yellow-300 font-bold">am Zug · {PHASE_LABEL[curStep] || ''}</span>
+                                                    : <span className="text-gray-500">wartet</span>}
+                                            </div>
+
+                                            {/* Linke Seitenleiste, gespiegelt: Konsole unten (Tischmitte), Info-Reihe, Commander-Zone oben */}
+                                            <div data-testid="opp-left" style={{ position: 'absolute', top: 4, bottom: 4, left: 8 }} className="z-40 w-56 overflow-y-auto scrollbar-hide flex flex-col-reverse gap-1.5">
+                                                <div data-testid="opp-console" className="bg-gray-900/80 backdrop-blur-sm px-3 py-2 rounded-lg border border-yellow-700/50 flex-shrink-0 shadow-lg">
+                                                    <div className="flex justify-between items-center h-5">
+                                                        <h4 className="text-red-400 text-sm font-bold truncate min-w-0" title={oppName}>{oppName}</h4>
+                                                        {oppChoosingMulligan
+                                                            ? <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-wide whitespace-nowrap">Wählt Mulligan …</span>
+                                                            : oppActive && <ActiveTurnBadge />}
+                                                    </div>
+                                                    <div className="flex items-center justify-between my-1">
+                                                        <span className="w-8 h-8" aria-hidden="true" />
+                                                        <div className="flex flex-col items-center leading-none" title={`Leben von ${oppName}`}>
+                                                            <span data-testid="opp-life" className="text-green-400 font-title font-bold text-3xl">{opp.life}</span>
+                                                            <span className="text-gray-400 text-[9px] uppercase tracking-wider mt-0.5">Leben</span>
+                                                        </div>
+                                                        <span className="w-8 h-8" aria-hidden="true" />
+                                                    </div>
+                                                    <ManaPool compact readOnly ownerName={oppName} pool={{ W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, ...(opp.manaPool || {}) }} />
+                                                    {oppEmblems.length > 0 && (
+                                                        <div className="flex gap-1 mt-1.5 overflow-hidden whitespace-nowrap">
+                                                            {oppEmblems.map(e => (
+                                                                <span key={e.instanceId} className="min-w-0 truncate bg-indigo-700/80 border border-indigo-400 text-indigo-100 text-[10px] font-bold px-1.5 py-0.5 rounded cursor-default" title={`${e.name}: ${e.stage > 0 ? (e.stageText || [])[e.stage - 1] || '' : 'Gerade erstellt'}`}>
+                                                                    {e.name} {e.maxStage > 1 ? `${e.stage}/${e.maxStage}` : ''}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Info-Reihe in der Geometrie meiner Aktionsreihe: Hand, Bibliothek, Commander-Schaden */}
+                                                <div data-testid="opp-info" className="flex gap-1 flex-shrink-0">
+                                                    <button type="button" tabIndex={-1} style={{ cursor: 'default' }} className={chip} title={`${oppName} hat ${opp.hand?.length || 0} Handkarten (verdeckt)`}>🂠 Hand {opp.hand?.length || 0}</button>
+                                                    <button type="button" tabIndex={-1} style={{ cursor: 'default' }} className={chip} title={`Bibliothek von ${oppName}`}>📚 Bibl. {opp.library?.length || 0}</button>
+                                                    <button type="button" tabIndex={-1} style={{ cursor: 'default' }}
+                                                        title={cmdDmgTo.length ? `Commander-Schaden an ${oppName}: ${cmdDmgTo.map(x => `${x.name} ${x.dmg}`).join(', ')}` : 'Commander-Schaden'}
+                                                        className={`relative w-8 flex-shrink-0 py-1.5 rounded text-sm font-bold leading-none border border-solid shadow bg-gray-900/80 ${maxCmdDmgTo >= 15 ? 'border-red-500 text-red-300' : 'border-yellow-700/50 text-yellow-400'}`}
+                                                    >{maxCmdDmgTo > 0 ? maxCmdDmgTo : '⚔'}</button>
+                                                </div>
+
+                                                <div className="bg-gray-900/80 backdrop-blur-sm px-3 py-2 rounded-lg border border-yellow-700/50 flex-1 min-h-0 overflow-hidden flex flex-col shadow-lg">
+                                                    <h4 className="text-red-400 text-sm font-bold mb-1 flex-shrink-0">Commander-Zone</h4>
+                                                    <div className="flex flex-wrap gap-2 content-start justify-center min-h-0">
+                                                        {(opp.commandZone || []).map(card => (
+                                                            <div key={card.instanceId} className="flex-shrink-0 flex flex-col items-center">
+                                                                <CardImage
+                                                                    src={card.image_url}
+                                                                    className="w-14 h-[78px] border border-yellow-500"
+                                                                    onMouseEnter={() => setHoveredCard(card.image_url)}
+                                                                    onMouseLeave={() => setHoveredCard(null)}
+                                                                />
+                                                                {card.isCommander && (
+                                                                    <div className="text-yellow-400 text-[10px] font-bold mt-0.5">Steuer: +{(opp.cmdTax || {})[card.instanceId] || 0}</div>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Rechte Seitenleiste, gespiegelt: Bibliothek unten (Tischmitte), darüber Friedhof/Exil */}
+                                            <div data-testid="opp-right" style={{ position: 'absolute', top: 4, bottom: 4, right: 8 }} className="z-40 w-56 overflow-y-auto flex flex-col-reverse gap-1.5 scrollbar-hide">
+                                                <div className="bg-gray-900/80 backdrop-blur-sm p-2 rounded-lg border border-yellow-700/50 flex-shrink-0 flex flex-col items-center justify-center relative shadow-lg">
+                                                    <h4 className="text-red-400 text-sm font-bold mb-1">Bibliothek ({opp.library?.length || 0})</h4>
+                                                    <CardImage isBack={true} className="w-[60px] h-[84px]" />
+                                                </div>
+                                                <div className="flex gap-2 flex-shrink-0">
+                                                    {[['graveyard', 'Friedhof'], ['exile', 'Exil']].map(([zone, label]) => {
+                                                        const top = (opp[zone] || [])[0];
+                                                        return (
+                                                            <div key={zone} onClick={() => setViewingZone({ zone, playerId: oppId })}
+                                                                className="bg-gray-900/80 backdrop-blur-sm p-2 rounded-lg border border-yellow-700/50 cursor-pointer hover:bg-gray-900 flex-1 flex flex-col items-center justify-center shadow-lg"
+                                                            >
+                                                                <h4 className="text-red-400 text-xs font-bold mb-1">{label} ({opp[zone]?.length || 0})</h4>
+                                                                {top ? (
+                                                                    <CardImage src={top.image_url} className="w-12 h-16"
+                                                                        onMouseEnter={() => setHoveredCard(top.image_url)}
+                                                                        onMouseLeave={() => setHoveredCard(null)} />
+                                                                ) : <div className="w-12 h-16 bg-black/50 rounded border border-gray-600"></div>}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {oppEmblems.length > 0 && (
+                                                    <div className="w-full bg-indigo-700/60 text-indigo-100 px-3 py-1.5 rounded text-xs font-bold shadow-lg flex-shrink-0 text-center truncate" title={oppEmblems.map(e => e.name).join(', ')}>
+                                                        Embleme ({oppEmblems.length})
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                                {/* Mittellinie zwischen den Hälften (eigenes Element, damit beide Hälften gleich hoch bleiben) */}
+                                <div aria-hidden="true" className="absolute left-0 right-0 pointer-events-none bg-yellow-700/30" style={{ top: 'calc(50% - 1px)', height: 2, zIndex: 1 }} />
+                            </>
+                        );
+                    })() : (
+                        /* --- 3-4 PLAYER LAYOUT ---
+                           Top 50% of the screen, split among however many opponents are actually seated:
+                           - Grid mode (expandedOpponentId === null): all opponent tiles equal width.
+                           - Expanded mode: the clicked opponent takes 80% width, the rest share the remaining
+                             20% between them (so they never disappear when one tile is enlarged) - per the
+                             spec: 10% each at 4 players (3 others), 20% as one tile at 3 players (2 others,
+                             so 10% each there too - the remaining tiles always split the 20% evenly).
+                           My own battlefield (bottom 50%) merges battlefieldUpper+battlefieldLower into a
+                           single unified drop zone - no more internal split on my own side. */
+                        <div className="absolute top-0 left-0 w-full h-1/2 bg-gray-950/40 border-b-2 border-yellow-700/30 z-0 flex gap-1 p-1">
+                            {seatedOpponentIds.map(oppId => {
+                                const isThisExpanded = expandedOpponentId === oppId;
+                                const otherCount = seatedOpponentIds.length - 1;
+                                let widthStyle;
+                                if (!expandedOpponentId) {
+                                    widthStyle = { width: `${100 / seatedOpponentIds.length}%` };
+                                } else if (isThisExpanded) {
+                                    widthStyle = { width: '80%' };
+                                } else {
+                                    widthStyle = { width: `${otherCount > 0 ? 20 / otherCount : 20}%` };
+                                }
+                                return (
+                                    <div key={oppId} style={widthStyle} className="h-full transition-all duration-200">
+                                        <OpponentTile 
+                                            name={getPlayerName(oppId)}
+                                            state={opponentStates[oppId]}
+                                            isActivePlayer={activePlayerId === oppId}
+                                            isChoosingMulligan={!!lobbyState?.seatOrder && !lobbyState?.mulliganStatus?.[oppId]?.completed}
+                                            isExpanded={isThisExpanded}
+                                            onClick={() => setExpandedOpponentId(isThisExpanded ? null : oppId)}
+                                            onHoverCard={setHoveredCard}
+                                            myCommanders={getCommandersOf(myState)}
+                                        />
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             );
         };

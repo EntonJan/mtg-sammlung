@@ -34,6 +34,9 @@
 .arena-root .rounded-xl.border-2, .arena-root .rounded-lg.border { border-color: rgba(212, 180, 106, 0.35); }
 .arena-root .arena-min { position: fixed; top: 8px; right: 50%; transform: translateX(50%); z-index: 980; background: rgba(15,14,12,.85); color: #d4b46a; border: 1px solid #8a7340; padding: 3px 12px; font-family: 'Cinzel', serif; font-size: 12px; letter-spacing: .08em; }
 .arena-root .arena-min:hover { background: #2a2416; }
+/* 2 Spieler: Gegnerhälfte ist das Spiegelbild meiner – oben mittig läge der Knopf auf ihrer Verzauberungs-/Artefaktreihe,
+   oben rechts (über Friedhof/Bibliothek des Gegners) ist dagegen frei. */
+.arena-root:has([data-testid="opp-half"]) .arena-min { right: 8px; transform: none; }
 .arena-root .arena-center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: #c2b79c; }
 body.arena-open { overflow: hidden; }
 
