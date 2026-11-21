@@ -160,6 +160,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
     onMoveMany(selectedRows.map((x) => ({ id: x.id, finish: x.finish, qty: 1, from: 'collection' })), to)
     setSelected(new Set())
   }
+  const moveOne = (r, to) => onMoveMany([{ id: r.id, finish: r.finish, qty: 1, from: 'collection' }], to)
   const targets = Object.values(decks || {}).sort((a, b) => (a.kind === 'binder') - (b.kind === 'binder') || a.name.localeCompare(b.name))
 
   const activeFilters = ['text', 'type', 'rarity', 'set', 'cmcMin', 'cmcMax', 'minPrice', 'finish']
@@ -284,22 +285,23 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
           {onMoveMany && targets.length > 0 && (
             <select value="" onChange={(e) => e.target.value && moveSelected(e.target.value)}>
               <option value="">→ je 1 Exemplar verschieben nach …</option>
-              {targets.map((d) => <option key={d.id} value={d.id}>{d.kind === 'binder' ? '📁 ' : ''}{d.name}</option>)}
+              {targets.some((d) => d.kind !== 'binder') && <optgroup label="Decks">{targets.filter((d) => d.kind !== 'binder').map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>}
+              {targets.some((d) => d.kind === 'binder') && <optgroup label="Ordner">{targets.filter((d) => d.kind === 'binder').map((d) => <option key={d.id} value={d.id}>📁 {d.name}</option>)}</optgroup>}
             </select>
           )}
-          <span className="muted small">oder die Auswahl auf ein Deck ziehen</span>
+          <span className="muted small">oder die Auswahl links auf ein Deck oder einen Ordner ziehen</span>
           <button className="btn small ghost" onClick={() => setSelected(new Set())}>Auswahl aufheben</button>
         </div>
       )}
 
       {view === 'list'
-        ? <VirtualList items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} deNames={f.german ? deNames : null} />
-        : <VirtualGrid items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} />}
+        ? <VirtualList items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} moveTo={onMoveMany && targets.length ? moveOne : null} targets={targets} deNames={f.german ? deNames : null} />
+        : <VirtualGrid items={filtered} onRowClick={onRowClick} payloadFor={payloadFor} selected={selected} onQuickAdd={onQuickAdd} moveTo={onMoveMany && targets.length ? moveOne : null} targets={targets} />}
     </div>
   )
 }
 
-function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNames }) {
+function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNames, moveTo, targets }) {
   const parentRef = useRef(null)
   const v = useVirtualizer({
     count: items.length,
@@ -337,6 +339,7 @@ function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNa
               <Mana cost={c.cost} />
               <span className={`rar rar-${c.rarity}`} title={c.rarity}>●</span>
               <span className="price">{euro(r.price)}</span>
+              {moveTo && r.free > 0 && <MoveMini r={r} moveTo={moveTo} targets={targets} />}
               {onQuickAdd && (
                 <button className="mini add-mini" title="1 Exemplar ins Deck" disabled={!r.free}
                   onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
@@ -350,7 +353,7 @@ function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNa
   )
 }
 
-function VirtualGrid({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
+function VirtualGrid({ items, onRowClick, payloadFor, selected, onQuickAdd, moveTo, targets }) {
   const parentRef = useRef(null)
   const [width, setWidth] = useState(800)
   useEffect(() => {
@@ -388,6 +391,7 @@ function VirtualGrid({ items, onRowClick, payloadFor, selected, onQuickAdd }) {
                 <span className="tile-badge">{r.qty}×</span>
                 {r.finish === 'foil' && r.printings === 1 && <span className="tile-foil">Foil</span>}
                 <span className="tile-price">{euro(r.price)}{r.used > 0 && <span className={`tile-avail ${r.free ? '' : 'none'}`}> · {r.free}/{r.qty} frei</span>}</span>
+                {moveTo && r.free > 0 && <MoveMini r={r} moveTo={moveTo} targets={targets} />}
                 {onQuickAdd && (
                   <button className="mini tile-add" title="1 Exemplar ins Deck" disabled={!r.free}
                     onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
@@ -409,12 +413,28 @@ function availText(r) {
   return r.free ? `${r.free} von ${r.qty} verfügbar · ${r.used} in ${where}` : `alle in ${where}`
 }
 
+// Ein Exemplar direkt in ein Deck oder einen Ordner verschieben (natives Auswahlmenü hinter einem kleinen Knopf)
+function MoveMini({ r, moveTo, targets }) {
+  const ds = targets.filter((d) => d.kind !== 'binder')
+  const bs = targets.filter((d) => d.kind === 'binder')
+  return (
+    <label className="mini move-mini" title="1 Exemplar in ein Deck oder einen Ordner verschieben" onClick={(e) => e.stopPropagation()}>
+      ⇢
+      <select value="" onChange={(e) => { const v = e.target.value; if (v) moveTo(r, v) }} onClick={(e) => e.stopPropagation()}>
+        <option value="">1 Exemplar verschieben nach …</option>
+        {ds.length > 0 && <optgroup label="Decks">{ds.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>}
+        {bs.length > 0 && <optgroup label="Ordner">{bs.map((d) => <option key={d.id} value={d.id}>📁 {d.name}</option>)}</optgroup>}
+      </select>
+    </label>
+  )
+}
+
 function Avail({ r }) {
   if (!r.used) return null
   const where = [...new Set(r.usedIn.map((x) => x.name))]
   return (
     <span className={`avail ${r.free ? 'part' : 'none'}`} title={availText(r)}>
-      {r.free ? `noch ${r.free} von ${r.qty} verfügbar` : `in ${where.length > 1 ? `${where.length} Decks` : where[0]}`}
+      {r.free ? `noch ${r.free} von ${r.qty} verfügbar` : `in ${where.length > 1 ? `${where.length} Decks/Ordnern` : where[0]}`}
     </span>
   )
 }

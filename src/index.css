@@ -565,3 +565,8 @@ body.native header { padding-top: max(10px, env(safe-area-inset-top)); }
 .pp-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
 
 .mini.danger:hover { background: #5a1f1f; border-color: #b44; }
+
+/* Sammlung: 1 Exemplar in Deck/Ordner verschieben (natives Menü hinter Mini-Knopf) */
+.move-mini { position: relative; display: inline-flex; align-items: center; justify-content: center; color: var(--accent); font-weight: 700; flex-shrink: 0; }
+.move-mini select { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.tile .move-mini { position: absolute; bottom: 34px; left: 8%; background: rgba(0,0,0,.75); }

@@ -19,6 +19,17 @@ export default function CardDetail({ card, entries, decks, cards, onChange, onMo
     .map((d) => ({ deck: d, items: Object.values(d.entries).filter(same).sort(byVersion) }))
     .filter((x) => x.items.length)
   const deckList = Object.values(decks).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+  // Ziel-Auswahl gruppiert: Decks und Ordner getrennt
+  const targetOptions = (exclude, prefix = '') => {
+    const ds = deckList.filter((d) => d.id !== exclude && d.kind !== 'binder')
+    const bs = deckList.filter((d) => d.id !== exclude && d.kind === 'binder')
+    return (
+      <>
+        {ds.length > 0 && <optgroup label="Decks">{ds.map((d) => <option key={d.id} value={d.id}>{prefix}{d.name}</option>)}</optgroup>}
+        {bs.length > 0 && <optgroup label="Ordner">{bs.map((d) => <option key={d.id} value={d.id}>{prefix}📁 {d.name}</option>)}</optgroup>}
+      </>
+    )
+  }
 
   const freeTotal = free.reduce((s, e) => s + e.qty, 0)
   const deckTotal = inDecks.reduce((s, x) => s + x.items.reduce((t, e) => t + e.qty, 0), 0)
@@ -67,8 +78,8 @@ export default function CardDetail({ card, entries, decks, cards, onChange, onMo
                     value=""
                     onChange={(ev) => ev.target.value && onMove({ id: e.id, finish: e.finish, from: 'collection' }, ev.target.value)}
                   >
-                    <option value="">→ ins Deck …</option>
-                    {deckList.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    <option value="">→ in Deck / Ordner …</option>
+                    {targetOptions(null)}
                   </select>
                 )}
               </div>
@@ -78,18 +89,18 @@ export default function CardDetail({ card, entries, decks, cards, onChange, onMo
 
           {inDecks.length > 0 && (
             <>
-              <h3>In Decks ({deckTotal})</h3>
+              <h3>In Decks & Ordnern ({deckTotal})</h3>
               <div className="owned">
                 {inDecks.flatMap(({ deck, items }) => items.map((e) => (
                   <div key={`${deck.id}|${e.id}|${e.finish}`} className="owned-row">
-                    <span className="ver"><b>{deck.name}</b> · {e.qty}× {version(e)}</span>
+                    <span className="ver"><b>{deck.kind === 'binder' ? '📁 ' : ''}{deck.name}</b> · {e.qty}× {version(e)}</span>
                     <select
                       className="move-select" value=""
                       onChange={(ev) => ev.target.value && onMove({ id: e.id, finish: e.finish, from: deck.id }, ev.target.value)}
                     >
                       <option value="">verschieben …</option>
                       <option value="collection">↩ zurück in die Sammlung</option>
-                      {deckList.filter((d) => d.id !== deck.id).map((d) => <option key={d.id} value={d.id}>→ {d.name}</option>)}
+                      {targetOptions(deck.id, '→ ')}
                     </select>
                   </div>
                 )))}

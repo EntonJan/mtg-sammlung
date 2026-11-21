@@ -325,7 +325,7 @@ function Main({ user }) {
     }
     if (!moved) return
     commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [...changed], label: `${moved} Karten verschoben` })
-    notify(`${moved} Karten → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
+    notify(`${moved} ${moved === 1 ? 'Karte' : 'Karten'} → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
   }, [commit])
 
   // Ziel für Drag & Drop: einzelne Karte oder Mehrfachauswahl
