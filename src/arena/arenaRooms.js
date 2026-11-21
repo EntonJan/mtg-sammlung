@@ -1,6 +1,7 @@
 // Räume für den Spieltisch (gleiches Datenmodell wie in der MTG Lounge, ergänzt um Einladungen)
 //   arena_rooms/{id}                    – host, players[], invited[], maxPlayers, playerInfo{uid:{name,deckId,deckName,commanderName}}, seatOrder, stack, combat, …
 //   arena_rooms/{id}/game_state/{uid}   – Zustand eines Spielers
+//   arena_rooms/{id}/log/{entry}        – Spielprotokoll { at, uid, name, text, cards?, kind? }
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
 import { db } from '../firebase'
 
@@ -39,7 +40,7 @@ export async function leaveRoom(id, me) {
   const r = snap.data()
   const rest = r.players.filter((p) => p !== me)
   const pi = { ...(r.playerInfo || {}) }; delete pi[me]
-  if (!rest.length) { await deleteDoc(ref).catch(() => updateDoc(ref, { players: [], playerInfo: {}, emptyAt: Date.now() }).catch(() => {})) }
+  if (!rest.length) { await deleteLog(id); await deleteDoc(ref).catch(() => updateDoc(ref, { players: [], playerInfo: {}, emptyAt: Date.now() }).catch(() => {})) }
   else {
     // war ich am Zug, geht der Zug an den nächsten anwesenden Spieler
     const patch = { players: rest, playerInfo: pi, invited: (r.invited || []).filter((p) => p !== me) }
@@ -58,9 +59,15 @@ export async function leaveRoom(id, me) {
   }
 }
 
-// Tisch auflösen (Gastgeber): erst alle Spielzustände, dann den Raum löschen
+// Protokolleinträge löschen (solange ich noch Mitspieler bin – die Regeln prüfen die Spielerliste des Raums)
+async function deleteLog(id) {
+  try { const lg = await getDocs(collection(db, 'arena_rooms', id, 'log')); await Promise.all(lg.docs.map((d) => deleteDoc(d.ref))) } catch (e) { console.warn(e) }
+}
+
+// Tisch auflösen (Gastgeber): erst alle Spielzustände und das Protokoll, dann den Raum löschen
 export async function cancelRoom(id) {
   try { const st = await getDocs(collection(db, 'arena_rooms', id, 'game_state')); await Promise.all(st.docs.map((d) => deleteDoc(d.ref))) } catch (e) { console.warn(e) }
+  await deleteLog(id)
   await deleteDoc(doc(db, 'arena_rooms', id))
 }
 

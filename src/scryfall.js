@@ -436,6 +436,7 @@ export async function fullCards(ids) {
       keywords: c.keywords || [], produced_mana: c.produced_mana || [],
       image_url: c.image_uris?.normal || c.card_faces?.[0]?.image_uris?.normal || '',
       card_faces: c.card_faces ? c.card_faces.map(face) : undefined,
+      layout: c.layout || undefined,
     }
   }
   return out

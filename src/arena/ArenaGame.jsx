@@ -3,7 +3,7 @@
 // Firebase läuft über das Projekt mtg-sammlung; Optik über Tailwind (gescoped auf .arena-root, Onyx-Gold-Palette).
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { collection, doc, setDoc as fsSetDoc, getDocs, getDoc, deleteDoc, onSnapshot, addDoc as fsAddDoc, updateDoc as fsUpdateDoc, increment, query, where, runTransaction } from 'firebase/firestore'
+import { collection, doc, setDoc as fsSetDoc, getDocs, getDoc, deleteDoc, onSnapshot, addDoc as fsAddDoc, updateDoc as fsUpdateDoc, increment, query, where, orderBy, limitToLast, runTransaction } from 'firebase/firestore'
 import { db } from '../firebase'
 import Icon from './Icon'
 
@@ -125,7 +125,69 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
         // Used to decide where a card played from hand should go: lands go straight to the battlefield,
         // everything else goes onto the shared stack first.
-        const isLand = (card) => /\bLand\b/i.test((card?.card_faces?.[0]?.type_line) || (card?.type_line || '').split(' // ')[0]);
+        // Doppelseitige Karten: solange keine Seite gewählt ist (faceIndex fehlt), gilt die Vorderseite. Auf dem
+        // Spielfeld trägt die Karte die Felder der angezeigten Seite (withFace); origFace hält die Originalfelder,
+        // resetFace stellt sie beim Verlassen des Spielfelds wieder her.
+        const curTypeLine = (card) => card?.faceIndex != null ? (card.type_line || '') : ((card?.card_faces?.[0]?.type_line) || (card?.type_line || '').split(' // ')[0]);
+        const isLand = (card) => /\bLand\b/i.test(curTypeLine(card));
+        const FACE_KEYS = ['name', 'type_line', 'oracle_text', 'power', 'toughness', 'loyalty', 'mana_cost', 'image_url'];
+        const hasFaces = (c) => Array.isArray(c?.card_faces) && c.card_faces.length >= 2;
+        const faceImg = (c, i) => c?.card_faces?.[i]?.image_uris?.normal || '';
+        const withFace = (card, idx) => {
+            if (!hasFaces(card)) return card;
+            const f = card.card_faces[idx] || card.card_faces[0];
+            const orig = card.origFace || Object.fromEntries(FACE_KEYS.filter(k => card[k] !== undefined && card[k] !== null).map(k => [k, card[k]]));
+            const out = { ...card, origFace: orig, faceIndex: idx };
+            FACE_KEYS.slice(0, 7).forEach(k => { if (f[k] !== undefined && f[k] !== null) out[k] = f[k]; else delete out[k]; });
+            out.image_url = faceImg(card, idx) || (idx === 0 ? orig.image_url : '') || orig.image_url || '';
+            return out;
+        };
+        const resetFace = (card) => {
+            if (!card || (card.faceIndex == null && !card.origFace)) return card;
+            const { origFace, faceIndex, ...rest } = card;
+            if (origFace) FACE_KEYS.forEach(k => { if (origFace[k] !== undefined) rest[k] = origFace[k]; else delete rest[k]; });
+            return rest;
+        };
+        // Vorderseite vor dem Betreten des Spielfelds festlegen (Regeltext, Stärke usw. der Seite)
+        const frontFace = (card) => (hasFaces(card) && card.faceIndex == null ? withFace(card, 0) : card);
+        // Modale doppelseitige Karte mit Land-Rückseite (Agadeem's Awakening, Pathways): Index der Rückseite, sonst null.
+        // Ohne layout (alte Kartendaten) gilt: Rückseite ist ein Land und die Vorderseite verwandelt sich nicht.
+        const landBackIdx = (card) => {
+            if (!hasFaces(card) || card.faceIndex != null) return null;
+            const [a, b] = card.card_faces;
+            if (!/\bLand\b/i.test(b?.type_line || '')) return null;
+            if (card.layout) return card.layout === 'modal_dfc' ? 1 : null;
+            return /\btransform/i.test(a?.oracle_text || '') ? null : 1;
+        };
+        // Bild(er) für die Vorschau: doppelseitige Karten zeigen beide Seiten – die gerade sichtbare zuerst
+        const previewOf = (card) => {
+            if (hasFaces(card)) {
+                const cur = card.faceIndex == null ? (faceImg(card, 0) || card.image_url) : (card.image_url || faceImg(card, card.faceIndex));
+                const other = faceImg(card, card.faceIndex === 1 ? 0 : 1) || (card.faceIndex === 1 ? card.origFace?.image_url : '');
+                if (cur && other && cur !== other) return [cur, other];
+            }
+            return card?.image_url || null;
+        };
+        const cardName = (c) => (c?.faceIndex != null ? (c.name || '') : (c?.name || '').split(' // ')[0]);
+        // „Diese Karte kommt getappt ins Spiel“ (ohne „unless“, ohne Wahl wie bei Shocklands)
+        const entersTappedSelf = (card) => {
+            const t = String(card?.oracle_text || '').replace(/\([^)]*\)/g, '');
+            if (!t) return false;
+            const nm = cardName(card).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(`(?:^|[\\n.]\\s*)(?:this [a-z]+|${nm || '~'}|it) enters(?: the battlefield)? tapped(?! unless)(?! and attacking)`, 'i');
+            if (!re.test(t)) return false;
+            return !/you may pay \d+ life/i.test(t);
+        };
+        // „Enchant …“-Zeile einer Aura → erlaubte Ziele
+        const parseEnchant = (card) => {
+            const m = String(card?.oracle_text || '').match(/^enchant ([^\n(]+)/im);
+            const w = (m ? m[1] : 'creature').toLowerCase().trim();
+            if (/\b(player|opponent)\b/.test(w) && !/permanent|creature/.test(w)) return { player: true, label: w };
+            const ctrl = /you control/.test(w) ? 'me' : /(opponent controls|you don't control)/.test(w) ? 'opp' : null;
+            const types = ['creature', 'land', 'artifact', 'enchantment', 'planeswalker'].filter(t => w.includes(t));
+            const any = /\bpermanent\b/.test(w) && !types.length;
+            return { types, any, nonland: /nonland/.test(w), ctrl, label: w };
+        };
         const BASIC_SUBTYPES = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
 
         // Detects what kind of ETB effect a land has so we can handle it interactively.
@@ -147,7 +209,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const tl = (card.type_line || '').toLowerCase();
 
             // Shock: "as ~ enters, you may pay 2 life. If you don't, ~ enters tapped"
-            if (t.includes('pay 2 life') && t.includes('enters tapped')) return 'shock';
+            // (auch ZNR-MDFC-Länder: „you may pay 3 life. If you don't, it enters tapped“)
+            if (/you may pay \d+ life/.test(t) && t.includes('enters tapped')) return 'shock';
 
             // Scry lands: "~ enters the battlefield tapped" + "when ~ enters, scry 1"
             if (t.includes('enters tapped') && t.match(/when [^,]* enters[^,]*, scry/)) return 'scry';
@@ -179,6 +242,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // Pain lands: "{T}: Add {1}" + colored option with life
             if (t.match(/\{t\}: add \{c\}|\{t\}: add 1/i) && t.includes('pay 1 life')) return 'pain';
 
+            // Sonst: „This land enters tapped.“ (Gildentore, Triome ohne Zyklen-Erkennung …)
+            if (entersTappedSelf(card)) return 'tapped';
             return null;
         };
 
@@ -336,9 +401,9 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         // any creature (even an opponent's); Equipment is dragged from one's own battlefield onto one's own
         // creature. A card could in principle be both (rare), in which case Aura takes priority since it's
         // the more common "must attach immediately" case.
-        const isAuraCard = (card) => /\bAura\b/i.test(card?.type_line || '');
-        const isEquipmentCard = (card) => /\bEquipment\b/i.test(card?.type_line || '');
-        const isCreatureLike = (card) => /\bCreature\b/i.test(card?.type_line || '') || (card?.isToken && card?.p_t);
+        const isAuraCard = (card) => /\bAura\b/i.test(curTypeLine(card));
+        const isEquipmentCard = (card) => /\bEquipment\b/i.test(curTypeLine(card));
+        const isCreatureLike = (card) => /\bCreature\b/i.test(curTypeLine(card)) || (card?.isToken && card?.p_t);
 
         // Classifies a card into one of 5 battlefield "neighborhoods" used to decide where it spawns when
         // played, so creatures/lands/artifacts/enchantments/planeswalkers don't all pile up in the same spot.
@@ -346,7 +411,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         // their own clearly-separate thing even when animated), then Creature (the most common and most
         // important-to-see type), then Planeswalker, then Artifact, then Enchantment as the catch-all.
         const getCardZoneType = (card) => {
-            const typeLine = card?.type_line || '';
+            const typeLine = curTypeLine(card);
             if (/\bLand\b/i.test(typeLine)) return 'land';
             if (isCreatureLike(card)) return 'creature';
             if (/\bPlaneswalker\b/i.test(typeLine)) return 'planeswalker';
@@ -1854,11 +1919,14 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const revealTypes = revealMatch ? [revealMatch[1], revealMatch[2]].map(s => s.charAt(0).toUpperCase()+s.slice(1)) : [];
 
             // Auto-resolve conditions for check/fast/slow without showing modal
+            // Liegt das Land schon auf dem Feld (aus einer Fetch-Suche), zählt es selbst nicht mit.
+            const others = modal.onBf ? myBattlefield.filter(c => c.instanceId !== card.instanceId) : myBattlefield;
             const canEnterUntapped = {
-                check: checkTypes.length > 0 && myBattlefield.some(c => checkTypes.some(t => new RegExp(`\\b${t}\\b`,'i').test(c.type_line||''))),
-                fast: myLandCount <= 2,
-                slow: myBasicCount >= 2,
+                check: checkTypes.length > 0 && others.some(c => checkTypes.some(t => new RegExp(`\\b${t}\\b`,'i').test(c.type_line||''))),
+                fast: (modal.onBf ? myLandCount - 1 : myLandCount) <= 2,
+                slow: (modal.onBf ? others.filter(c => /\bBasic\b/i.test(c.type_line||'')).length : myBasicCount) >= 2,
             };
+            const lifeCost = parseInt((oracle.match(/pay (\d+) life/i) || [])[1]) || 2;
 
             // For check/fast/slow: auto-place if condition is met
             React.useEffect(() => {
@@ -1879,18 +1947,18 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 </div>, (document.getElementById('arena-portal') || document.body)
             );
 
-            if (type === 'shock' || type === 'shock_fetch') return wrap(`⚡ ${card.name} — Shock Land`, '#ef4444',
-                <div>
+            if (type === 'shock' || type === 'shock_fetch') return wrap(`⚡ ${card.name}`, '#ef4444',
+                <div data-testid="land-etb-shock">
                     <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:16 }}>
                         {img()}
-                        <p style={{ color:'#d1d5db', fontSize:13 }}>Choose how {card.name} enters the battlefield:</p>
+                        <p style={{ color:'#d1d5db', fontSize:13 }}>Wie kommt {card.name} ins Spiel? Du kannst {lifeCost} Leben zahlen, sonst kommt es getappt.</p>
                     </div>
                     <div style={{ display:'flex', gap:8 }}>
-                        <button onClick={() => onResolve(false, { life: -2 })} style={{ flex:1, background:'#dc2626', color:'white', border:'none', borderRadius:8, padding:'12px 8px', cursor:'pointer', fontWeight:'bold', fontSize:13 }}>
-                            ⚡ Untapped<br/><span style={{ fontSize:11, opacity:0.8 }}>2 Leben zahlen</span>
+                        <button onClick={() => onResolve(false, { life: -lifeCost })} style={{ flex:1, background:'#dc2626', color:'white', border:'none', borderRadius:8, padding:'12px 8px', cursor:'pointer', fontWeight:'bold', fontSize:13 }}>
+                            ⚡ Ungetappt<br/><span style={{ fontSize:11, opacity:0.8 }}>{lifeCost} Leben zahlen</span>
                         </button>
                         <button onClick={() => onResolve(true)} style={{ flex:1, background:'#374151', color:'#d1d5db', border:'1px solid #4b5563', borderRadius:8, padding:'12px 8px', cursor:'pointer', fontWeight:'bold', fontSize:13 }}>
-                            💤 Tapped<br/><span style={{ fontSize:11, opacity:0.8 }}>Keine Kosten</span>
+                            💤 Getappt<br/><span style={{ fontSize:11, opacity:0.8 }}>Keine Kosten</span>
                         </button>
                     </div>
                 </div>
@@ -1900,7 +1968,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 const myLands = myBattlefield.filter(c => isLand(c));
                 return wrap(`↩ ${card.name} — Bounce Land`, '#60a5fa',
                     <div>
-                        <p style={{ color:'#d1d5db', fontSize:13, marginBottom:10 }}>{card.name} enters tapped. Return a land you control to your hand:</p>
+                        <p style={{ color:'#d1d5db', fontSize:13, marginBottom:10 }}>{card.name} kommt getappt ins Spiel. Bringe ein Land, das du kontrollierst, auf die Hand zurück:</p>
                         {myLands.length === 0
                             ? <p style={{ color:'#9ca3af', fontSize:12 }}>Kein Land zum Zurücknehmen – getappt kostenlos ins Spiel.</p>
                             : <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12, maxHeight:180, overflowY:'auto' }}>
@@ -1914,14 +1982,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         }
                         <button onClick={() => {
                             if (!selectedLand && myLands.length > 0) return;
-                            const returnUpdates = selectedLand ? {
-                                hand: [...myHand, selectedLand],
-                                battlefieldLower: myBattlefield.filter(c => c.instanceId !== selectedLand.instanceId)
-                            } : {};
-                            onResolve(true, returnUpdates);
+                            onResolve(true, selectedLand ? { bounce: selectedLand } : {});
                         }} disabled={myLands.length > 0 && !selectedLand}
                             style={{ background: (myLands.length === 0 || selectedLand) ? '#2563eb' : '#374151', color:'white', border:'none', borderRadius:6, padding:'8px 16px', cursor: (myLands.length === 0 || selectedLand) ? 'pointer' : 'not-allowed', fontWeight:'bold', fontSize:13 }}>
-                            {selectedLand ? `Return ${selectedLand.name} & Place` : myLands.length === 0 ? 'Getappt legen' : 'Erst ein Land wählen'}
+                            {selectedLand ? `${selectedLand.name} zurück & legen` : myLands.length === 0 ? 'Getappt legen' : 'Erst ein Land wählen'}
                         </button>
                     </div>
                 );
@@ -1932,7 +1996,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 return wrap(`👁 ${card.name} — Reveal Land`, '#a78bfa',
                     <div>
                         <p style={{ color:'#d1d5db', fontSize:13, marginBottom:10 }}>
-                            Reveal a {revealTypes.join(' or ')} from hand to enter untapped, or enter tapped:
+                            Decke ein {revealTypes.join(' oder ')} aus der Hand auf, damit es ungetappt kommt – oder lege es getappt:
                         </p>
                         {validCards.length > 0 && (
                             <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
@@ -1967,8 +2031,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             <p style={{ color:'#d1d5db', fontSize:13, marginBottom:6 }}>
                                 {type === 'scry' && 'Kommt getappt ins Spiel, dann Hellsicht 1.'}
                                 {type === 'surveil' && 'Kommt getappt ins Spiel, dann Überwachen 1.'}
-                                {type === 'triome' && 'Enters tapped.'}
-                                {(type === 'check' || type === 'fast' || type === 'slow') && `Enters tapped (condition not met).`}
+                                {(type === 'triome' || type === 'tapped') && 'Kommt getappt ins Spiel.'}
+                                {(type === 'check' || type === 'fast' || type === 'slow') && 'Kommt getappt ins Spiel (Bedingung nicht erfüllt).'}
                             </p>
                             <p style={{ color:'#6b7280', fontSize:11 }}>{card.name}</p>
                         </div>
@@ -2297,6 +2361,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const [pendingTriggers, setPendingTriggers] = useState([]);
             const [landETBModal, setLandETBModal] = useState(null);
             const [crewModal, setCrewModal] = useState(null); // { vehicle, zone }
+            // Aura-Zielwahl: { aura, source: 'stack'|'zone'|'bf', stackEntry?, fromZone?, enchant } – Ziele leuchten golden
+            const [auraTarget, setAuraTarget] = useState(null);
+            // „Karten millen …“: null oder { n }
+            const [millPrompt, setMillPrompt] = useState(null);
             // { card, fromZone, type: 'shock'|'check'|'bounce'|'pain'|'reveal'|'scry'|'surveil'|'slow'|'fast' } // triggers waiting to be ordered onto stack
             const isResolvingCombatRef = React.useRef(false);
             const [cmdDmgOpen, setCmdDmgOpen] = useState(false);
@@ -2552,6 +2620,126 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const getPlayerName = (uid) => lobbyState?.playerInfo?.[uid]?.name || lobbyState?.playerInfo?.[uid]?.deckName || 'Mitspieler';
             const activePlayerId = lobbyState?.activePlayer;
 
+            // ── SPIELPROTOKOLL ────────────────────────────────────────────────────
+            // arena_rooms/{roomId}/log/{id}: { at, uid, name, text, cards?: [{ name, image_url }], kind? }
+            // Jeder Client schreibt nur seine eigenen Einträge (Regeln: uid == auth.uid).
+            const [logEntries, setLogEntries] = useState([]);
+            const [logOpen, setLogOpen] = useState(false);
+            const [logSeenAt, setLogSeenAt] = useState(() => Date.now());
+            useEffect(() => {
+                try {
+                    const q = query(collection(db, 'arena_rooms', roomId, 'log'), orderBy('at'), limitToLast(200));
+                    return onSnapshot(q, (snap) => setLogEntries(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => {});
+                } catch (e) { return () => {}; }
+            }, [roomId]);
+            const logScrollRef = useRef(null);
+            useEffect(() => {
+                if (!logOpen) return;
+                setLogSeenAt(Date.now());
+                const el = logScrollRef.current;
+                if (el) el.scrollTop = el.scrollHeight;
+            }, [logOpen, logEntries.length]);
+            const logEvent = (text, cards = null, kind = null) => {
+                const entry = { at: Date.now(), uid: user.uid, name: getPlayerName(user.uid), text };
+                const cs = (cards || []).filter(c => c && c.name).map(c => ({ name: cardName(c), image_url: c.image_url || '' }));
+                if (cs.length) entry.cards = cs;
+                if (kind) entry.kind = kind;
+                addDoc(collection(db, 'arena_rooms', roomId, 'log'), entry).catch(() => {});
+            };
+            // Gezogene Karten zusammenfassen (nie Namen): „zieht 3 Karten“
+            const drawLogRef = useRef({ n: 0, t: null });
+            const noteDraw = (n = 1, suffix = '') => {
+                const r = drawLogRef.current;
+                r.n += n; clearTimeout(r.t);
+                r.t = setTimeout(() => { const k = r.n; r.n = 0; if (k > 0) logEvent(`zieht ${k} Karte${k > 1 ? 'n' : ''}${suffix}`); }, 1500);
+            };
+            // Lebensänderungen pro Spieler gebündelt (~1,5 s Ruhe): „Leben 40 → 34“ – jeder Client meldet nur sein eigenes Leben
+            const lifeLogRef = useRef(null);
+            const myLifeNow = myState?.life;
+            useEffect(() => {
+                if (typeof myLifeNow !== 'number') return;
+                const r = lifeLogRef.current;
+                if (!r) { lifeLogRef.current = { base: myLifeNow, cur: myLifeNow, t: null }; return; }
+                if (myLifeNow === r.cur) return;
+                r.cur = myLifeNow; clearTimeout(r.t);
+                r.t = setTimeout(() => { if (r.cur !== r.base) logEvent(`Leben ${r.base} → ${r.cur}`); r.base = r.cur; }, 1500);
+            }, [myLifeNow]);
+
+            // Anfragen an Mitspieler (Raum-Dokument) per Transaktion anhängen bzw. erledigte entfernen, damit
+            // gleichzeitige Anfragen sich nicht gegenseitig überschreiben.
+            const pushRoomRequest = (field, req) => runTx(async (tx) => {
+                const snap = await tx.get(roomRef);
+                if (!snap.exists()) return;
+                tx.update(roomRef, { [field]: [...(snap.data()[field] || []), ...(Array.isArray(req) ? req : [req])] });
+            }).catch(err => addToast(`❌ Anfrage fehlgeschlagen: ${err.message}`, 'red'));
+            // Eingehende Anfragen an MICH: in EINER Transaktion meinen Zustand frisch lesen, die Anfragen anwenden und sie
+            // aus der Warteschlange des Raums entfernen. Dadurch wird nichts doppelt angewendet (auch nicht nach einem
+            // Neuladen oder wenn ein Snapshot zweimal kommt) und nichts geht verloren. Meine Bearbeitungen laufen
+            // nacheinander (Kette), damit sie sich nicht gegenseitig mit veralteten Arrays überschreiben.
+            // handler(mine, state) → { state?: Patch für meinen Zustand, push?: { feld: [neue Anfragen] }, after?: () => {} }
+            // – muss rein sein (Firestore wiederholt Transaktionen); Toasts/Trigger gehören in `after`.
+            const reqChainRef = useRef(Promise.resolve());
+            const reqBusyRef = useRef({});
+            const processRequests = (field, handler, attempt = 0) => {
+                if (!myState || !(lobbyState?.[field] || []).some(r => r?.targetPlayerId === user.uid)) return;
+                const busy = reqBusyRef.current;
+                if (busy[field]) { busy[field] = 'again'; return; }
+                busy[field] = true;
+                reqChainRef.current = reqChainRef.current.then(() => runTx(async (tx) => {
+                    const rs = await tx.get(roomRef);
+                    if (!rs.exists()) return null;
+                    const room = rs.data();
+                    const all = room[field] || [];
+                    const mine = all.filter(r => r?.targetPlayerId === user.uid);
+                    if (!mine.length) return null;
+                    const ss = await tx.get(myStateRef);
+                    if (!ss.exists()) return null;
+                    const res = handler(mine, ss.data()) || {};
+                    if (res.state && Object.keys(res.state).length) tx.update(myStateRef, res.state);
+                    const roomPatch = { [field]: all.filter(r => r?.targetPlayerId !== user.uid) };
+                    Object.entries(res.push || {}).forEach(([f, items]) => { if (items?.length) roomPatch[f] = [...(roomPatch[f] || room[f] || []), ...items]; });
+                    tx.update(roomRef, roomPatch);
+                    return res.after || null;
+                })).then(after => { if (typeof after === 'function') after(); return false; })
+                    // fehlgeschlagen (offline, Konflikt): nichts wurde angewendet – später erneut versuchen
+                    .catch(err => { console.warn('Anfrage', field, err); return attempt < 3; })
+                    .then(retry => {
+                        const again = busy[field] === 'again'; busy[field] = false;
+                        if (again) processRequests(field, handler);
+                        else if (retry) setTimeout(() => processRequests(field, handler, attempt + 1), 1500 * (attempt + 1));
+                    });
+            };
+
+            // Karte verlässt das Spielfeld: Vorderseite, keine Marker außer Loyalität, Anhänge lösen.
+            // Auren gehen in den Friedhof IHRES Besitzers, Ausrüstung bleibt lose auf meinem Feld liegen.
+            const cleanLeaving = (card) => {
+                const c = { ...resetFace(card), isTapped: false, counters: (card.counters || []).filter(x => x.type === 'Loyalität') };
+                delete c.attachments; delete c.isCrewed;
+                return c;
+            };
+            const shedAttachments = (card, sendRequests = true) => {
+                const ownGy = [], looseEquip = [], falls = [];
+                (card.attachments || []).forEach(a => {
+                    if (a.kind === 'aura') {
+                        if (!a.ownerId || a.ownerId === user.uid) ownGy.push(resetFace(a.card || a));
+                        else falls.push({ id: generateId(), targetPlayerId: a.ownerId, card: resetFace(a.card || a) });
+                    } else if (a.kind === 'equipment') looseEquip.push({ ...(a.card || a), isTapped: false, x: card.x, y: card.y });
+                });
+                if (sendRequests) falls.forEach(f => pushRoomRequest('auraFallRequests', f));
+                return { ownGy, looseEquip, falls };
+            };
+            // Gehört die Karte einem Mitspieler (z. B. aus seinem Friedhof reanimiert)?
+            const foreignOwner = (c) => !!c?.ownerId && c.ownerId !== user.uid;
+            const returnRequestFor = (card, zone) => {
+                const c = cleanLeaving(card); delete c.ownerId; delete c.x; delete c.y;
+                return { id: generateId(), targetPlayerId: card.ownerId, card: c, zone, fromPlayerId: user.uid };
+            };
+            const returnToOwner = (card, zone) => {
+                const req = returnRequestFor(card, zone), c = req.card;
+                pushRoomRequest('returnRequests', req);
+                addToast(`↩ ${cardName(c)} geht an ${getPlayerName(card.ownerId)} zurück`, 'blue');
+            };
+
             // Opponents arranged in turn order, clockwise starting from whoever sits after ME.
             // With my own battlefield always at the bottom of the screen, this puts the next player to act
             // at the left of the opponent grid, then the next, and so on - so a glance across the top row,
@@ -2574,25 +2762,26 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // further down and wouldn't exist yet at this point in the component).
 
             // Watches for incoming Aura-attachment requests addressed to ME and applies them to the named
-            // creature on my own battlefield, then clears my own request(s) out of the shared queue.
+            // creature on my own battlefield (one transaction with clearing the queue, see processRequests).
             useEffect(() => {
-                const myRequests = (lobbyState?.attachRequests || []).filter(r => r.targetPlayerId === user.uid);
-                if (myRequests.length === 0 || !myState) return;
-                myRequests.forEach(r => {
-                    const tryAttach = (zone) => {
-                        const bf = myState[zone] || [];
-                        if (!bf.some(c => c.instanceId === r.targetCardInstanceId)) return false;
-                        const updated = bf.map(c => c.instanceId === r.targetCardInstanceId ? { ...c, attachments: [...(c.attachments || []), r.attachment] } : c);
-                        updateDoc(myStateRef, { [zone]: updated });
-                        return true;
+                processRequests('attachRequests', (mine, d) => {
+                    const upd = { battlefieldLower: [...(d.battlefieldLower || [])], battlefieldUpper: [...(d.battlefieldUpper || [])] };
+                    const falls = [], hits = [];
+                    mine.forEach(r => {
+                        let hit = false;
+                        ['battlefieldLower', 'battlefieldUpper'].forEach(zone => {
+                            upd[zone] = upd[zone].map(c => { if (c.instanceId !== r.targetCardInstanceId) return c; hit = true; return { ...c, attachments: [...(c.attachments || []), r.attachment] }; });
+                        });
+                        // Ziel nicht mehr da: die Aura geht in den Friedhof ihres Besitzers
+                        if (!hit && r.attachment?.ownerId && r.attachment.ownerId !== user.uid) falls.push({ id: generateId(), targetPlayerId: r.attachment.ownerId, card: r.attachment.card });
+                        else if (hit) hits.push(r);
+                    });
+                    return {
+                        state: hits.length ? upd : {}, push: { auraFallRequests: falls },
+                        after: () => hits.forEach(r => addToast(`✨ ${getPlayerName(r.fromPlayerId)}: ${r.attachment?.name || 'Aura'} verzaubert deine Karte`, 'purple')),
                     };
-                    if (!tryAttach('battlefieldLower')) tryAttach('battlefieldUpper');
                 });
-                updateDoc(roomRef, {
-                    attachRequests: (lobbyState?.attachRequests || []).filter(r => r.targetPlayerId !== user.uid)
-                });
-                // eslint-disable-next-line
-            }, [lobbyState?.attachRequests, user.uid, myState]);
+            }, [lobbyState?.attachRequests, user.uid, !!myState]);
 
             // Builds a placeholder-image token the same way createTokens does, for use inside hooks that run
             // before createTokens itself is defined further down (see the token-request listener below).
@@ -2620,104 +2809,124 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // my battlefield. Aura tokens (Role tokens etc.) instead pop up a "choose a creature to enchant"
             // prompt - they can't just be dropped loose, they need a target the moment they're created.
             useEffect(() => {
-                const myRequests = (lobbyState?.tokenRequests || []).filter(r => r.targetPlayerId === user.uid);
-                if (myRequests.length === 0 || !myState) return;
-                let newTokensForBattlefield = [];
-                myRequests.forEach(r => {
-                    if (r.tokenSpec.isAura) setAuraAttachPrompt(r.tokenSpec);
-                    else newTokensForBattlefield = [...newTokensForBattlefield, ...buildPlaceholderTokens(r.tokenSpec)];
+                processRequests('tokenRequests', (mine, d) => {
+                    const auraSpecs = [], tokens = [];
+                    mine.forEach(r => { if (r.tokenSpec?.isAura) auraSpecs.push(r.tokenSpec); else if (r.tokenSpec) tokens.push(...buildPlaceholderTokens(r.tokenSpec)); });
+                    return {
+                        state: tokens.length ? { battlefieldLower: [...(d.battlefieldLower || []), ...tokens] } : {},
+                        after: () => auraSpecs.forEach(s => setAuraAttachPrompt(s)),
+                    };
                 });
-                if (newTokensForBattlefield.length > 0) {
-                    updateDoc(myStateRef, { battlefieldLower: [...(myState.battlefieldLower || []), ...newTokensForBattlefield] });
-                }
-                updateDoc(roomRef, {
-                    tokenRequests: (lobbyState?.tokenRequests || []).filter(r => r.targetPlayerId !== user.uid)
-                });
-                // eslint-disable-next-line
-            }, [lobbyState?.tokenRequests, user.uid, myState]);
+            }, [lobbyState?.tokenRequests, user.uid, !!myState]);
 
             // Watches for incoming "your Aura fell off a creature" notices (the host left someone ELSE's
             // battlefield) and puts the Aura into MY OWN graveyard, since I'm its owner.
             useEffect(() => {
-                const myFalls = (lobbyState?.auraFallRequests || []).filter(r => r.targetPlayerId === user.uid);
-                if (myFalls.length === 0 || !myState) return;
-                updateDoc(myStateRef, { graveyard: [...myFalls.map(r => r.card), ...myState.graveyard] });
-                updateDoc(roomRef, {
-                    auraFallRequests: (lobbyState?.auraFallRequests || []).filter(r => r.targetPlayerId !== user.uid)
+                processRequests('auraFallRequests', (mine, d) => ({
+                    state: { graveyard: [...mine.filter(r => r.card).map(r => resetFace(r.card)), ...(d.graveyard || [])] },
+                    after: () => addToast(`💀 ${mine.map(r => cardName(r.card)).join(', ')} → dein Friedhof`, 'red'),
+                }));
+            }, [lobbyState?.auraFallRequests, user.uid, !!myState]);
+
+            // Karten, die mir gehören und bei einem Mitspieler das Spielfeld verlassen (reanimiert, dann gestorben
+            // usw.), kommen in MEINE Zone zurück.
+            useEffect(() => {
+                processRequests('returnRequests', (mine, d) => {
+                    const upd = { graveyard: [...(d.graveyard || [])], exile: [...(d.exile || [])], hand: [...(d.hand || [])], library: [...(d.library || [])], commandZone: [...(d.commandZone || [])] };
+                    const ZL = { graveyard: 'Friedhof', exile: 'Exil', hand: 'Hand', library_top: 'Bibliothek', library_bottom: 'Bibliothek', command: 'Commander-Zone' };
+                    const msgs = [];
+                    mine.forEach(r => {
+                        if (!r.card) return;
+                        const c = { ...resetFace(r.card), isTapped: false };
+                        delete c.ownerId; delete c.x; delete c.y;
+                        if (c.isCommander && (r.zone === 'graveyard' || r.zone === 'exile' || r.zone === 'command')) upd.commandZone.unshift({ ...c, counters: [] });
+                        else if (r.zone === 'exile') upd.exile.unshift(c);
+                        else if (r.zone === 'hand') upd.hand.push(c);
+                        else if (r.zone === 'library_top') upd.library.unshift(c);
+                        else if (r.zone === 'library_bottom') upd.library.push(c);
+                        else upd.graveyard.unshift(c);
+                        msgs.push(`↩ ${cardName(c)} kommt zu dir zurück (${ZL[r.zone] || 'Friedhof'})`);
+                    });
+                    return { state: upd, after: () => msgs.forEach(m => addToast(m, 'blue')) };
                 });
-                // eslint-disable-next-line
-            }, [lobbyState?.auraFallRequests, user.uid, myState]);
+            }, [lobbyState?.returnRequests, user.uid, !!myState]);
+
+            // Ein Mitspieler reanimiert eine Karte aus meinem Friedhof/Exil auf sein Spielfeld: hier nur entfernen.
+            useEffect(() => {
+                processRequests('reanimateRequests', (mine, d) => {
+                    const ids = new Set(mine.map(r => r.instanceId));
+                    const gone = [...(d.graveyard || []), ...(d.exile || [])].filter(c => ids.has(c.instanceId));
+                    return {
+                        state: gone.length ? { graveyard: (d.graveyard || []).filter(c => !ids.has(c.instanceId)), exile: (d.exile || []).filter(c => !ids.has(c.instanceId)) } : {},
+                        after: () => mine.forEach(r => { const c = gone.find(g => g.instanceId === r.instanceId); if (c) addToast(`🧟 ${getPlayerName(r.fromPlayerId)} holt ${cardName(c)} aus deinem ${r.fromZone === 'exile' ? 'Exil' : 'Friedhof'}`, 'purple'); }),
+                    };
+                });
+            }, [lobbyState?.reanimateRequests, user.uid, !!myState]);
 
             // Watches for incoming "your creature died in combat" requests from the attacker.
             // The attacker cannot write to MY game_state, so they post a request here and I apply it myself.
             useEffect(() => {
-                const myDeathReqs = (lobbyState?.deathRequests || []).filter(r => r.targetPlayerId === user.uid);
-                if (myDeathReqs.length === 0 || !myState) return;
-                const deadIds = new Set(myDeathReqs.flatMap(r => r.instanceIds));
-                const bfLower = myState.battlefieldLower || [];
-                const bfUpper = myState.battlefieldUpper || [];
-                const deadCards = [
-                    ...bfLower.filter(c => deadIds.has(c.instanceId)),
-                    ...bfUpper.filter(c => deadIds.has(c.instanceId)),
-                ];
-                if (deadCards.length === 0) {
-                    // Cards already gone — just clear the requests
-                    updateDoc(roomRef, { deathRequests: (lobbyState?.deathRequests || []).filter(r => r.targetPlayerId !== user.uid) });
-                    return;
-                }
-                const enduringCards = deadCards.filter(c => !c.isToken && !c.isCommander && hasEnduringAbility(c));
-                const cmdDead = deadCards.filter(c => c.isCommander);
-                const normalDead = deadCards.filter(c => !c.isToken && !c.isCommander && !hasEnduringAbility(c));
-                const returned = enduringCards.map(c => ({
-                    ...c, isTapped: false,
-                    type_line: c.type_line?.replace(/Enchantment Creature/i, 'Enchantment').replace(/\bCreature\b/i, '').trim() || 'Enchantment',
-                    x: 50, y: 50
-                }));
-                updateDoc(myStateRef, {
-                    battlefieldLower: [...bfLower.filter(c => !deadIds.has(c.instanceId)), ...returned],
-                    battlefieldUpper: bfUpper.filter(c => !deadIds.has(c.instanceId)),
-                    graveyard: [...normalDead, ...(myState.graveyard || [])],
-                    ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...c, isTapped: false, counters: [], attachments: [] })), ...(myState.commandZone || [])] } : {})
+                processRequests('deathRequests', (mine, d) => {
+                    const deadIds = new Set(mine.flatMap(r => r.instanceIds || []));
+                    const bfLower = d.battlefieldLower || [];
+                    const bfUpper = d.battlefieldUpper || [];
+                    const deadCards = [
+                        ...bfLower.filter(c => deadIds.has(c.instanceId)),
+                        ...bfUpper.filter(c => deadIds.has(c.instanceId)),
+                    ];
+                    if (deadCards.length === 0) return {}; // Cards already gone — just clear the requests
+                    const enduringCards = deadCards.filter(c => !c.isToken && !c.isCommander && !foreignOwner(c) && hasEnduringAbility(c));
+                    const cmdDead = deadCards.filter(c => c.isCommander && !foreignOwner(c));
+                    const foreignDead = deadCards.filter(c => !c.isToken && foreignOwner(c));
+                    const normalDead = deadCards.filter(c => !c.isToken && !c.isCommander && !foreignOwner(c) && !hasEnduringAbility(c));
+                    const returned = enduringCards.map(c => ({
+                        ...c, isTapped: false,
+                        type_line: c.type_line?.replace(/Enchantment Creature/i, 'Enchantment').replace(/\bCreature\b/i, '').trim() || 'Enchantment',
+                        x: 50, y: 50
+                    }));
+                    const shedGy = [], shedEquip = [], falls = [];
+                    deadCards.forEach(c => { const r = shedAttachments(c, false); shedGy.push(...r.ownGy); shedEquip.push(...r.looseEquip); falls.push(...r.falls); });
+                    const returns = foreignDead.map(c => returnRequestFor(c, 'graveyard'));
+                    return {
+                        state: {
+                            battlefieldLower: [...bfLower.filter(c => !deadIds.has(c.instanceId)), ...returned, ...shedEquip],
+                            battlefieldUpper: bfUpper.filter(c => !deadIds.has(c.instanceId)),
+                            graveyard: [...normalDead.map(cleanLeaving), ...shedGy, ...(d.graveyard || [])],
+                            ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...cleanLeaving(c), counters: [] })), ...(d.commandZone || [])] } : {})
+                        },
+                        push: { auraFallRequests: falls, returnRequests: returns },
+                        after: () => {
+                            foreignDead.forEach(c => addToast(`↩ ${cardName(c)} geht an ${getPlayerName(c.ownerId)} zurück`, 'blue'));
+                            if (cmdDead.length) addToast(`👑 ${cmdDead.map(c => c.name).join(', ')} zurück in die Commander-Zone`, 'blue');
+                            if (normalDead.length) addToast(`💀 ${normalDead.map(c => c.name).join(', ')} → Friedhof`, 'red');
+                            if (enduringCards.length) addToast(`♾️ ${enduringCards.map(c => c.name).join(', ')} kehrt als Verzauberung zurück`, 'purple');
+                            normalDead.forEach(dead => { fireTriggers('dies', dead); fireTriggers('creature_dies', dead); });
+                        },
+                    };
                 });
-                if (cmdDead.length) addToast(`👑 ${cmdDead.map(c => c.name).join(', ')} zurück in die Commander-Zone`, 'blue');
-                updateDoc(roomRef, { deathRequests: (lobbyState?.deathRequests || []).filter(r => r.targetPlayerId !== user.uid) });
-                if (normalDead.length) addToast(`💀 ${normalDead.map(c => c.name).join(', ')} → Friedhof`, 'red');
-                if (enduringCards.length) addToast(`♾️ ${enduringCards.map(c => c.name).join(', ')} kehrt als Verzauberung zurück`, 'purple');
-                normalDead.forEach(dead => { fireTriggers('dies', dead); fireTriggers('creature_dies', dead); });
-            }, [lobbyState?.deathRequests, user.uid, myState]); // eslint-disable-line
+            }, [lobbyState?.deathRequests, user.uid, !!myState]);
             // Process incoming combat damage requests — attacker can't write our life total directly
             useEffect(() => {
-                const myDmgReqs = (lobbyState?.damageRequests || []).filter(r => r.targetPlayerId === user.uid);
-                if (myDmgReqs.length === 0 || !myState) return;
-                const totalDmg = myDmgReqs.reduce((s, r) => s + (r.amount || 0), 0);
-                if (totalDmg > 0) {
-                    updateMyState({ life: myState.life - totalDmg });
-                    addToast(`💔 Du erleidest ${totalDmg} Kampfschaden`, 'red');
-                }
-                updateDoc(roomRef, {
-                    damageRequests: (lobbyState?.damageRequests || []).filter(r => r.targetPlayerId !== user.uid)
+                processRequests('damageRequests', (mine, d) => {
+                    const totalDmg = mine.reduce((s, r) => s + (r.amount || 0), 0);
+                    if (totalDmg <= 0) return {};
+                    return { state: { life: (d.life || 0) - totalDmg }, after: () => addToast(`💔 Du erleidest ${totalDmg} Kampfschaden`, 'red') };
                 });
-            }, [lobbyState?.damageRequests, user.uid, myState]); // eslint-disable-line
+            }, [lobbyState?.damageRequests, user.uid, !!myState]);
 
             // Process incoming loyalty change requests for my planeswalkers
             useEffect(() => {
-                const myLoyaltyReqs = (lobbyState?.loyaltyRequests || []).filter(r => r.targetPlayerId === user.uid);
-                if (myLoyaltyReqs.length === 0 || !myState) return;
-                const applyLoyalty = (arr) => (arr || []).map(card => {
-                    const req = myLoyaltyReqs.find(r => r.instanceId === card.instanceId);
-                    if (!req) return card;
-                    const newCounters = (card.counters||[]).filter(c => c.type !== 'Loyalität');
-                    newCounters.push({ type: 'Loyalität', count: req.newLoyalty });
-                    return { ...card, counters: newCounters };
+                processRequests('loyaltyRequests', (mine, d) => {
+                    const applyLoyalty = (arr) => (arr || []).map(card => {
+                        const req = mine.find(r => r.instanceId === card.instanceId);
+                        if (!req) return card;
+                        const newCounters = (card.counters||[]).filter(c => c.type !== 'Loyalität');
+                        newCounters.push({ type: 'Loyalität', count: req.newLoyalty });
+                        return { ...card, counters: newCounters };
+                    });
+                    return { state: { battlefieldLower: applyLoyalty(d.battlefieldLower), battlefieldUpper: applyLoyalty(d.battlefieldUpper) } };
                 });
-                updateDoc(myStateRef, {
-                    battlefieldLower: applyLoyalty(myState.battlefieldLower),
-                    battlefieldUpper: applyLoyalty(myState.battlefieldUpper)
-                });
-                updateDoc(roomRef, {
-                    loyaltyRequests: (lobbyState?.loyaltyRequests || []).filter(r => r.targetPlayerId !== user.uid)
-                });
-            }, [lobbyState?.loyaltyRequests, user.uid, myState]); // eslint-disable-line
+            }, [lobbyState?.loyaltyRequests, user.uid, !!myState]);
 
             // ── ZUGPHASEN: Enttappen, automatisches Ziehen, Manapool, Trigger-Hinweise ─────────────
             // Enttappen passiert jetzt über die Phase „untap“ (früher beim Wechsel von activePlayer) – siehe unten.
@@ -2762,6 +2971,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }).then(r => {
                     if (r === 'retry') untapDoneRef.current = null;
                     if (r === 'untapped' && (phase.turn || 0) > 1) addToast('🔄 Neuer Zug – alles enttappt', 'blue');
+                    if (r === 'untapped' && (phase.turn || 0) >= 1) logEvent(`Zug ${phase.turn} – ${getPlayerName(user.uid)}`, null, 'turn');
                 }).catch(() => { untapDoneRef.current = null; });
             }, [phase?.step, turnKey, user.uid, hasMyState, myState?.lastUntapKey]);
 
@@ -2789,7 +2999,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     return 'drawn';
                 }).then(r => {
                     if (r === 'retry') drawDoneRef.current = null;
-                    if (r === 'drawn') addToast('📖 Karte gezogen (Ziehphase)', 'blue');
+                    if (r === 'drawn') { addToast('📖 Karte gezogen (Ziehphase)', 'blue'); logEvent('zieht 1 Karte (Ziehphase)'); }
                     if (r === 'skip') addToast('Erster Zug (2 Spieler): kein Ziehen', 'blue');
                     if (r === 'empty') addToast('⚠️ Bibliothek leer – keine Karte gezogen', 'red');
                 }).catch(() => { drawDoneRef.current = null; });
@@ -2996,7 +3206,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         if (!e.repeat) k.space();
                         return;
                     }
-                    const map = { d: k.draw, e: k.endTurn, h: k.toggleHand, m: k.shuffle, t: k.token, x: k.hold };
+                    const map = { d: k.draw, e: k.endTurn, h: k.toggleHand, m: k.shuffle, t: k.token, x: k.hold, l: k.toggleLog };
                     if (map[key]) { e.preventDefault(); map[key](); }
                 };
                 window.addEventListener('keydown', onKey);
@@ -3018,6 +3228,18 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 const newLib = [...myState.library];
                 const card = newLib.shift();
                 updateMyState({ library: newLib, hand: [...myState.hand, card] });
+                noteDraw(1);
+            };
+
+            // Oberste X Karten in den Friedhof (Reihenfolge: zuletzt gemillte Karte liegt oben)
+            const millCards = (count) => {
+                const n = Math.max(0, Math.min(count, myState.library.length));
+                if (!n) { addToast('Bibliothek ist leer', 'yellow'); return; }
+                const milled = myState.library.slice(0, n);
+                updateMyState({ library: myState.library.slice(n), graveyard: [...[...milled].reverse(), ...(myState.graveyard || [])] });
+                const names = milled.map(cardName).join(', ');
+                addToast(`🪦 Gemillt: ${names}`, 'purple');
+                logEvent(`millt ${n}: ${names}`, milled);
             };
 
             const shuffleLibrary = () => {
@@ -3028,6 +3250,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }
                 updateMyState({ library: newLib });
                 addToast('🔀 Bibliothek gemischt', 'purple');
+                logEvent('mischt die Bibliothek');
             };
 
             // Opens the Scry/Surveil/Look overlay for the top N cards of the library.
@@ -3070,11 +3293,14 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 const newBFLower = [...(myState.battlefieldLower || [])];
                 toBF.forEach(card => {
                     const spawn = getDefaultSpawnPosition(card);
-                    newBFLower.push({ ...card, isTapped: false, x: spawn.x, y: spawn.y, counters: [] });
-                    setTimeout(() => fireTriggers('etb', card), 100);
+                    const c = { ...prepEnter(card, isLand(frontFace(card)) ? (detectLandETB(frontFace(card)) === 'tapped' || detectLandETB(frontFace(card)) === 'triome') : undefined), x: spawn.x, y: spawn.y, counters: [] };
+                    newBFLower.push(c);
+                    setTimeout(() => fireTriggers(isLand(c) ? 'landfall' : 'etb', c), 100);
                 });
 
                 updateMyState({ library: newLibrary, hand: newHand, graveyard: newGY, battlefieldLower: newBFLower });
+                if (toGY.length) logEvent(`${mode === 'surveil' ? 'Überwachen' : mode === 'scry' ? 'Hellsicht' : 'Bibliothek'}: ${toGY.map(cardName).join(', ')} → Friedhof`, toGY);
+                if (toBF.length) logEvent(`${toBF.map(cardName).join(', ')}: Bibliothek → Spielfeld`, toBF);
 
                 // TODO: broadcast revealed cards to opponents (for now just log)
                 if (revealed.length > 0) {
@@ -3200,7 +3426,27 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             };
             const getDefaultSpawnPosition = (card) => slotPercent(card);
 
+            const ZONE_LABEL = { battlefield: 'Spielfeld', battlefieldLower: 'Spielfeld', battlefieldUpper: 'Spielfeld', graveyard: 'Friedhof', exile: 'Exil', hand: 'Hand', library: 'Bibliothek', library_top: 'Bibliothek (oben)', library_bottom: 'Bibliothek (unten)', command: 'Commander-Zone', stack: 'Stack' };
+            const ZONE_KEY = { hand: 'hand', graveyard: 'graveyard', exile: 'exile', library: 'library', library_top: 'library', library_bottom: 'library', command: 'commandZone', battlefieldLower: 'battlefieldLower', battlefieldUpper: 'battlefieldUpper' };
+            // Entfernt die Karte aus ihrer Herkunftszone (in `updates`, damit mehrere Änderungen in EIN Schreiben gehen)
+            const removeFrom = (updates, fromZone, id) => {
+                const key = ZONE_KEY[fromZone];
+                if (!key) return updates;
+                updates[key] = (updates[key] || myState[key] || []).filter(c => c.instanceId !== id);
+                return updates;
+            };
+            // Karte betritt mein Spielfeld (nicht als Land): Vorderseite festlegen, „enters tapped“ beachten
+            const prepEnter = (card, tapped) => {
+                const c = frontFace(card);
+                const t = tapped !== undefined ? tapped : (!isLand(c) && entersTappedSelf(c));
+                return { ...c, isTapped: !!t, counters: c.counters || [] };
+            };
+
             const playCard = (card, fromZone, targetBattlefield, coords = null) => {
+                const fromBf = fromZone === 'battlefieldUpper' || fromZone === 'battlefieldLower';
+                // Länder (auch aus Friedhof/Bibliothek/Exil) laufen über die Land-Logik (getappt, Shock, Landfall …)
+                if (!fromBf && isLand(frontFace(card))) { enterLand(card, fromZone, coords); return; }
+                if (!fromBf && isAuraCard(card)) { startAuraTargeting({ aura: card, source: 'zone', fromZone }); return; }
                 let x = coords?.x;
                 let y = coords?.y;
 
@@ -3210,13 +3456,16 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     y = spawn.y;
                 }
 
-                const newCard = { ...card, isTapped: false, x, y, counters: card.counters || [] };
+                const base = fromBf ? { ...card, isTapped: false } : prepEnter(card);
+                const newCard = { ...base, x, y, counters: card.counters || [] };
                 let updates = {};
                 
+                if (fromZone === 'battlefieldUpper') updates.battlefieldUpper = (myState.battlefieldUpper || []).filter(c => c.instanceId !== card.instanceId);
+                else if (fromZone === 'battlefieldLower') updates.battlefieldLower = (myState.battlefieldLower || []).filter(c => c.instanceId !== card.instanceId);
                 if (targetBattlefield === 'upper') {
-                    updates.battlefieldUpper = [...(myState.battlefieldUpper || []), newCard];
+                    updates.battlefieldUpper = [...(updates.battlefieldUpper || myState.battlefieldUpper || []), newCard];
                 } else {
-                    updates.battlefieldLower = [...(myState.battlefieldLower || []), newCard];
+                    updates.battlefieldLower = [...(updates.battlefieldLower || myState.battlefieldLower || []), newCard];
                 }
                 
                 if (fromZone === 'hand') updates.hand = myState.hand.filter(c => c.instanceId !== card.instanceId);
@@ -3229,10 +3478,13 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 else if (fromZone === 'graveyard') updates.graveyard = myState.graveyard.filter(c => c.instanceId !== card.instanceId);
                 else if (fromZone === 'exile') updates.exile = myState.exile.filter(c => c.instanceId !== card.instanceId);
                 else if (fromZone === 'library_top' || fromZone === 'library') updates.library = myState.library.filter(c => c.instanceId !== card.instanceId);
-                else if (fromZone === 'battlefieldUpper') updates.battlefieldUpper = (myState.battlefieldUpper || []).filter(c => c.instanceId !== card.instanceId);
-                else if (fromZone === 'battlefieldLower') updates.battlefieldLower = (myState.battlefieldLower || []).filter(c => c.instanceId !== card.instanceId);
 
                 updateMyState(updates);
+                if (!fromBf) {
+                    const n = cardName(newCard);
+                    logEvent(fromZone === 'hand' ? `bringt ${n} direkt ins Spiel${newCard.isTapped ? ' (getappt)' : ''}` : `${n}: ${ZONE_LABEL[fromZone] || fromZone} → Spielfeld${newCard.isTapped ? ' (getappt)' : ''}`, [newCard]);
+                    if (newCard.isTapped) addToast(`💤 ${n} kommt getappt ins Spiel`, 'blue');
+                }
             };
 
             // --- STACK ZONE (shared, visible to everyone at the table) ---
@@ -3244,96 +3496,87 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const myStackCards = (lobbyState?.stack || []).filter(s => s.ownerId === user.uid);
             const allStackCards = lobbyState?.stack || [];
 
-            // Entry point for the new "Spielen" button on hand cards: lands go straight to the battlefield
-            // (as before), everything else goes to the shared stack first so its effects can be resolved.
-            const playCardFromHand = (card) => {
-                if (isLand(card)) {
-                    const etbType = detectLandETB(card,
-                        [...(myState.battlefieldLower||[]), ...(myState.battlefieldUpper||[])],
-                        myState.hand
-                    );
-                    if (etbType && etbType !== 'pain') {
-                        // Needs interactive ETB — show modal, don't place yet
-                        setLandETBModal({ card, fromZone: 'hand', type: etbType });
-                        return;
-                    }
-                    playCard(card, 'hand', 'lower');
-                    setTimeout(() => fireTriggers('landfall', card), 100);
-                    return;
-                }
+            // Zauber auf den Stack legen (aus Hand, Friedhof, Exil, Bibliothek). `extra.auraTarget` merkt sich das
+            // beim Ziehen auf eine Kreatur gewählte Ziel einer Aura.
+            const castToStack = (card, fromZone = 'hand', extra = {}) => {
                 // The stack is LIFO: whatever goes on last resolves first. New entries go at the FRONT of the
-                // array (index 0), not the back - this is what lets a reactive spell (e.g. a counterspell
-                // cast in response to someone else's spell) sit on top and resolve before the thing it's
-                // responding to, exactly like a real stack at the table.
-                // Uses a transaction (read-modify-write as one atomic unit) instead of a plain updateDoc,
-                // because two players can plausibly cast in quick succession (you cast, I respond) - a plain
-                // updateDoc based on a possibly-stale local lobbyState snapshot could let the second write
-                // clobber the first instead of stacking on top of it.
-                const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: user.displayName || getDeckCommanderDisplayName(deck) || 'Spieler', timestamp: Date.now() };
+                // array (index 0). Uses a transaction because two players can plausibly cast in quick succession.
+                const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: user.displayName || getDeckCommanderDisplayName(deck) || 'Spieler', timestamp: Date.now(), ...extra };
                 runTx(async (tx) => {
                     const snap = await tx.get(roomRef);
                     const currentStack = snap.exists() ? (snap.data().stack || []) : [];
                     tx.update(roomRef, { stack: [stackEntry, ...currentStack] });
-                });
-                updateMyState({ hand: myState.hand.filter(c => c.instanceId !== card.instanceId) });
+                }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+                updateMyState(removeFrom({}, fromZone, card.instanceId));
+                logEvent(`spielt ${cardName(card)}${fromZone !== 'hand' ? ` (aus ${fromZone === 'graveyard' ? 'dem Friedhof' : fromZone === 'exile' ? 'dem Exil' : fromZone === 'command' ? 'der Commander-Zone' : 'der Bibliothek'})` : ''}`, [card]);
                 // Fire "whenever you cast" triggers for instant/sorcery spells
                 setTimeout(() => fireCastTriggers(card), 50);
             };
 
-            // Resolves the ETB choice for a land and places it accordingly.
-            // Central hook called whenever ANY land enters MY battlefield (hand play, fetch, drag, etc.)
-            // Fires Landfall triggers and checks if the land needs an ETB modal (shock/scry/surveil).
-            // `fromFetch` = true when coming from the fetch modal (already tapped, no life choice needed for shock)
-            const onLandEntersBattlefield = (card, fromFetch = false) => {
-                // 1. Landfall triggers — check all my permanents for "whenever a land enters"
-                setTimeout(() => fireTriggers('landfall', card), 50);
+            // Entry point for the "Spielen" button on hand cards: lands go straight to the battlefield
+            // (with their ETB choice), everything else goes to the shared stack first.
+            const playCardFromHand = (card) => {
+                if (isLand(card)) { enterLand(card, 'hand'); return; }
+                castToStack(card, 'hand');
+            };
+            // Modale doppelseitige Karte als Land (Rückseite) spielen
+            const playLandFace = (card, idx = 1) => enterLand(withFace(card, idx), 'hand');
 
-                // 2. ETB effect for the land itself (shock/scry/surveil) — but skip if from fetch
-                //    (fetched lands always enter tapped, no choice needed — except scry/surveil which still fire)
-                if (!fromFetch) return;
-                const etbType = detectLandETB(card);
-                if (etbType === 'scry') setTimeout(() => openLibraryAction('scry', 1), 200);
-                if (etbType === 'surveil') setTimeout(() => openLibraryAction('surveil', 1), 200);
-                // Shock lands fetched always enter tapped (can't pay 2 life for an untapped fetch target)
+            // Zentrale Land-Logik für jedes Land, das mein Spielfeld betritt (Hand, Friedhof, Bibliothek, Ziehen aufs Feld):
+            // Shock/Check/… → Auswahlfenster; „enters tapped“/Triome → getappt; sonst ungetappt. Danach Landfall.
+            const enterLand = (card, fromZone, coords = null) => {
+                const c = frontFace(card);
+                const etbType = detectLandETB(c, myPermanents(), myState.hand);
+                if (etbType && !['pain', 'tapped', 'triome'].includes(etbType)) {
+                    setLandETBModal({ card: c, fromZone, type: etbType, coords });
+                    return;
+                }
+                placeLand(c, fromZone, etbType === 'tapped' || etbType === 'triome', {}, coords);
+            };
+            const placeLand = (card, fromZone, tapped, extra = {}, coords = null) => {
+                const spawn = coords && coords.x !== undefined ? coords : getDefaultSpawnPosition(card);
+                const newCard = { ...card, isTapped: !!tapped, x: spawn.x, y: spawn.y, counters: [] };
+                const updates = removeFrom({}, fromZone, card.instanceId);
+                let lower = [...(myState.battlefieldLower || []), newCard];
+                // Bounce-Land: ein anderes Land zurück auf die Hand
+                if (extra.bounce) {
+                    lower = lower.filter(c => c.instanceId !== extra.bounce.instanceId);
+                    updates.battlefieldUpper = (myState.battlefieldUpper || []).filter(c => c.instanceId !== extra.bounce.instanceId);
+                    updates.hand = [...(updates.hand || myState.hand), cleanLeaving(extra.bounce)];
+                }
+                updates.battlefieldLower = lower;
+                if (extra.life) updates.life = myState.life + extra.life;
+                updateMyState(updates);
+                const n = cardName(newCard);
+                logEvent(fromZone === 'hand' ? `spielt Land ${n}${tapped ? ' (getappt)' : ''}` : `${n}: ${ZONE_LABEL[fromZone] || fromZone} → Spielfeld${tapped ? ' (getappt)' : ''}`, [newCard]);
+                if (extra.bounce) logEvent(`${cardName(extra.bounce)} → Hand`, [extra.bounce]);
+                setTimeout(() => fireTriggers('landfall', newCard), 100);
+                return newCard;
             };
 
             const resolveLandETB = (tapped, extraUpdates = {}) => {
                 if (!landETBModal) return;
-                const { card, fromZone, type } = landETBModal;
+                const { card, fromZone, type, coords } = landETBModal;
 
-                // shock_fetch: land is already on the battlefield (placed tapped by fetch).
-                // If the player pays 2 life, just untap it — don't move it again.
-                if (type === 'shock_fetch') {
+                // Land liegt schon (getappt) auf dem Feld, z. B. aus einer Fetch-Suche: ungetappt = enttappen (+ Lebenskosten)
+                if (landETBModal.onBf || type === 'shock_fetch') {
                     if (!tapped) {
-                        // Untap the card in place and deduct 2 life
                         const untap = (arr) => (arr || []).map(c =>
                             c.instanceId === card.instanceId ? { ...c, isTapped: false } : c
                         );
-                        updateMyState({
-                            battlefieldLower: untap(myState.battlefieldLower),
-                            battlefieldUpper: untap(myState.battlefieldUpper),
-                            life: myState.life - 2
-                        });
+                        const upd = { battlefieldLower: untap(myState.battlefieldLower), battlefieldUpper: untap(myState.battlefieldUpper) };
+                        if (extraUpdates.life) upd.life = myState.life + extraUpdates.life;
+                        updateMyState(upd);
                     }
-                    // If tapped chosen: already tapped on field, nothing to do
                     setLandETBModal(null);
                     return;
                 }
 
-                // Separate life changes from battlefield updates
-                const { life: lifeDelta, ...bfUpdates } = extraUpdates;
-                const spawn = getDefaultSpawnPosition(card);
-                const newCard = { ...card, isTapped: tapped, x: spawn.x, y: spawn.y, counters: [] };
-                const newBF = [...(myState.battlefieldLower || []), newCard];
-                const updates = { battlefieldLower: newBF, ...bfUpdates };
-                if (fromZone === 'hand') updates.hand = myState.hand.filter(c => c.instanceId !== card.instanceId);
-                if (lifeDelta !== undefined) updates.life = myState.life + lifeDelta;
-                updateMyState(updates);
+                placeLand(card, fromZone, tapped, extraUpdates, coords);
                 setLandETBModal(null);
                 const t = type;
                 if (t === 'scry') setTimeout(() => openLibraryAction('scry', 1), 150);
                 if (t === 'surveil') setTimeout(() => openLibraryAction('surveil', 1), 150);
-                setTimeout(() => fireTriggers('landfall', { ...card, isTapped: tapped }), 100);
             };
 
             // Removes a card from the shared stack only
@@ -3361,16 +3604,98 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             };
 
             // Moves a card off the stack and onto MY OWN battlefield (e.g. a permanent spell resolving).
-            const moveStackCardToBattlefield = (stackEntry, targetBattlefield) => {
+            // Auren: erst ein Ziel wählen (oder das beim Ziehen gemerkte Ziel nehmen); `noTarget` legt sie lose ab.
+            const moveStackCardToBattlefield = (stackEntry, targetBattlefield, noTarget = false) => {
+                if (!noTarget && isAuraCard(stackEntry.card)) {
+                    const t = stackEntry.auraTarget;
+                    if (t) {
+                        const where = findOnBattlefield(t.cardInstanceId);
+                        if (where) { chooseAuraTarget(where.card, where.zone, where.playerId, { aura: stackEntry.card, source: 'stack', stackEntry }); return; }
+                    }
+                    startAuraTargeting({ aura: stackEntry.card, source: 'stack', stackEntry });
+                    return;
+                }
                 const { x, y } = getDefaultSpawnPosition(stackEntry.card);
-                const newCard = { ...stackEntry.card, isTapped: false, x, y, counters: stackEntry.card.counters || [] };
+                const newCard = { ...prepEnter(stackEntry.card), x, y };
                 const updates = {};
                 if (targetBattlefield === 'upper') updates.battlefieldUpper = [...(myState.battlefieldUpper || []), newCard];
                 else updates.battlefieldLower = [...(myState.battlefieldLower || []), newCard];
                 updateMyState(updates);
                 removeFromStack(stackEntry.instanceId);
+                if (newCard.isTapped) addToast(`💤 ${cardName(newCard)} kommt getappt ins Spiel`, 'blue');
                 // Fire ETB triggers after placing on battlefield
                 setTimeout(() => fireTriggers('etb', newCard), 50);
+            };
+
+            // Wo liegt eine Karte auf einem Spielfeld (meinem oder einem gegnerischen)?
+            const findOnBattlefield = (instanceId) => {
+                for (const z of ['battlefieldLower', 'battlefieldUpper']) {
+                    const c = (myState[z] || []).find(x => x.instanceId === instanceId);
+                    if (c) return { card: c, zone: z, playerId: user.uid };
+                }
+                for (const oid of opponentIds) for (const z of ['battlefieldLower', 'battlefieldUpper']) {
+                    const c = (opponentStates[oid]?.[z] || []).find(x => x.instanceId === instanceId);
+                    if (c) return { card: c, zone: z, playerId: oid };
+                }
+                return null;
+            };
+
+            // ── AUREN ANLEGEN ─────────────────────────────────────────────────
+            const auraTargetOk = (spec, card, isMine) => {
+                if (!spec || !card || card.instanceId === spec.aura.instanceId) return false;
+                const e = spec.enchant || {};
+                if (e.player) return false;
+                if (e.ctrl === 'me' && !isMine) return false;
+                if (e.ctrl === 'opp' && isMine) return false;
+                if (e.nonland && isLand(card)) return false;
+                if (e.any || !e.types?.length) return e.any ? true : isCreatureLike(card);
+                const tl = curTypeLine(card);
+                return e.types.some(t => t === 'creature' ? isCreatureLike(card) : t === 'land' ? isLand(card) : new RegExp(`\\b${t}\\b`, 'i').test(tl));
+            };
+            const startAuraTargeting = (spec) => {
+                const enchant = parseEnchant(spec.aura);
+                const full = { ...spec, enchant };
+                if (enchant.player) {
+                    addToast(`✨ ${cardName(spec.aura)} verzaubert einen Spieler – liegt in deiner Verzauberungsreihe`, 'purple');
+                    placeAuraLoose(full);
+                    return;
+                }
+                setCardMenu(null); setViewingZone(null);
+                setAuraTarget(full);
+            };
+            // Aura ohne Ziel ins Spiel (Verzauberungsreihe) – „Ohne Ziel ablegen“ / Esc
+            const placeAuraLoose = (spec = auraTarget) => {
+                setAuraTarget(null);
+                if (!spec) return;
+                if (spec.source === 'stack') { moveStackCardToBattlefield(spec.stackEntry, 'lower', true); return; }
+                if (spec.source === 'bf') return; // liegt schon lose
+                const { x, y } = getDefaultSpawnPosition(spec.aura);
+                const newCard = { ...prepEnter(spec.aura), x, y };
+                const updates = removeFrom({}, spec.fromZone, spec.aura.instanceId);
+                updates.battlefieldLower = [...(updates.battlefieldLower || myState.battlefieldLower || []), newCard];
+                updateMyState(updates);
+                logEvent(`${cardName(newCard)}: ${ZONE_LABEL[spec.fromZone] || spec.fromZone} → Spielfeld`, [newCard]);
+            };
+            // Aura an `targetCard` anlegen. Eigene Karte: direkt; fremde Karte: Anfrage an deren Besitzer (attachRequests).
+            const chooseAuraTarget = (targetCard, targetZone, targetPlayerId, spec = auraTarget) => {
+                if (!spec) return;
+                setAuraTarget(null);
+                const aura = cleanLeaving(spec.aura);
+                delete aura.x; delete aura.y;
+                const attachment = { instanceId: spec.aura.instanceId, kind: 'aura', name: cardName(aura), image_url: aura.image_url || '', card: aura, ownerId: spec.aura.ownerId || user.uid };
+                const updates = {};
+                if (spec.source === 'zone') removeFrom(updates, spec.fromZone, spec.aura.instanceId);
+                if (spec.source === 'bf') { removeFrom(updates, 'battlefieldLower', spec.aura.instanceId); removeFrom(updates, 'battlefieldUpper', spec.aura.instanceId); }
+                if (targetPlayerId === user.uid) {
+                    updates[targetZone] = (updates[targetZone] || myState[targetZone] || []).map(c =>
+                        c.instanceId === targetCard.instanceId ? { ...c, attachments: [...(c.attachments || []), attachment] } : c);
+                } else {
+                    pushRoomRequest('attachRequests', { id: generateId(), targetPlayerId, targetCardInstanceId: targetCard.instanceId, attachment, fromPlayerId: user.uid });
+                }
+                if (Object.keys(updates).length) updateMyState(updates);
+                if (spec.source === 'stack') removeFromStack(spec.stackEntry.instanceId);
+                logEvent(`${cardName(aura)} verzaubert ${cardName(targetCard)}${targetPlayerId !== user.uid ? ` (${getPlayerName(targetPlayerId)})` : ''}`, [aura, targetCard]);
+                addToast(`✨ ${cardName(aura)} → ${cardName(targetCard)}`, 'purple');
             };
 
             // Resolves a triggered ability from the stack — applies its effect.
@@ -3383,6 +3708,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     case 'draw':
                         if (myState.library.length >= triggerAmount) {
                             updateMyState({ hand: [...myState.hand, ...myState.library.slice(0, triggerAmount)], library: myState.library.slice(triggerAmount) });
+                            noteDraw(triggerAmount);
                         }
                         addToast(`📖 ${triggerAmount} Karte${triggerAmount > 1 ? 'n' : ''} gezogen`, 'blue');
                         break;
@@ -3413,19 +3739,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // can only write to my own game_state, attaching to MY OWN creature is direct; attaching to
             // someone else's goes through the same cross-player request queue used for token gifts.
             const attachAuraCardFromStack = (stackEntry, targetCard, targetZone, targetPlayerId) => {
-                const attachment = { instanceId: stackEntry.card.instanceId, kind: 'aura', name: stackEntry.card.name, image_url: stackEntry.card.image_url, card: stackEntry.card, ownerId: user.uid };
-                if (targetPlayerId === user.uid) {
-                    const bf = (myState[targetZone] || []).map(c => 
-                        c.instanceId === targetCard.instanceId ? { ...c, attachments: [...(c.attachments || []), attachment] } : c
-                    );
-                    updateMyState({ [targetZone]: bf });
-                } else {
-                    const request = { id: generateId(), targetPlayerId, targetCardInstanceId: targetCard.instanceId, attachment, fromPlayerId: user.uid };
-                    updateDoc(roomRef, {
-                        attachRequests: [...(lobbyState?.attachRequests || []), request]
-                    });
-                }
-                removeFromStack(stackEntry.instanceId);
+                chooseAuraTarget(targetCard, targetZone, targetPlayerId, { aura: stackEntry.card, source: 'stack', stackEntry });
             };
 
             // Equip an Equipment artifact already on MY OWN battlefield onto one of MY OWN creatures (per the
@@ -3532,6 +3846,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 updateMyState({
                     battlefieldLower: [...(myState.battlefieldLower || []), ...newTokens]
                 });
+                logEvent(`erstellt ${quantity > 1 ? quantity + '× ' : ''}${name}${stats ? ' ' + stats : ''}-Token`);
 
                 // Place tokens immediately with the placeholder image so the game never stalls waiting on a
                 // network request - then look up the real Scryfall art in the background and patch each
@@ -3567,9 +3882,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     return;
                 }
                 const request = { id: generateId(), targetPlayerId, tokenSpec, fromPlayerId: user.uid };
-                updateDoc(roomRef, {
-                    tokenRequests: [...(lobbyState?.tokenRequests || []), request]
-                });
+                pushRoomRequest('tokenRequests', request);
+                logEvent(`gibt ${getPlayerName(targetPlayerId)} ${tokenSpec.quantity > 1 ? tokenSpec.quantity + '× ' : ''}${tokenSpec.name}${tokenSpec.stats ? ' ' + tokenSpec.stats : ''}-Token`);
             };
 
             // Creates an Aura token (e.g. a Role) already attached to a specific creature on MY battlefield,
@@ -3583,6 +3897,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 );
                 updateMyState({ [targetZone]: bf });
                 setAuraAttachPrompt(null);
+                logEvent(`erstellt ${tokenSpec.name}-Token an ${cardName(targetCard)}`, [targetCard]);
             };
 
             // --- EMBLEMS (The Ring, Max Speed, Planeswalker emblems, freeform) ---
@@ -3777,29 +4092,33 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }
 
                 // Move fetch land to GY
-                newGY = [{ ...fetchCard }, ...newGY];
+                newGY = [cleanLeaving(fetchCard), ...newGY];
 
-                // Remove fetched cards from library, place tapped on battlefield
+                // Getappt oder nicht entscheidet die FETCH-Karte („onto the battlefield tapped“ → getappt). Danach gilt die
+                // eigene ETB-Logik des gesuchten Landes (Shock → 2 Leben zahlen, Check-Land prüfen, Triome getappt …).
+                // Ist die Fetch-Karte schon „getappt“, ist jede Wahl hinfällig → einfach getappt.
+                const fetchTapped = /onto the battlefield tapped/i.test(fetchCard.oracle_text || '');
+                const placedCards = [];
                 selectedCards.forEach(target => {
                     newLibrary = newLibrary.filter(c => c.instanceId !== target.instanceId);
-                    const pos = getDefaultSpawnPosition({ ...target, type_line: target.type_line });
-                    const placedCard = { ...target, isTapped: true, x: pos.x, y: pos.y, counters: [] };
+                    const t0 = frontFace(target);
+                    const pos = getDefaultSpawnPosition(t0);
+                    const etbType = detectLandETB(t0);
+                    const ownTapped = ['tapped', 'triome', 'scry', 'surveil', 'bounce'].includes(etbType);
+                    const askType = !fetchTapped && ['shock', 'check', 'fast', 'slow', 'reveal'].includes(etbType) ? etbType : null;
+                    // mit Auswahl: erst getappt hinlegen, das Fenster enttappt bei „ungetappt“
+                    const placedCard = { ...t0, isTapped: fetchTapped || ownTapped || !!askType, x: pos.x, y: pos.y, counters: [] };
                     newBattlefield = [...newBattlefield, placedCard];
-                    // For shocklands: show the pay-2-life choice AFTER placing (tapped by default)
-                    // For scry/surveil lands: open the library action modal
-                    // For all lands: fire landfall triggers
-                    const etbType = detectLandETB(target);
+                    placedCards.push(placedCard);
                     setTimeout(() => {
                         fireTriggers('landfall', placedCard);
-                        if (etbType === 'shock') {
-                            setLandETBModal({ card: placedCard, fromZone: 'battlefieldLower', type: 'shock_fetch' });
-                        } else if (etbType === 'scry') {
-                            openLibraryAction('scry', 1);
-                        } else if (etbType === 'surveil') {
-                            openLibraryAction('surveil', 1);
-                        }
+                        if (askType) setLandETBModal({ card: placedCard, fromZone: 'battlefieldLower', type: askType, onBf: true });
+                        else if (etbType === 'scry') openLibraryAction('scry', 1);
+                        else if (etbType === 'surveil') openLibraryAction('surveil', 1);
                     }, 200);
                 });
+                const anyAsk = placedCards.some(c => { const t = detectLandETB(c); return !fetchTapped && ['shock', 'check', 'fast', 'slow', 'reveal'].includes(t); });
+                logEvent(`opfert ${cardName(fetchCard)} und sucht ${placedCards.map(cardName).join(', ') || 'nichts'}${!anyAsk && placedCards.some(c => c.isTapped) ? ' (getappt)' : ''}`, [fetchCard, ...placedCards]);
 
                 // Shuffle library
                 for (let i = newLibrary.length - 1; i > 0; i--) {
@@ -3998,7 +4317,15 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     const ph = r.phase && r.phase.player === r.activePlayer && PHASE_STEPS.includes(r.phase.step) ? r.phase : { step: 'main1', turn: r.phase?.turn || 0, player: r.activePlayer };
                     tx.update(roomRef, { combat: newCombat, phase: { ...ph, step: 'combat_block', at: Date.now() }, hold: null });
                 })
-                .then(() => addToast('⚔️ Angreifer erklärt – Gegner kann blocken', 'red'))
+                .then(() => {
+                    addToast('⚔️ Angreifer erklärt – Gegner kann blocken', 'red');
+                    const byTarget = {};
+                    attackers.forEach(a => { const t = a.targetPlayerId || ''; (byTarget[t] = byTarget[t] || []).push(a.card); });
+                    Object.entries(byTarget).forEach(([t, cards]) => {
+                        const tn = !t ? '' : t.startsWith('pw_') ? ` → ${cardName(findOnBattlefield(t.split('_')[1])?.card) || 'Planeswalker'}` : ` → ${getPlayerName(t)}`;
+                        logEvent(`greift an${tn}: ${cards.map(cardName).join(', ')}`, cards);
+                    });
+                })
                 .catch(err => addToast(`❌ Angriff fehlgeschlagen: ${err.message}`, 'red'));
                 setPendingAttackers([]);
             };
@@ -4171,17 +4498,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         } else {
                             // Update loyalty counter on PW — post as deathRequest-style request
                             // We post a loyaltyRequest instead since we can't write oppState directly
-                            const newCounters = (pw.counters||[]).filter(c => c.type !== 'Loyalität');
-                            newCounters.push({ type: 'Loyalität', count: newLoyalty });
-                            const loyaltyReqs = [...(lobbyState?.loyaltyRequests||[]), {
-                                id: generateId(), targetPlayerId: oppId,
-                                instanceId: pwInstanceId, newLoyalty
-                            }];
-                            updateDoc(roomRef, { loyaltyRequests: loyaltyReqs });
+                            pushRoomRequest('loyaltyRequests', { id: generateId(), targetPlayerId: oppId, instanceId: pwInstanceId, newLoyalty });
                         }
                     });
                     if (pwDeathReqs.length > 0) {
-                        updateDoc(roomRef, { deathRequests: [...(lobbyState?.deathRequests||[]), ...pwDeathReqs] });
+                        pushRoomRequest('deathRequests', pwDeathReqs);
                     }
                 }
 
@@ -4205,7 +4526,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     .filter(([, dmg]) => dmg > 0)
                     .map(([oppId, dmg]) => ({ id: generateId(), targetPlayerId: oppId, amount: dmg }));
                 if (dmgReqsToAdd.length > 0) {
-                    updateDoc(roomRef, { damageRequests: [...(lobbyState?.damageRequests || []), ...dmgReqsToAdd] });
+                    pushRoomRequest('damageRequests', dmgReqsToAdd);
                 }
 
                 // Move my dead creatures + apply life changes in ONE transaction
@@ -4220,8 +4541,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             ...bfLower.filter(c => myDeadIds.has(c.instanceId)),
                             ...bfUpper.filter(c => myDeadIds.has(c.instanceId)),
                         ];
-                        const cmdDead = allDead.filter(c => c.isCommander);
-                        const deadCards = allDead.filter(c => !c.isToken && !c.isCommander);
+                        const cmdDead = allDead.filter(c => c.isCommander && !foreignOwner(c));
+                        const foreignDead = allDead.filter(c => !c.isToken && foreignOwner(c));
+                        const deadCards = allDead.filter(c => !c.isToken && !c.isCommander && !foreignOwner(c));
+                        const shedGy = [], shedEquip = [], shedFalls = [];
+                        allDead.forEach(c => { const r = shedAttachments(c, false); shedGy.push(...r.ownGy); shedEquip.push(...r.looseEquip); shedFalls.push(...r.falls); });
                         const enduringCards = deadCards.filter(hasEnduringAbility);
                         const undyingCards = deadCards.filter(c => !hasEnduringAbility(c) && hasUndying(c) && !(c.counters||[]).some(x => x.type==='+1/+1'));
                         const persistCards = deadCards.filter(c => !hasEnduringAbility(c) && !hasUndying(c) && hasPersist(c) && !(c.counters||[]).some(x => x.type==='-1/-1'));
@@ -4232,14 +4556,16 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             ...persistCards.map(c => ({ ...c, isTapped:false, counters:[...(c.counters||[]).filter(x=>x.type!=='-1/-1'), {type:'-1/-1',count:1}], x:50, y:50 })),
                         ];
                         tx.update(myStateRef, {
-                            battlefieldLower: [...bfLower.filter(c => !myDeadIds.has(c.instanceId)), ...returned],
+                            battlefieldLower: [...bfLower.filter(c => !myDeadIds.has(c.instanceId)), ...returned, ...shedEquip],
                             battlefieldUpper: bfUpper.filter(c => !myDeadIds.has(c.instanceId)),
-                            graveyard: [...normalDead, ...(data.graveyard || [])],
-                            ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...c, isTapped: false, counters: [], attachments: [] })), ...(data.commandZone || [])] } : {}),
+                            graveyard: [...normalDead.map(cleanLeaving), ...shedGy, ...(data.graveyard || [])],
+                            ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...cleanLeaving(c), counters: [] })), ...(data.commandZone || [])] } : {}),
                             ...myUpdates
                         });
-                        return { normalDead, enduringCards, undyingCards, persistCards };
+                        return { normalDead, enduringCards, undyingCards, persistCards, foreignDead, shedFalls };
                     }).then(result => {
+                        (result?.shedFalls || []).forEach(f => pushRoomRequest('auraFallRequests', f));
+                        (result?.foreignDead || []).forEach(c => returnToOwner(c, 'graveyard'));
                         if (result?.normalDead?.length) {
                             addToast(`💀 ${result.normalDead.map(c => c.name).join(', ')} → Friedhof`, 'red');
                             result.normalDead.forEach(dead => { fireTriggers('dies', dead); fireTriggers('creature_dies', dead); });
@@ -4265,9 +4591,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     .filter(([, deadSet]) => deadSet.size > 0)
                     .map(([oppId, deadSet]) => ({ id: generateId(), targetPlayerId: oppId, instanceIds: [...deadSet] }));
                 if (pendingDeathReqs.length > 0) {
-                    updateDoc(roomRef, { deathRequests: [...(lobbyState?.deathRequests || []), ...pendingDeathReqs] });
+                    pushRoomRequest('deathRequests', pendingDeathReqs);
                 }
 
+                {
+                    const parts = [];
+                    Object.entries(oppDamage).forEach(([oppId, dmg]) => { if (dmg > 0) parts.push(`${getPlayerName(oppId)} erleidet ${dmg}`); });
+                    if (myDmg > 0) parts.push(`${getPlayerName(user.uid)} erleidet ${myDmg}`);
+                    if (myLifeGained > 0) parts.push(`+${myLifeGained} Leben (Lebensverknüpfung)`);
+                    const allField = [...(myState.battlefieldLower || []), ...(myState.battlefieldUpper || []), ...opponentIds.flatMap(id => [...(opponentStates[id]?.battlefieldLower || []), ...(opponentStates[id]?.battlefieldUpper || [])])];
+                    const deadIds = new Set([...myDeadIds, ...Object.values(oppDeadIds).flatMap(x => [...x])]);
+                    const dead = allField.filter(c => deadIds.has(c.instanceId));
+                    if (dead.length) parts.push(`stirbt: ${dead.map(cardName).join(', ')}`);
+                    logEvent(`Kampfschaden${firstStrikeOnly ? ' (Erstschlag)' : ''}: ${parts.length ? parts.join(' · ') : 'kein Schaden'}`, dead);
+                }
                 if (!firstStrikeOnly) {
                     finishCombat();
                     addToast('✅ Kampf abgeschlossen', 'green');
@@ -4419,15 +4756,38 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 // Return to Hand — available from battlefield and graveyard
                 const isOnBattlefield = zone === 'battlefieldLower' || zone === 'battlefieldUpper';
                 const isInGraveyard = zone === 'graveyard';
-                if (isOnBattlefield || isInGraveyard) {
+                if (isOnBattlefield && !cardMenu?.isAttachment) {
+                    options.push({ label: card.isTapped ? '⤴ Enttappen' : '⤵ Tappen', action: () => toggleTap(card.instanceId, zone) });
+                    if (hasFaces(card)) options.push({ label: '🔄 Umdrehen', action: () => flipCard(card, zone) });
+                    if (isAuraCard(card)) options.push({ label: '✨ An Karte anlegen', action: () => startAuraTargeting({ aura: card, source: 'bf', fromZone: zone }) });
+                }
+                if ((isOnBattlefield && !cardMenu?.isAttachment) || isInGraveyard) {
                     options.push({ label: '↩ Auf die Hand', action: () => moveCardToZone(card, 'hand') });
+                }
+                if (isOnBattlefield && !cardMenu?.isAttachment) {
+                    options.push({ label: '💀 In den Friedhof', action: () => moveCardToZone(card, 'graveyard') });
+                    options.push({ label: '🚫 Ins Exil', action: () => moveCardToZone(card, 'exile') });
                 }
 
                 return options;
             };
 
+            // Transformierende Karte umdrehen (Vorder-/Rückseite); beim Verlassen des Spielfelds wieder Vorderseite
+            const flipCard = (card, zone) => {
+                if (!hasFaces(card)) return;
+                const idx = card.faceIndex === 1 ? 0 : 1;
+                const flipped = withFace(card, idx);
+                updateMyState({ [zone]: (myState[zone] || []).map(c => c.instanceId === card.instanceId ? { ...flipped, isTapped: c.isTapped, x: c.x, y: c.y, counters: c.counters || [], attachments: c.attachments } : c) });
+                logEvent(`dreht ${cardName(card)} um → ${cardName(flipped)}`, [card, flipped]);
+                setHoveredCard(null);
+            };
+
             const moveCardToZone = (card, toZone) => {
                 const filter = c => c.instanceId !== card.instanceId;
+                const has = (arr) => (arr || []).some(c => c.instanceId === card.instanceId);
+                const fromZone = has(myState.battlefieldLower) || has(myState.battlefieldUpper) ? 'battlefield'
+                    : has(myState.hand) ? 'hand' : has(myState.graveyard) ? 'graveyard' : has(myState.exile) ? 'exile'
+                    : has(myState.commandZone) ? 'command' : has(myState.library) ? 'library' : null;
                 let updates = {
                     battlefieldUpper: (myState.battlefieldUpper || []).filter(filter),
                     battlefieldLower: (myState.battlefieldLower || []).filter(filter),
@@ -4442,35 +4802,25 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 // Auras go to THEIR OWNER's graveyard (rule 704.5n) - possibly a different player than whoever
                 // controlled the host creature, handled via the same cross-player request queue as gifting a
                 // token. Equipment simply unattaches and stays loose on MY OWN battlefield (rule 704.5q).
-                const wasOnBattlefield = (myState.battlefieldUpper || []).some(c => c.instanceId === card.instanceId)
-                    || (myState.battlefieldLower || []).some(c => c.instanceId === card.instanceId);
+                const wasOnBattlefield = fromZone === 'battlefield';
                 const leavingBattlefield = wasOnBattlefield && toZone !== 'battlefieldUpper' && toZone !== 'battlefieldLower';
-                // Counters are removed when a card leaves the battlefield (rule 704.5)
-                // Exception: keep Loyalty counters on planeswalkers since they track the printed value
-                if (leavingBattlefield && card.counters?.length) {
-                    card = { ...card, counters: (card.counters || []).filter(c => c.type === 'Loyalität') };
-                }
-                if (leavingBattlefield && card.attachments?.length) {
-                    const looseEquipment = [];
-                    card.attachments.forEach(a => {
-                        if (a.kind === 'aura') {
-                            if (a.ownerId === user.uid) {
-                                updates.graveyard = [a.card, ...updates.graveyard];
-                            } else {
-                                updateDoc(roomRef, {
-                                    auraFallRequests: [...(lobbyState?.auraFallRequests || []), { id: generateId(), targetPlayerId: a.ownerId, card: a.card }]
-                                });
-                            }
-                        } else if (a.kind === 'equipment') {
-                            looseEquipment.push({ ...a.card, isTapped: false, x: card.x, y: card.y });
-                        }
-                    });
-                    if (looseEquipment.length) updates.battlefieldLower = [...updates.battlefieldLower, ...looseEquipment];
+                const original = card;
+                if (leavingBattlefield) {
+                    const { ownGy, looseEquip } = shedAttachments(card);
+                    if (ownGy.length) updates.graveyard = [...ownGy, ...updates.graveyard];
+                    if (looseEquip.length) updates.battlefieldLower = [...updates.battlefieldLower, ...looseEquip];
+                    // Counters are removed when a card leaves the battlefield (rule 704.5), Loyalität bleibt;
+                    // doppelseitige Karten zeigen wieder die Vorderseite.
+                    card = cleanLeaving(card);
                 }
 
+                const n = cardName(card);
+                const nBf = cardName(original); // Name der Seite, die auf dem Spielfeld lag
                 const tokenGone = card.isToken && leavingBattlefield;
+                const toForeign = foreignOwner(card) && ['graveyard', 'exile', 'hand', 'library_top', 'library_bottom', 'command'].includes(toZone);
                 const toCmd = card.isCommander && (toZone === 'graveyard' || toZone === 'exile');
                 if (tokenGone) { addToast(`✨ Token ${card.name} verschwindet`, 'blue'); }
+                else if (toForeign) { returnToOwner(card, toZone); }
                 else if (toCmd) { updates.commandZone = [{ ...card, isTapped: false, counters: [] }, ...updates.commandZone]; addToast(`👑 ${card.name} zurück in die Commander-Zone`, 'blue'); }
                 else if (toZone === 'graveyard') updates.graveyard = [card, ...updates.graveyard];
                 else if (toZone === 'exile') updates.exile = [card, ...updates.exile];
@@ -4481,13 +4831,56 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
                 updateMyState(updates);
 
+                // Protokoll (öffentliche Zonen mit Namen; Hand/Bibliothek ohne Namen)
+                const dest = toCmd ? 'command' : toZone;
+                const destLabel = ZONE_LABEL[dest] || dest;
+                const ownerNote = toForeign ? ` (an ${getPlayerName(original.ownerId)})` : '';
+                if (fromZone === 'battlefield') {
+                    if (tokenGone) logEvent(`Token ${n} verlässt das Spielfeld`);
+                    else if (toZone === 'graveyard' && isCreatureLike(original)) logEvent(`${nBf} stirbt${ownerNote}`, [original]);
+                    else logEvent(`${nBf} → ${destLabel}${ownerNote}`, [original]);
+                } else if (fromZone === 'graveyard' || fromZone === 'exile') {
+                    logEvent(`${n}: ${ZONE_LABEL[fromZone]} → ${destLabel}${ownerNote}`, [card]);
+                } else if (fromZone === 'hand') {
+                    if (toZone === 'graveyard') logEvent(`wirft ${n} ab`, [card]);
+                    else if (toZone === 'exile' || toZone === 'command') logEvent(`${n}: Hand → ${destLabel}`, [card]);
+                    else if (toZone.startsWith('library')) logEvent(`legt eine Handkarte in die ${destLabel}`);
+                } else if (fromZone === 'library') {
+                    if (toZone === 'graveyard' || toZone === 'exile') logEvent(`${n}: Bibliothek → ${destLabel}`, [card]);
+                    else if (toZone === 'library_bottom') logEvent('legt die oberste Karte unter die Bibliothek');
+                    else if (toZone === 'hand') logEvent('nimmt eine Karte aus der Bibliothek auf die Hand');
+                } else if (fromZone === 'command' && toZone !== 'command') {
+                    logEvent(`${n}: Commander-Zone → ${destLabel}`, [card]);
+                }
+
                 // Fire dies triggers when a creature goes to GY from battlefield
-                if (toZone === 'graveyard' && wasOnBattlefield && isCreatureLike(card)) {
+                if (toZone === 'graveyard' && wasOnBattlefield && isCreatureLike(frontFace(card))) {
                     setTimeout(() => {
                         fireTriggers('dies', card);
                         fireTriggers('creature_dies', card);
                     }, 50);
                 }
+            };
+
+            // Direkt aufs Spielfeld (ohne Stack) aus Friedhof/Exil/Bibliothek – Reihe nach Kartentyp, Länder mit ETB-Logik,
+            // Auren mit Zielwahl
+            const putOntoBattlefield = (card, fromZone) => playCard(card, fromZone, 'lower');
+            // Zauber aus einer Zone wirken (Rückblende, Flucht …): Länder werden gespielt, alles andere auf den Stack
+            const playFromZone = (card, fromZone) => { if (isLand(frontFace(card))) enterLand(card, fromZone); else castToStack(card, fromZone); };
+
+            // Reanimieren aus dem Friedhof/Exil eines Mitspielers: Karte kommt unter MEINE Kontrolle (ownerId = Besitzer),
+            // der Besitzer entfernt sie per reanimateRequests aus seiner Zone. Verlässt sie mein Feld, geht sie zurück zu ihm.
+            const reanimateFrom = (card, ownerUid, fromZone) => {
+                const c = { ...prepEnter(card), instanceId: card.instanceId, ownerId: ownerUid };
+                pushRoomRequest('reanimateRequests', { id: generateId(), targetPlayerId: ownerUid, instanceId: card.instanceId, fromZone, fromPlayerId: user.uid });
+                const n = cardName(c);
+                logEvent(`holt ${n} aus dem ${fromZone === 'exile' ? 'Exil' : 'Friedhof'} von ${getPlayerName(ownerUid)} auf das eigene Spielfeld`, [c]);
+                if (isLand(c)) { const { x, y } = getDefaultSpawnPosition(c); updateMyState({ battlefieldLower: [...(myState.battlefieldLower || []), { ...c, isTapped: detectLandETB(c) === 'tapped' || detectLandETB(c) === 'triome', x, y }] }); return; }
+                if (isAuraCard(c)) { startAuraTargeting({ aura: c, source: 'zone', fromZone: 'none' }); return; }
+                const { x, y } = getDefaultSpawnPosition(c);
+                const placed = { ...c, x, y };
+                updateMyState({ battlefieldLower: [...(myState.battlefieldLower || []), placed] });
+                setTimeout(() => fireTriggers('etb', placed), 50);
             };
 
             // Taps/untaps either the host card itself, or one of its attachments independently - Auras and
@@ -4573,7 +4966,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const iHold = hold?.uid === user.uid;
             const holdBlocksMe = !!hold && !iHold;
             const holdTitle = hold ? `${hold.name || getPlayerName(hold.uid)} möchte reagieren` : '';
-            const requestHold = () => updateDoc(roomRef, { hold: { uid: user.uid, name: getPlayerName(user.uid), at: Date.now() } }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+            const requestHold = () => updateDoc(roomRef, { hold: { uid: user.uid, name: getPlayerName(user.uid), at: Date.now() } }).then(() => logEvent('ruft „Moment!“')).catch(err => addToast(`❌ ${err.message}`, 'red'));
             const releaseHold = () => updateDoc(roomRef, { hold: null }).catch(err => addToast(`❌ ${err.message}`, 'red'));
 
             const canEndTurn = mayControlTurn && !holdBlocksMe;
@@ -4761,6 +5154,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     const targetKey = targetBattlefield === 'upper' ? 'battlefieldUpper' : 'battlefieldLower';
                     updates[targetKey] = [...(updates[targetKey] || myState[targetKey] || []), freedCard];
                     updateMyState(updates);
+                } else if (draggedCard.fromZone === 'hand' && landBackIdx(draggedCard.card) != null && !isLand(draggedCard.card)) {
+                    // Modale Karte mit Land-Rückseite: auf die Länderreihe gezogen → als Land, sonst wie gewohnt
+                    const g = measureMyGeom(), z = g.zones.land, py = e.clientY - rect.top, px = e.clientX - rect.left;
+                    if (py >= z.top - 6 && py <= z.top + g.ch + 6 && px >= z.left - 6 && px <= z.right + 6) playLandFace(draggedCard.card, 1);
+                    else playCard(draggedCard.card, draggedCard.fromZone, targetBattlefield, { x, y });
                 } else {
                     playCard(draggedCard.card, draggedCard.fromZone, targetBattlefield, { x, y });
                 }
@@ -4826,9 +5224,21 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 // Offset so the host's name/top portion stays visible above an Aura stacked underneath it,
                 // and the host's bottom portion stays visible below an Equipment stacked on top of it.
                 const ATTACH_OFFSET = 28;
+                const auraValid = !!auraTarget && auraTargetOk(auraTarget, card, isMine);
+                const handAuraDrag = draggedCard?.fromZone === 'hand' && isAuraCard(draggedCard.card);
+                // Klick während der Aura-Zielwahl (auch auf Anhänge der Karte) → diese Karte als Ziel
+                const auraClick = (e) => {
+                    if (!auraTarget) return false;
+                    e.stopPropagation();
+                    if (!auraValid) { addToast(`Kein gültiges Ziel für ${cardName(auraTarget.aura)}`, 'yellow'); return true; }
+                    const owner = isMine ? user.uid : findOnBattlefield(card.instanceId)?.playerId;
+                    if (owner) chooseAuraTarget(card, zone, owner);
+                    return true;
+                };
                 return (
                     <div 
                         key={card.instanceId} 
+                        data-aura-target={auraValid ? '1' : undefined}
                         className="absolute cursor-pointer"
                         style={pos && geom
                             // eigenes Feld: Reihe/Platz aus layoutMyCards, Größe über scale (kleine Fenster)
@@ -4836,9 +5246,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             : { left: leftStyle, top: isMine ? topStyle : (zone === 'battlefieldLower' ? undefined : topStyle), bottom: isMine ? undefined : (zone === 'battlefieldLower' ? topStyle : undefined) }}
                         draggable={isMine}
                         onDragStart={(e) => isMine && handleDragStart(e, card, zone)}
-                        onDragOver={(e) => (isMine || (draggedCard?.fromZone === 'stack' && isAuraCard(draggedCard.card))) && e.preventDefault()}
+                        onDragOver={(e) => (isMine || (draggedCard?.fromZone === 'stack' && isAuraCard(draggedCard.card)) || handAuraDrag) && e.preventDefault()}
                         onDrop={(e) => {
                             if (!draggedCard) return;
+                            // Aura aus der Hand auf eine Karte: auf den Stack, Ziel merken (beim Auflösen automatisch anlegen)
+                            if (handAuraDrag) {
+                                e.preventDefault(); e.stopPropagation();
+                                const owner = isMine ? user.uid : findOnBattlefield(card.instanceId)?.playerId;
+                                const src = draggedCard.card;
+                                setDraggedCard(null);
+                                if (!owner || !auraTargetOk({ aura: src, enchant: parseEnchant(src) }, card, isMine)) { addToast(`${cardName(src)} kann ${cardName(card)} nicht verzaubern`, 'yellow'); return; }
+                                castToStack(src, 'hand', { auraTarget: { cardInstanceId: card.instanceId, playerId: owner } });
+                                addToast(`✨ ${cardName(src)} auf dem Stack – Ziel: ${cardName(card)}`, 'purple');
+                                return;
+                            }
                             // Gegnerkarten: nur eine Aura vom Stack darf darauf abgelegt werden
                             if (!isMine && !(draggedCard.fromZone === 'stack' && isAuraCard(draggedCard.card))) return;
                             // Nur Anlegen (Aura vom Stack, Ausrüstung) wird auf der Karte behandelt; alles andere
@@ -4872,7 +5293,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <CardImage 
                                     src={a.image_url} 
                                     className={`w-[90px] h-[120px] card-shadow ${a.isTapped ? 'tapped' : 'untapped'}`}
-                                    onClick={(e) => { if (isMine) { e.stopPropagation(); toggleTap(a.instanceId, zone); } }}
+                                    onClick={(e) => { if (auraClick(e)) return; if (isMine) { e.stopPropagation(); toggleTap(a.instanceId, zone); } }}
                                     onMouseEnter={() => setHoveredCard(a.image_url)}
                                     onMouseLeave={() => setHoveredCard(null)}
                                 />
@@ -4910,6 +5331,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 `}
                                 style={{ zIndex: 4 }}
                                 onClick={(e) => {
+                                    if (auraClick(e)) return;
                                     if (!isMine) return;
                                     if (combatState?.phase === 'attacking' && combatState.attackerId === user.uid && isCreatureLike(card) && !card.isTapped) {
                                         toggleAttacker(card);
@@ -4920,9 +5342,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                         toggleTap(card.instanceId, zone, e);
                                     }
                                 }}
-                                onMouseEnter={() => setHoveredCard(card.image_url)}
+                                onMouseEnter={() => setHoveredCard(previewOf(card))}
                                 onMouseLeave={() => setHoveredCard(null)}
                             />
+                            {auraValid && (
+                                <div className="absolute inset-0 rounded-lg pointer-events-none" style={{ zIndex: 6, border: '2px solid #facc15', boxShadow: '0 0 14px 4px rgba(250,204,21,0.75)' }} />
+                            )}
                             {/* Fetch button — shown on hover for lands with a fetch ability */}
                             {isMine && isLand(card) && parseFetchAbility(card.oracle_text) && (
                                 <button
@@ -4976,7 +5401,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <CardImage 
                                     src={a.image_url} 
                                     className={`w-[90px] h-[120px] card-shadow ${a.isTapped ? 'tapped' : 'untapped'}`}
-                                    onClick={(e) => { if (isMine && a.ownerId === user.uid) { e.stopPropagation(); toggleTap(a.instanceId, zone); } }}
+                                    onClick={(e) => { if (auraClick(e)) return; if (isMine && a.ownerId === user.uid) { e.stopPropagation(); toggleTap(a.instanceId, zone); } }}
                                     onMouseEnter={() => setHoveredCard(a.image_url)}
                                     onMouseLeave={() => setHoveredCard(null)}
                                 />
@@ -4994,9 +5419,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
             // Aktionen für die Tastenkürzel – exakt dieselben Wege und Sperren wie die Buttons.
             kbRef.current = {
-                escape: () => { setShowKeys(false); setMyMenuPos(null); setCardMenu(null); setLibraryMenu(null); setCmdDmgOpen(false); setManaChoice(null); setViewingZone(null); setTopCardView(null); },
+                toggleLog: () => setLogOpen(v => !v),
+                escape: () => { if (auraTarget) placeAuraLoose(); setShowKeys(false); setMyMenuPos(null); setCardMenu(null); setLibraryMenu(null); setCmdDmgOpen(false); setManaChoice(null); setViewingZone(null); setTopCardView(null); },
                 toggleHelp: () => setShowKeys(v => !v),
                 space: () => {
+                    // Während der Aura-Zielwahl nichts weiterschalten (Esc legt die Aura ohne Ziel ab)
+                    if (auraTarget) { addToast(`Erst ein Ziel für ${cardName(auraTarget.aura)} wählen (Esc: ohne Ziel)`, 'yellow'); return; }
                     if (myPriorityPending) { passPriority(); return; }
                     if (amDefending) return;
                     if (nextInfo.disabled) return;
@@ -5007,6 +5435,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 draw: () => { if (!myState.library.length) { addToast('Bibliothek ist leer', 'yellow'); return; } drawCard(); },
                 endTurn: () => {
                     if (!canEndTurn) return;
+                    if (auraTarget) { addToast(`Erst ein Ziel für ${cardName(auraTarget.aura)} wählen (Esc: ohne Ziel)`, 'yellow'); return; }
                     if (allStackCards.length) { addToast('Erst den Stack auflösen', 'yellow'); return; }
                     endTurn();
                 },
@@ -5030,6 +5459,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 ['T', 'Token erstellen'],
                 ['+ / −', 'Leben +1 / −1'],
                 ['X', 'Moment! / Weiter geben'],
+                ['L', 'Spielprotokoll ein/aus'],
                 ['Esc', 'Menüs und Fenster schließen'],
                 ['?', 'Diese Übersicht ein/aus'],
             ];
@@ -5041,6 +5471,73 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     <HintStack hints={hints}
                         onDraw={(h) => { drawCard(); addToast(`📖 ${h.cardName}: Karte gezogen`, 'blue'); setHints(p => p.filter(x => x.id !== h.id)); }}
                         onDismiss={(h) => setHints(p => p.filter(x => x.id !== h.id))} />
+
+                    {/* Aura-Zielwahl: Banner oben in der Mitte, gültige Ziele leuchten golden */}
+                    {auraTarget && ReactDOM.createPortal(
+                        <div data-testid="aura-banner" className="bg-gray-950/95 border-solid border border-yellow-500 rounded-xl shadow-2xl flex items-center gap-3"
+                            style={{ position: 'fixed', left: '50%', top: 10, transform: 'translateX(-50%)', zIndex: 9500, padding: '8px 14px', color: '#ece4cf', fontSize: 13 }}>
+                            <span>✨ Wähle, was <b className="text-yellow-300">{cardName(auraTarget.aura)}</b> verzaubert <span className="text-gray-400" style={{ fontSize: 11 }}>({auraTarget.enchant?.label || 'creature'})</span></span>
+                            <button onClick={() => placeAuraLoose()} title="Ohne Ziel ablegen (Esc)" className="bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold px-3 py-1 rounded border-0 cursor-pointer">Ohne Ziel ablegen</button>
+                        </div>,
+                        (document.getElementById('arena-portal') || document.body)
+                    )}
+
+                    {/* Spielprotokoll: Knopf am rechten Rand auf der Mittellinie, Panel rechts über der Seitenleiste */}
+                    {(() => {
+                        const unread = logOpen ? 0 : logEntries.filter(e => e.at > logSeenAt && e.uid !== user.uid).length;
+                        const seats = (lobbyState?.seatOrder && lobbyState.seatOrder.length ? lobbyState.seatOrder : [...(lobbyState?.players || [])].sort());
+                        const PCOL = ['#f2b45a', '#7cc4ff', '#8fdc8a', '#d6a2ff', '#ff8f7a', '#f5e17a'];
+                        const colorOf = (uid) => { const i = seats.indexOf(uid); if (i >= 0) return PCOL[i % PCOL.length]; let h = 0; for (const ch of String(uid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PCOL[h % PCOL.length]; };
+                        const hhmm = (t) => { const d = new Date(t || 0); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+                        const renderText = (e) => {
+                            let parts = [String(e.text || '')];
+                            (e.cards || []).forEach((c, ci) => {
+                                if (!c.name) return;
+                                parts = parts.flatMap((p) => {
+                                    if (typeof p !== 'string' || !p.includes(c.name)) return [p];
+                                    const seg = p.split(c.name);
+                                    return seg.flatMap((x, i) => i === 0 ? [x] : [
+                                        <span key={`${ci}-${i}-${x.length}`} data-log-card={c.name} className="text-yellow-200 underline cursor-help" style={{ textDecorationStyle: 'dotted' }}
+                                            onMouseEnter={() => c.image_url && setHoveredCard(c.image_url)} onMouseLeave={() => setHoveredCard(null)}>{c.name}</span>, x]);
+                                });
+                            });
+                            return parts;
+                        };
+                        return ReactDOM.createPortal(
+                            <>
+                                <button data-testid="log-toggle" onClick={() => setLogOpen(v => !v)} title="Spielprotokoll (L)" aria-label="Spielprotokoll"
+                                    className={`border-solid border rounded-l-lg shadow-lg font-bold cursor-pointer ${logOpen ? 'bg-yellow-600 text-gray-950 border-yellow-400' : 'bg-gray-900/95 text-yellow-300 border-yellow-700/70 hover:bg-gray-800'}`}
+                                    style={{ position: 'fixed', right: logOpen ? 288 : 0, top: '50%', transform: 'translateY(-50%)', zIndex: 8996, fontSize: 11, padding: '3px 8px', lineHeight: '14px' }}>
+                                    📜 Log
+                                    {unread > 0 && <span data-testid="log-unread" className="bg-red-600 text-white rounded-full font-bold" style={{ position: 'absolute', top: -7, left: -7, minWidth: 16, height: 16, fontSize: 9, lineHeight: '16px', textAlign: 'center', padding: '0 3px' }}>{unread > 99 ? '99+' : unread}</span>}
+                                </button>
+                                {logOpen && (
+                                    <div data-testid="log-panel" className="bg-gray-950/95 border-solid border border-yellow-600/70 rounded-xl shadow-2xl flex flex-col"
+                                        style={{ position: 'fixed', right: 8, top: '50%', transform: 'translateY(-50%)', width: 280, maxHeight: '60vh', zIndex: 8995, color: '#ece4cf' }}>
+                                        <div className="flex items-center justify-between border-solid border-0 border-b border-yellow-700/50" style={{ padding: '6px 10px' }}>
+                                            <span className="font-title text-yellow-400 font-bold tracking-wide" style={{ fontSize: 13 }}>📜 Spielprotokoll</span>
+                                            <button onClick={() => setLogOpen(false)} aria-label="Schließen" title="Schließen (L)" className="bg-transparent border-0 text-gray-400 hover:text-yellow-300 cursor-pointer" style={{ fontSize: 14 }}>✕</button>
+                                        </div>
+                                        <div ref={logScrollRef} className="overflow-y-auto flex flex-col gap-1" style={{ padding: '6px 10px', fontSize: 11.5, lineHeight: 1.35 }}>
+                                            {logEntries.length === 0 && <p className="text-gray-500 text-center m-0" style={{ padding: '12px 0' }}>Noch keine Einträge</p>}
+                                            {logEntries.map(e => e.kind === 'turn' ? (
+                                                <div key={e.id} data-log-entry="turn" className="text-center font-bold text-yellow-400 border-solid border-0 border-t border-yellow-700/40" style={{ marginTop: 4, paddingTop: 3, fontSize: 11 }}>
+                                                    — {e.text} — <span className="text-gray-500 font-normal">{hhmm(e.at)}</span>
+                                                </div>
+                                            ) : (
+                                                <div key={e.id} data-log-entry="1">
+                                                    <span className="text-gray-500" style={{ fontSize: 10 }}>{hhmm(e.at)}</span>{' '}
+                                                    <b style={{ color: colorOf(e.uid) }}>{e.name || getPlayerName(e.uid)}</b>{' '}
+                                                    <span className="text-gray-200">{renderText(e)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </>,
+                            (document.getElementById('arena-portal') || document.body)
+                        );
+                    })()}
 
                     {/* Kürzel-Übersicht (? / ⋯-Menü) – kein Modal, das Spiel bleibt bedienbar */}
                     {showKeys && ReactDOM.createPortal(
@@ -5200,6 +5697,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                         onDiscard={(ids) => {
                                             const discarded = myState.hand.filter(c => ids.includes(c.instanceId));
                                             const remaining = myState.hand.filter(c => !ids.includes(c.instanceId));
+                                            if (discarded.length) logEvent(`wirft ${discarded.map(cardName).join(', ')} ab`, discarded);
                                             updateMyState({
                                                 hand: remaining,
                                                 graveyard: [...discarded, ...(myState.graveyard || [])]
@@ -5363,7 +5861,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     )}
 
                     {hoveredCard && (() => {
-                        const PREVIEW_W = 256; // matches w-64
+                        const imgs = Array.isArray(hoveredCard) ? hoveredCard : [hoveredCard];
+                        const PREVIEW_W = 256 * imgs.length + 8 * (imgs.length - 1); // matches w-64 je Seite
                         const PREVIEW_H = 350; // matches h-[350px]
                         const OFFSET = 20; // gap between cursor and preview
                         // Default: place it up and to the right of the cursor. Clamp so it never runs off-screen.
@@ -5374,11 +5873,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         if (top < 0) top = mousePos.y + OFFSET; // flip below the cursor if there's no room above
                         if (top + PREVIEW_H > window.innerHeight) top = window.innerHeight - PREVIEW_H - 8;
                         return (
-                            <div 
-                                className="fixed z-[100] pointer-events-none w-64 h-[350px] rounded-xl overflow-hidden shadow-2xl border-2 border-yellow-500 bg-black"
-                                style={{ left, top }}
-                            >
-                                <img src={hoveredCard} className="w-full h-full object-contain" />
+                            <div data-testid="card-preview" className="fixed pointer-events-none flex gap-2" style={{ left, top, zIndex: 10050 }}>
+                                {imgs.map((src, i) => (
+                                    <div key={i} className="w-64 h-[350px] rounded-xl overflow-hidden shadow-2xl border-2 border-solid border-yellow-500 bg-black">
+                                        <img src={src} className="w-full h-full object-contain" />
+                                    </div>
+                                ))}
                             </div>
                         );
                     })()}
@@ -5407,10 +5907,29 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 { label: 'Hellsicht …', submenu: [1,2,3,4,5,7,10].map(n => ({ label: `Hellsicht ${n}`, action: () => { openLibraryAction('scry', n); setLibraryMenu(null); } })) },
                                 { label: 'Überwachen …', submenu: [1,2,3,4,5,7,10].map(n => ({ label: `Überwachen ${n}`, action: () => { openLibraryAction('surveil', n); setLibraryMenu(null); } })) },
                                 { label: 'Oberste X ansehen …', submenu: [2,3,4,5,6,7,10,15].map(n => ({ label: `Oberste ${n} ansehen`, action: () => { openLibraryAction('look', n); setLibraryMenu(null); } })) },
+                                { label: 'Karten millen …', action: () => { setLibraryMenu(null); setMillPrompt({ n: 1 }); } },
                                 { label: 'Bibliothek mischen', action: shuffleLibrary },
                                 { label: 'Ganze Bibliothek ansehen', action: () => setViewingZone('library') }
                             ]} 
                         />
+                    )}
+
+                    {millPrompt && (
+                        <Modal isOpen={true} onClose={() => setMillPrompt(null)} title="Karten millen">
+                            <form data-testid="mill-modal" className="flex flex-col items-center gap-4" onSubmit={(e) => { e.preventDefault(); const n = Math.max(1, Math.min(20, parseInt(millPrompt.n) || 1)); setMillPrompt(null); millCards(n); }}>
+                                <p className="text-gray-300 text-sm m-0">Wie viele Karten von oben in den Friedhof legen? (1–20)</p>
+                                <div className="flex items-center gap-2">
+                                    <button type="button" onClick={() => setMillPrompt(p => ({ n: Math.max(1, (parseInt(p.n) || 1) - 1) }))} className="w-8 h-8 rounded-full bg-gray-700 hover:bg-gray-600 text-white font-bold border-0">−</button>
+                                    <input autoFocus type="number" min={1} max={20} value={millPrompt.n} onChange={(e) => setMillPrompt({ n: e.target.value })}
+                                        className="w-20 text-center text-lg font-bold bg-gray-900 text-yellow-300 border-solid border border-yellow-700/70 rounded px-2 py-1" />
+                                    <button type="button" onClick={() => setMillPrompt(p => ({ n: Math.min(20, (parseInt(p.n) || 0) + 1) }))} className="w-8 h-8 rounded-full bg-gray-700 hover:bg-gray-600 text-white font-bold border-0">+</button>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button type="button" onClick={() => setMillPrompt(null)} className="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded text-white border-0">Abbrechen</button>
+                                    <button type="submit" className="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded text-gray-950 font-bold border-0">Millen</button>
+                                </div>
+                            </form>
+                        </Modal>
                     )}
 
                     {topCardView && (
@@ -5429,22 +5948,40 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     {viewingZone && (() => {
                         const isOpp = viewingZone.playerId && viewingZone.playerId !== user.uid;
                         const zoneName = viewingZone.zone || viewingZone;
-                        const playerName = isOpp ? getPlayerName(viewingZone.playerId) : 'Your';
+                        const oppName = isOpp ? getPlayerName(viewingZone.playerId) : '';
                         const cards = isOpp
                             ? (opponentStates[viewingZone.playerId]?.[zoneName] || [])
                             : (myState[zoneName] || []);
+                        const ZT = { graveyard: ['Dein Friedhof', 'Friedhof von'], exile: ['Dein Exil', 'Exil von'], library: ['Bibliothek', 'Bibliothek von'], hand: ['Hand', 'Hand von'] };
+                        const title = isOpp ? `${(ZT[zoneName] || [zoneName, zoneName + ' von'])[1]} ${oppName}` : (ZT[zoneName] || [zoneName])[0];
+                        const btn = 'w-[88%] px-2 py-0.5 rounded text-[11px] font-bold text-white border-0 cursor-pointer';
+                        const pub = zoneName === 'graveyard' || zoneName === 'exile';
                         return (
-                            <Modal isOpen={true} onClose={() => setViewingZone(null)} title={`${playerName} ${zoneName.charAt(0).toUpperCase() + zoneName.slice(1)} (${cards.length})`}>
-                                <div className="grid grid-cols-4 gap-4">
+                            <Modal isOpen={true} onClose={() => setViewingZone(null)} title={`${title} (${cards.length})`}>
+                                <div className="grid grid-cols-4 gap-4" data-testid="zone-viewer" data-zone-name={zoneName}>
                                     {cards.map((card, idx) => (
-                                        <div key={idx} className="relative group">
-                                            <img src={card.image_url} className="w-full rounded-lg shadow-lg" />
+                                        <div key={card.instanceId || idx} className="relative group" data-card-name={cardName(card)}
+                                            onMouseEnter={() => setHoveredCard(previewOf(card))} onMouseLeave={() => setHoveredCard(null)}>
+                                            <img src={card.image_url} alt={cardName(card)} className="w-full rounded-lg shadow-lg" style={{ minHeight: 60, background: '#1f2937' }} />
+                                            {!card.image_url && <div className="absolute inset-x-0 top-2 text-center text-[11px] text-gray-300 px-1">{cardName(card)}</div>}
                                             {!isOpp && (
-                                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-2 transition-opacity">
-                                                    <button onClick={() => { playCard(card, zoneName, 'lower'); }} className="bg-green-600 px-3 py-1 rounded text-xs font-bold text-white hover:bg-green-500">Spielen</button>
-                                                    {zoneName === 'library' && (
-                                                        <button onClick={() => { moveCardToZone(card, 'library_top'); setViewingZone(null); }} className="bg-yellow-600 px-3 py-1 rounded text-xs font-bold text-white hover:bg-yellow-500">Oben</button>
-                                                    )}
+                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 touch-show flex flex-col items-center justify-center gap-1 transition-opacity">
+                                                    <button onClick={() => { setHoveredCard(null); playFromZone(card, zoneName); }} className={`${btn} bg-green-600 hover:bg-green-500`} title={isLand(frontFace(card)) ? 'Als Land spielen' : 'Wirken – auf den Stack'}>Spielen</button>
+                                                    <button onClick={() => { setHoveredCard(null); putOntoBattlefield(card, zoneName); }} className={`${btn} bg-blue-600 hover:bg-blue-500`} title="Direkt aufs Spielfeld (ohne Stack)">Aufs Spielfeld</button>
+                                                    {zoneName !== 'hand' && <button onClick={() => moveCardToZone(card, 'hand')} className={`${btn} bg-gray-600 hover:bg-gray-500`}>Auf die Hand</button>}
+                                                    {zoneName === 'library'
+                                                        ? <button onClick={() => { moveCardToZone(card, 'library_top'); setViewingZone(null); }} className={`${btn} bg-yellow-600 hover:bg-yellow-500`}>Oben</button>
+                                                        : <>
+                                                            <button onClick={() => moveCardToZone(card, 'library_top')} className={`${btn} bg-yellow-700 hover:bg-yellow-600`}>Oben auf die Bibliothek</button>
+                                                            <button onClick={() => moveCardToZone(card, 'library_bottom')} className={`${btn} bg-yellow-800 hover:bg-yellow-700`}>Unter die Bibliothek</button>
+                                                        </>}
+                                                    {zoneName === 'graveyard' && <button onClick={() => moveCardToZone(card, 'exile')} className={`${btn} bg-gray-700 hover:bg-gray-600`}>Ins Exil</button>}
+                                                    {zoneName === 'exile' && <button onClick={() => moveCardToZone(card, 'graveyard')} className={`${btn} bg-gray-700 hover:bg-gray-600`}>In den Friedhof</button>}
+                                                </div>
+                                            )}
+                                            {isOpp && pub && (
+                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 touch-show flex flex-col items-center justify-center gap-1 transition-opacity">
+                                                    <button onClick={() => { setHoveredCard(null); setViewingZone(null); reanimateFrom(card, viewingZone.playerId, zoneName); }} className={`${btn} bg-purple-700 hover:bg-purple-600`} title={`Unter deine Kontrolle; ${oppName} bleibt Besitzer`}>Aufs eigene Spielfeld (reanimieren)</button>
                                                 </div>
                                             )}
                                         </div>
@@ -5596,14 +6133,32 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                         src={card.image_url}
                                                         style={{ width: 'calc((18vh - 8px) * 0.714)', height: 'calc(18vh - 8px)' }}
                                                         className="group-hover/handcard:brightness-110 transition-[filter]"
-                                                        onMouseEnter={() => setHoveredCard(card.image_url)}
+                                                        onMouseEnter={() => setHoveredCard(previewOf(card))}
                                                         onMouseLeave={() => setHoveredCard(null)}
                                                     />
+                                                    {landBackIdx(card) != null ? (
+                                                        <div className="absolute bottom-1 inset-x-1 flex flex-col gap-0.5 opacity-0 group-hover/handcard:opacity-100 touch-show transition-opacity">
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); playCardFromHand(card); }}
+                                                                className="w-full bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-0.5 rounded shadow-lg"
+                                                                title={isLand(card) ? `${card.card_faces[0].name} als Land spielen` : `${card.card_faces[0].name} auf den Stack legen`}
+                                                            >Spielen</button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); playLandFace(card, 1); }}
+                                                                className="w-full bg-yellow-700 hover:bg-yellow-600 text-white text-[10px] font-bold py-0.5 rounded shadow-lg"
+                                                                title={`Rückseite ${card.card_faces[1].name} als Land spielen`}
+                                                            >{isLand(card) ? '🌍 Rückseite' : '🌍 Als Land'}</button>
+                                                        </div>
+                                                    ) : (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); playCardFromHand(card); }}
                                                         className="absolute bottom-1 inset-x-1 bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-1 rounded opacity-0 group-hover/handcard:opacity-100 touch-show transition-opacity shadow-lg"
                                                         title={isLand(card) ? 'Auf dein Spielfeld' : 'Auf den Stack legen'}
                                                     >Spielen</button>
+                                                    )}
+                                                    {hasFaces(card) && previewOf(card) && Array.isArray(previewOf(card)) && (
+                                                        <span className="absolute top-1 right-1 bg-gray-950/80 text-yellow-300 text-[10px] font-bold rounded px-1 opacity-0 group-hover/handcard:opacity-100 touch-show pointer-events-none" title="Doppelseitig – die Vorschau zeigt beide Seiten">↺</span>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -5749,7 +6304,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                             <CardImage
                                                 src={card.image_url}
                                                 className="w-14 h-[78px] hover:brightness-110 transition-[filter] border border-yellow-500"
-                                                onMouseEnter={() => setHoveredCard(card.image_url)}
+                                                onMouseEnter={() => setHoveredCard(previewOf(card))}
                                                 onMouseLeave={() => setHoveredCard(null)}
                                             />
                                             {card.isCommander && (
@@ -5772,6 +6327,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                         commandZone: myState.commandZone.filter(c => c.instanceId !== card.instanceId),
                                                         cmdTax: { ...(myState.cmdTax || {}), [card.instanceId]: ((myState.cmdTax || {})[card.instanceId] || 0) + 2 }
                                                     });
+                                                    logEvent(`wirkt Commander ${cardName(card)} (Steuer bisher +${(myState.cmdTax || {})[card.instanceId] || 0}, jetzt +${((myState.cmdTax || {})[card.instanceId] || 0) + 2})`, [card]);
                                                 }}
                                                 className="absolute left-0.5 right-0.5 top-[60px] bg-green-600 hover:bg-green-500 text-white text-[9px] font-bold py-0.5 rounded shadow opacity-0 group-hover/cmdcard:opacity-100 touch-show transition-opacity"
                                                 title={`${card.name} aus der Commander-Zone wirken`}
@@ -5932,7 +6488,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                                 <CardImage
                                                                     src={card.image_url}
                                                                     className="w-14 h-[78px] border border-yellow-500"
-                                                                    onMouseEnter={() => setHoveredCard(card.image_url)}
+                                                                    onMouseEnter={() => setHoveredCard(previewOf(card))}
                                                                     onMouseLeave={() => setHoveredCard(null)}
                                                                 />
                                                                 {card.isCommander && (

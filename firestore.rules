@@ -54,6 +54,13 @@ service cloud.firestore {
         // eigener Zustand frei; bei Mitspielern nur Leben (z. B. „jeder Gegner verliert X“)
         allow update: if inRoom(r) && (request.auth.uid == p || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['life']));
       }
+      // Spielprotokoll: Mitspieler lesen; jeder schreibt nur eigene Einträge; nie ändern; löschen nur Mitspieler (Aufräumen)
+      match /log/{entryId} {
+        allow read: if inRoom(r);
+        allow create: if inRoom(r) && request.resource.data.uid == request.auth.uid;
+        allow update: if false;
+        allow delete: if inRoom(r);
+      }
     }
   }
 }
