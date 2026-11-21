@@ -358,6 +358,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
             for (const line of lines) {
                 const t = line.toLowerCase();
+                // „Whenever you cast …“ erledigt castTriggersFor (mit Filter/Manawert, direkt über dem Zauber)
+                if (/^\s*(?:[a-z][a-z' ]*\s+[—–-]\s+)?whenever you cast\b/.test(t)) continue;
 
                 // Determine trigger event
                 let event = null;
@@ -395,6 +397,72 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }
             }
             return triggers;
+        };
+
+        // Effektive Stärke/Widerstand: Grundwerte plus +1/+1- und minus -1/-1-Marker (für Kampf und Anzeige)
+        const counterSum = (card, type) => (card?.counters || []).filter(c => c.type === type).reduce((s, c) => s + (Number(c.count) || 0), 0);
+        const effectivePT = (card) => {
+            const [p, t] = getPT(card);
+            const d = counterSum(card, '+1/+1') - counterSum(card, '-1/-1');
+            return [p + d, t + d];
+        };
+        const hasPTData = (card) => !!(card && (card.p_t || (card.power !== undefined && card.power !== null) || (card.toughness !== undefined && card.toughness !== null)));
+
+        // Manawert des gewirkten Zaubers (gewählte Seite einer doppelseitigen Karte, sonst cmc bzw. Manakosten)
+        const manaCostValue = (cost) => [...String(cost || '').matchAll(/\{([^}]+)\}/g)].reduce((s, [, x]) => s + (/^\d+$/.test(x) ? Number(x) : /^[XYZ]$/i.test(x) ? 0 : 1), 0);
+        const manaValueOf = (card) => {
+            if (!card) return 0;
+            if (card.faceIndex != null && card.mana_cost) return manaCostValue(card.mana_cost);
+            if (card.cmc !== undefined && card.cmc !== null && !isNaN(Number(card.cmc))) return Number(card.cmc);
+            return manaCostValue(card.mana_cost || card.card_faces?.[0]?.mana_cost || '');
+        };
+        const spellColorsOf = (card) => {
+            const cost = card?.faceIndex != null ? card?.mana_cost : (card?.mana_cost || card?.card_faces?.[0]?.mana_cost);
+            const fromCost = [...new Set([...String(cost || '').matchAll(/\{([^}]+)\}/g)].flatMap(([, x]) => (x.match(/[WUBRG]/g) || [])))];
+            return fromCost.length ? fromCost : (Array.isArray(card?.colors) ? card.colors : []);
+        };
+
+        // Einfache Effekte aus einem Regeltext-Satz: Schaden an jeden Gegner, Leben, Karten ziehen, Token.
+        // Bedingte/optionale Sätze („if“, „you may“) werden nicht automatisch ausgeführt (nur Erinnerung).
+        const WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+        const toNum = (x) => /^\d+$/.test(x) ? Number(x) : (WORD_NUM[String(x).toLowerCase()] || 0);
+        const parseSimpleEffects = (text) => {
+            const t = String(text || '').toLowerCase();
+            if (!t || /\byou may\b|\bif\b|\bunless\b|\bx\b/.test(t)) return [];
+            const out = [];
+            let m;
+            if ((m = t.match(/deals? (\d+|one|two|three|four|five) damage to each opponent/))) out.push({ effect: 'damage_each_opp', amount: toNum(m[1]) });
+            if ((m = t.match(/each opponent loses (\d+|one|two|three|four|five) life/))) out.push({ effect: 'opp_lose_life', amount: toNum(m[1]) });
+            if ((m = t.match(/(?:^|\band |, |\. )(?:you )?gain (\d+|one|two|three|four|five) life/))) out.push({ effect: 'gain_life', amount: toNum(m[1]) });
+            if ((m = t.match(/(?:^|\band |, |\. |\bthen )(?:you )?draw (a|an|one|two|three|four|five|\d+) cards?/))) out.push({ effect: 'draw', amount: toNum(m[1]) || 1 });
+            if (/\bcreate\b[^.]*\btokens?\b/.test(t)) out.push({ effect: 'token', amount: 0 });
+            return out.filter(e => e.effect === 'token' || e.amount > 0);
+        };
+        const EFFECT_LABEL = { damage_each_opp: (n) => `${n} Schaden an jeden Gegner`, opp_lose_life: (n) => `jeder Gegner verliert ${n} Leben`, gain_life: (n) => `+${n} Leben`, draw: (n) => `zieht ${n} Karte${n > 1 ? 'n' : ''}`, token: () => 'Token' };
+
+        // „Whenever you cast a <Filter> spell [with mana value N or greater], <Effekt>“ eines Permanents → passt `spell`?
+        // Filter: noncreature, creature, instant or sorcery, instant, sorcery, artifact, enchantment, planeswalker,
+        // legendary, historic, multicolored, colorless, Farben, leer („a spell“). Unbekannte Filter lösen nicht aus.
+        const CAST_TRIGGER_RE = /^whenever you cast (?:an? )?(.*?)\bspells?\b(?: with (?:mana value|converted mana cost) (\d+) or (greater|more|less|fewer))?\s*,\s*(.+)$/i;
+        const COLOR_WORD = { white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' };
+        const spellWordOk = (w, tl, colors) => {
+            const has = (x) => new RegExp(`\\b${x}\\b`, 'i').test(tl);
+            if (w.startsWith('non')) { const r = spellWordOk(w.slice(3).replace(/^-/, ''), tl, colors); return r === null ? null : !r; }
+            if (['creature', 'instant', 'sorcery', 'artifact', 'enchantment', 'planeswalker', 'legendary', 'land', 'battle', 'tribal', 'kindred'].includes(w)) return has(w);
+            if (w === 'historic') return has('artifact') || has('legendary') || has('saga');
+            if (w === 'multicolored') return colors.length > 1;
+            if (w === 'monocolored') return colors.length === 1;
+            if (w === 'colorless') return colors.length === 0;
+            if (COLOR_WORD[w]) return colors.includes(COLOR_WORD[w]);
+            return null;
+        };
+        const spellFilterOk = (filter, spell) => {
+            const f = String(filter || '').toLowerCase().replace(/,/g, ' ').trim();
+            if (!f) return true;
+            const tl = curTypeLine(spell), colors = spellColorsOf(spell);
+            let unknown = false;
+            const ok = f.split(/\s+or\s+/).some(alt => alt.split(/\s+/).filter(Boolean).every(w => { const r = spellWordOk(w, tl, colors); if (r === null) unknown = true; return r === true; }));
+            return unknown ? false : ok;
         };
 
         // Used to decide how a permanent attaches to another card. Auras are dragged off the stack onto
@@ -636,19 +704,83 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             );
         };
 
-        // Simple Yes/No pregame-action popup shown to everyone once all mulligans are complete.
-        const PregameActionModal = ({ onAnswer }) => (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
-                <div className="bg-gray-800 border-2 border-yellow-500/60 rounded-xl shadow-2xl w-full max-w-md p-6 flex flex-col items-center gap-4">
-                    <h2 className="text-xl font-bold text-yellow-400 text-center">Hast du eine Aktion vor Spielbeginn?</h2>
-                    <p className="text-gray-400 text-sm text-center">z. B. eine Fähigkeit, die vor dem eigentlichen Spielbeginn wirkt (Leylines, Companions …).</p>
-                    <div className="flex gap-4 mt-2">
-                        <button onClick={() => onAnswer(true)} className="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-6 py-3 rounded-lg shadow-lg">Ja</button>
-                        <button onClick={() => onAnswer(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold px-6 py-3 rounded-lg shadow-lg">Nein</button>
+        // Aktion vor Spielbeginn: Ja/Nein für alle, sobald alle Mulligans fertig sind. Erkannte Karten der Starthand
+        // (Leylines, Gemstone Caverns, Chancellors …) werden gelistet; nach „Ja“ lassen sie sich direkt ausführen.
+        const PregameActionModal = ({ onAnswer, candidates = [], hand = [], onPerform, onExileFromHand, isStartingPlayer = false }) => {
+            const [stage, setStage] = useState('ask'); // 'ask' | 'act' | { exileFor: card }
+            const [done, setDone] = useState({});
+            const btn = 'font-bold px-3 py-1.5 rounded text-xs shadow';
+            const label = (a) => a.type === 'battlefield' ? (a.counter ? `Aufs Spielfeld (${COUNTER_DE[a.counter] || a.counter}-Marker)` : 'Aufs Spielfeld') : a.type === 'reveal' ? 'Aufdecken' : null;
+            return (
+                <div data-testid="pregame-modal" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+                    <div className="bg-gray-800 border-2 border-yellow-500/60 rounded-xl shadow-2xl w-full max-w-lg p-6 flex flex-col items-center gap-4">
+                        {stage === 'ask' && <>
+                            <h2 className="text-xl font-bold text-yellow-400 text-center">Hast du eine Aktion vor Spielbeginn?</h2>
+                            <p className="text-gray-400 text-sm text-center">z. B. eine Fähigkeit, die vor dem eigentlichen Spielbeginn wirkt (Leylines, Companions …).</p>
+                            {candidates.length > 0 && <p className="text-yellow-200 text-xs text-center">In deiner Starthand: {candidates.map(c => cardName(c.card)).join(', ')}</p>}
+                            <div className="flex gap-4 mt-2">
+                                <button onClick={() => (candidates.length ? setStage('act') : onAnswer(true))} className="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-6 py-3 rounded-lg shadow-lg">Ja</button>
+                                <button onClick={() => onAnswer(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold px-6 py-3 rounded-lg shadow-lg">Nein</button>
+                            </div>
+                        </>}
+                        {stage === 'act' && <>
+                            <h2 className="text-lg font-bold text-yellow-400 text-center">Aktionen vor Spielbeginn</h2>
+                            <div className="flex flex-col gap-2 w-full max-h-[55vh] overflow-y-auto">
+                                {candidates.map(({ card, action }) => (
+                                    <div key={card.instanceId} className="flex items-center gap-3 bg-gray-900/60 rounded-lg p-2 border border-solid border-yellow-700/40">
+                                        <img src={card.image_url} alt={cardName(card)} className="w-14 rounded" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-yellow-200 text-sm font-bold truncate">{cardName(card)}</div>
+                                            <div className="text-gray-400 text-[10px] leading-snug">{action.sentence}</div>
+                                        </div>
+                                        {done[card.instanceId] ? <span className="text-green-400 text-xs font-bold">✓ erledigt</span>
+                                            : (isStartingPlayer && /not the starting player/i.test(action.sentence)) ? <span className="text-gray-500 text-[10px] text-right">nur, wenn du nicht beginnst</span>
+                                            : label(action) ? <button onClick={() => { setDone(d => ({ ...d, [card.instanceId]: true })); onPerform(card, action); if (action.exileFromHand) setStage({ exileFor: card }); }} className={`${btn} bg-yellow-600 hover:bg-yellow-500 text-white`}>{label(action)}</button>
+                                            : <span className="text-gray-500 text-[10px]">von Hand</span>}
+                                    </div>
+                                ))}
+                            </div>
+                            <button onClick={() => onAnswer(true)} className="bg-green-600 hover:bg-green-500 text-white font-bold px-6 py-2.5 rounded-lg shadow-lg">Fertig</button>
+                        </>}
+                        {stage?.exileFor && <>
+                            <h2 className="text-lg font-bold text-yellow-400 text-center">{cardName(stage.exileFor)}: eine Handkarte ins Exil</h2>
+                            <div className="flex gap-2 flex-wrap justify-center max-h-[55vh] overflow-y-auto">
+                                {hand.filter(c => c.instanceId !== stage.exileFor.instanceId).map(c => (
+                                    <img key={c.instanceId} src={c.image_url} alt={cardName(c)} title={cardName(c)} data-testid="pregame-exile-pick"
+                                        onClick={() => { onExileFromHand(c); setStage('act'); }}
+                                        className="w-20 rounded shadow-lg border border-solid border-gray-600 hover:border-yellow-400 cursor-pointer" />
+                                ))}
+                            </div>
+                        </>}
+                    </div>
+                </div>
+            );
+        };
+        const COUNTER_DE = { luck: 'Glück', charge: 'Ladung', oil: 'Öl', shield: 'Schild', stun: 'Betäubung' };
+
+        // Commander-Regel 903.9: Commander liegt bereits in der Zielzone – zurück in die Commander-Zone (Standard) oder dort lassen?
+        const CMD_ZONE_TO = { graveyard: 'in den Friedhof', exile: 'ins Exil', hand: 'auf die Hand', library: 'in die Bibliothek' };
+        const CommanderChoiceModal = ({ entry, card, onChoose }) => {
+            // Mehrere Commander nacheinander (Partner): der Klick/das Enter, das die vorige Frage beantwortet hat, darf
+            // nicht gleich die nächste beantworten – kurz nach dem Erscheinen werden Eingaben ignoriert.
+            const shownAt = useRef(Date.now());
+            const choose = (toCmd) => { if (Date.now() - shownAt.current < 400) return; onChoose(toCmd); };
+            // Leertaste ist am Tisch „Weiter“ – sie soll hier nicht versehentlich den fokussierten Standard-Button auslösen (Enter schon)
+            const noSpace = (e) => { if (e.key === ' ' || e.code === 'Space') e.preventDefault(); };
+            return (
+            <div data-testid="cmd-choice" style={{ zIndex: 650 }} onKeyDown={noSpace} onKeyUp={noSpace} className="fixed inset-0 flex items-center justify-center bg-black/80 p-4">
+                <div className="bg-gray-900 border-2 border-solid border-yellow-500/70 rounded-xl shadow-2xl w-full max-w-md p-5 flex flex-col items-center gap-3">
+                    {card?.image_url && <img src={card.image_url} alt={entry.name} className="w-28 rounded shadow-lg border border-solid border-yellow-600/60" />}
+                    <h2 className="text-lg font-bold text-yellow-400 text-center">Commander {entry.name}: In die Commander-Zone oder {CMD_ZONE_TO[entry.zone] || entry.zone}?</h2>
+                    <p className="text-gray-400 text-xs text-center">Commander-Regel: Du darfst deinen Commander statt {CMD_ZONE_TO[entry.zone] || entry.zone} in die Commander-Zone legen.</p>
+                    <div className="flex gap-3 mt-1">
+                        <button autoFocus onClick={() => choose(true)} className="bg-yellow-500 hover:bg-yellow-400 text-gray-950 font-bold px-5 py-2.5 rounded-lg shadow-lg">Commander-Zone</button>
+                        <button onClick={() => choose(false)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold px-5 py-2.5 rounded-lg">{CMD_ZONE_LABEL[entry.zone] || entry.zone}</button>
                     </div>
                 </div>
             </div>
-        );
+            );
+        };
 
         // Shown to a player who just received an Aura token (e.g. a Role) and needs to pick which of their
         // own creatures it enchants. Auras can't just sit loose on the battlefield like a normal token.
@@ -1296,7 +1428,29 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         // Compact per-opponent tile used in the multiplayer grid (3-4 player tables).
         // Unlike the single 2-player layout, battlefield cards here are laid out in a simple flow
         // (not free x/y positioning) since each tile only gets a fraction of the screen.
-        const OpponentTile = ({ name, state, isActivePlayer, isChoosingMulligan, isExpanded, onClick, onHoverCard, myCommanders }) => {
+        // Karte in einer Gegner-Kachel (3–4 Spieler): Bild, effektive Stärke/Widerstand und Marker wie auf dem großen
+        // Spielfeld; während einer Aura-Zielwahl golden markiert und anklickbar.
+        const TileCard = ({ card, sizeClass, onHoverCard, auraValid, onAuraPick, zone }) => {
+            const [p, t] = effectivePT(card);
+            const showPT = isCreatureLike(card) && hasPTData(card);
+            const counters = (card.counters || []).filter(c => c && c.count);
+            return (
+                <div className="relative flex-shrink-0" data-aura-target={auraValid ? '1' : undefined} data-tile-card={card.instanceId}
+                    onClick={(e) => { if (onAuraPick && onAuraPick(card, zone, auraValid)) e.stopPropagation(); }}>
+                    <CardImage src={card.image_url} className={`${sizeClass} card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
+                        onMouseEnter={(e) => { e.stopPropagation(); onHoverCard(card.image_url); }}
+                        onMouseLeave={() => onHoverCard(null)} />
+                    {showPT && <span data-testid="tile-pt" style={{ position: 'absolute', right: 1, bottom: 1, background: t <= 0 ? '#7f1d1d' : 'rgba(0,0,0,0.85)', color: 'white', fontSize: 9, fontWeight: 'bold', lineHeight: 1.2, padding: '0 3px', borderRadius: 3, pointerEvents: 'none' }}>{p}/{t}</span>}
+                    {counters.length > 0 && (
+                        <div data-testid="tile-counters" style={{ position: 'absolute', left: 1, top: 1, display: 'flex', flexDirection: 'column', gap: 1, pointerEvents: 'none' }}>
+                            {counters.map((c, i) => <span key={`${c.type}-${i}`} title={`${c.type}: ${c.count}`} style={{ background: 'rgba(30,27,75,0.92)', border: '1px solid #a5b4fc', color: '#e0e7ff', fontSize: 8, fontWeight: 'bold', lineHeight: 1.1, padding: '0 2px', borderRadius: 3, whiteSpace: 'nowrap' }}>{c.type}{c.count > 1 || /\d/.test(c.type) ? ` ×${c.count}` : ''}</span>)}
+                        </div>
+                    )}
+                    {auraValid && <div className="absolute inset-0 rounded-lg pointer-events-none" style={{ border: '2px solid #facc15', boxShadow: '0 0 10px 3px rgba(250,204,21,0.75)' }} />}
+                </div>
+            );
+        };
+        const OpponentTile = ({ name, state, isActivePlayer, isChoosingMulligan, isExpanded, onClick, onHoverCard, myCommanders, auraValidFor, onAuraPick, onReanimate }) => {
             const [viewingZoneLocal, setViewingZoneLocal] = React.useState(null); // 'graveyard' | 'exile' | null
             if (!state) {
                 return (
@@ -1306,6 +1460,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 );
             }
             const battlefieldCards = [...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])];
+            const zoneOf = (card) => (state.battlefieldUpper || []).some(c => c.instanceId === card.instanceId) ? 'battlefieldUpper' : 'battlefieldLower';
             const cardSizeClass = isExpanded ? 'w-20 h-28' : 'w-12 h-16';
             return (
                 <div 
@@ -1361,9 +1516,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             <div className="flex flex-nowrap overflow-hidden">
                                 {(() => { const cr = [...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])].filter(c => getCardZoneType(c) === 'creature'); return cr.map((card, i) => (
                                     <div key={card.instanceId} className="relative" style={{ flex: i === cr.length - 1 ? '0 0 auto' : '0 1 auto', minWidth: 8, paddingRight: 2 }}>
-                                        <CardImage src={card.image_url} className={`${cardSizeClass} card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
-                                            onMouseEnter={(e) => { e.stopPropagation(); onHoverCard(card.image_url); }}
-                                            onMouseLeave={() => onHoverCard(null)} />
+                                        <TileCard card={card} sizeClass={cardSizeClass} onHoverCard={onHoverCard} auraValid={!!auraValidFor?.(card)} onAuraPick={onAuraPick} zone={zoneOf(card)} />
                                     </div>
                                 )); })()}
                             </div>
@@ -1374,9 +1527,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <div className="text-[7px] text-yellow-400/40 font-bold uppercase">Länder</div>
                                 <div className="flex flex-wrap gap-0.5">
                                     {[...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])].filter(c => getCardZoneType(c) === 'land').map(card => (
-                                        <CardImage key={card.instanceId} src={card.image_url} className={`${cardSizeClass} card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
-                                            onMouseEnter={(e) => { e.stopPropagation(); onHoverCard(card.image_url); }}
-                                            onMouseLeave={() => onHoverCard(null)} />
+                                        <TileCard key={card.instanceId} card={card} sizeClass={cardSizeClass} onHoverCard={onHoverCard} auraValid={!!auraValidFor?.(card)} onAuraPick={onAuraPick} zone={zoneOf(card)} />
                                     ))}
                                 </div>
                             </div>
@@ -1384,9 +1535,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <div className="text-[7px] text-red-300/40 font-bold uppercase">PW</div>
                                 <div className="flex flex-wrap gap-0.5">
                                     {[...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])].filter(c => getCardZoneType(c) === 'planeswalker').map(card => (
-                                        <CardImage key={card.instanceId} src={card.image_url} className={`${cardSizeClass} card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
-                                            onMouseEnter={(e) => { e.stopPropagation(); onHoverCard(card.image_url); }}
-                                            onMouseLeave={() => onHoverCard(null)} />
+                                        <TileCard key={card.instanceId} card={card} sizeClass={cardSizeClass} onHoverCard={onHoverCard} auraValid={!!auraValidFor?.(card)} onAuraPick={onAuraPick} zone={zoneOf(card)} />
                                     ))}
                                 </div>
                             </div>
@@ -1397,9 +1546,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <div className="text-[7px] text-purple-400/40 font-bold uppercase">Verzaubern</div>
                                 <div className="flex flex-wrap gap-0.5">
                                     {[...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])].filter(c => getCardZoneType(c) === 'enchantment').map(card => (
-                                        <CardImage key={card.instanceId} src={card.image_url} className={`${cardSizeClass} card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
-                                            onMouseEnter={(e) => { e.stopPropagation(); onHoverCard(card.image_url); }}
-                                            onMouseLeave={() => onHoverCard(null)} />
+                                        <TileCard key={card.instanceId} card={card} sizeClass={cardSizeClass} onHoverCard={onHoverCard} auraValid={!!auraValidFor?.(card)} onAuraPick={onAuraPick} zone={zoneOf(card)} />
                                     ))}
                                 </div>
                             </div>
@@ -1407,9 +1554,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                 <div className="text-[7px] text-orange-400/40 font-bold uppercase">Artefakte</div>
                                 <div className="flex flex-wrap gap-0.5">
                                     {[...(state.battlefieldUpper || []), ...(state.battlefieldLower || [])].filter(c => getCardZoneType(c) === 'artifact').map(card => (
-                                        <CardImage key={card.instanceId} src={card.image_url} className={`${cardSizeClass} card-shadow ${card.isTapped ? 'tapped' : 'untapped'}`}
-                                            onMouseEnter={(e) => { e.stopPropagation(); onHoverCard(card.image_url); }}
-                                            onMouseLeave={() => onHoverCard(null)} />
+                                        <TileCard key={card.instanceId} card={card} sizeClass={cardSizeClass} onHoverCard={onHoverCard} auraValid={!!auraValidFor?.(card)} onAuraPick={onAuraPick} zone={zoneOf(card)} />
                                     ))}
                                 </div>
                             </div>
@@ -1471,15 +1616,20 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                     ) : (
                                         <div className="flex flex-wrap gap-2 justify-center">
                                             {((viewingZoneLocal === 'graveyard' ? state.graveyard : state.exile) || []).map(card => (
-                                                <img
-                                                    key={card.instanceId}
-                                                    src={card.image_url}
-                                                    alt={card.name}
-                                                    title={card.name}
-                                                    className="w-24 rounded shadow-lg border border-gray-600 hover:border-white transition-colors cursor-default"
-                                                    onMouseEnter={() => onHoverCard(card.image_url)}
-                                                    onMouseLeave={() => onHoverCard(null)}
-                                                />
+                                                <div key={card.instanceId} className="flex flex-col items-center gap-1 w-24">
+                                                    <img
+                                                        src={card.image_url}
+                                                        alt={card.name}
+                                                        title={card.name}
+                                                        className="w-24 rounded shadow-lg border border-gray-600 hover:border-white transition-colors cursor-default"
+                                                        onMouseEnter={() => onHoverCard(card.image_url)}
+                                                        onMouseLeave={() => onHoverCard(null)}
+                                                    />
+                                                    {onReanimate && (
+                                                        <button onClick={(e) => { e.stopPropagation(); onHoverCard(null); setViewingZoneLocal(null); onReanimate(card, viewingZoneLocal); }}
+                                                            className="bg-purple-700 hover:bg-purple-600 text-white text-[10px] font-bold px-1.5 py-1 rounded w-full leading-tight" title={`Unter deine Kontrolle; ${name} bleibt Besitzer`}>Aufs eigene Spielfeld (reanimieren)</button>
+                                                    )}
+                                                </div>
                                             ))}
                                         </div>
                                     )}
@@ -2057,7 +2207,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 c.instanceId !== vehicle.instanceId
             );
 
-            const totalPower = selected.reduce((s, c) => s + getPT(c)[0], 0);
+            const totalPower = selected.reduce((s, c) => s + effectivePT(c)[0], 0);
             const ready = totalPower >= needed;
 
             const toggle = (c) => setSelected(prev =>
@@ -2112,6 +2262,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         // turn zählt die Züge am Tisch (1 = erster Zug des Spiels, 0 = Altspiel ohne Phasen), player ist der
         // aktive Spieler, für den die Phase gilt. Fehlt das Feld (oder passt player nicht zu activePlayer),
         // gilt „Hauptphase 1“ – so laufen alte Spiele weiter.
+        // Commander-Wahl: Zielzone (moveCardToZone) → Zone im Spielstand, Beschriftungen
+        const CMD_ASK_ZONES = { graveyard: 'graveyard', exile: 'exile', hand: 'hand', library_top: 'library', library_bottom: 'library' };
+        const CMD_ZONE_LABEL = { graveyard: 'Friedhof', exile: 'Exil', hand: 'Hand', library: 'Bibliothek' };
+        const CMD_ZONE_IN = { graveyard: 'im Friedhof', exile: 'im Exil', hand: 'auf der Hand', library: 'in der Bibliothek' };
         const PHASE_STEPS = ['untap', 'upkeep', 'draw', 'main1', 'combat_begin', 'combat_attack', 'combat_block', 'combat_damage', 'combat_end', 'main2', 'end', 'cleanup'];
         const PHASE_LABEL = { untap: 'Enttappen', upkeep: 'Versorgung', draw: 'Ziehen', main1: 'Hauptphase 1', combat_begin: 'Beginn des Kampfes', combat_attack: 'Angreifer erklären', combat_block: 'Blocker erklären', combat_damage: 'Kampfschaden', combat_end: 'Kampfende', main2: 'Hauptphase 2', end: 'Endschritt', cleanup: 'Aufräumen' };
         const PHASE_SHORT = { untap: 'Enttap.', upkeep: 'Versorg.', draw: 'Ziehen', main1: 'Haupt 1', combat_begin: 'Beginn', combat_attack: 'Angriff', combat_block: 'Blocker', combat_damage: 'Schaden', combat_end: 'Kampfende', main2: 'Haupt 2', end: 'Endschr.', cleanup: 'Aufr.' };
@@ -2230,6 +2384,41 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
         };
         const attachmentAttackHintsFor = (card) => hintSentences(card).filter(s => /whenever (equipped|enchanted) creature attacks/i.test(s)).map(s => ({ sentence: s, reason: 'Angriff (Träger)' }));
         const combatEnterHintsFor = (card) => hintSentences(card).filter(s => /during combat/i.test(s) && /\benters?\b/i.test(s)).map(s => ({ sentence: s, reason: 'Kreatur kam im Kampf ins Spiel' }));
+        // Zauberauslöser eines Permanents für den gewirkten Zauber: [{ sentence, effects, clause }]
+        const castTriggersFor = (perm, spell) => {
+            if (!perm || !spell || perm.instanceId === spell.instanceId) return [];
+            const out = [];
+            hintSentences(perm).forEach(s => {
+                // Fähigkeitswort davor („Magecraft — Whenever you cast …“) abtrennen
+                const m = s.replace(/^[A-Za-z][A-Za-z' ]*\s+[—–-]\s+/, '').match(CAST_TRIGGER_RE);
+                if (!m) return;
+                // Magecraft: „Whenever you cast or copy an instant or sorcery spell“ → Filter ohne „or copy“
+                if (!spellFilterOk(m[1].replace(/^or copy (?:an? )?/i, ''), spell)) return;
+                if (m[2]) {
+                    const n = Number(m[2]), mv = manaValueOf(spell);
+                    if (/greater|more/i.test(m[3]) ? mv < n : mv > n) return;
+                }
+                out.push({ sentence: s, clause: m[4], effects: parseSimpleEffects(m[4]) });
+            });
+            return out;
+        };
+        // „… if a player/an opponent lost N or more life this turn …“ → { who, n } oder null
+        const lifeLostCondition = (s) => {
+            const m = String(s).match(/if (a player|an opponent|you) lost (\d+|one|two|three|four|five|six|seven|eight|nine|ten) or more life this turn/i);
+            return m ? { who: m[1].toLowerCase(), n: toNum(m[2]) } : null;
+        };
+        // Aktion „vor Spielbeginn“ einer Handkarte (Leylines, Gemstone Caverns, Chancellors …) oder null
+        const pregameActionOf = (card) => {
+            const t = String(getOracleTextForParsing(card) || '').replace(/\([^)]*\)/g, '');
+            const s = t.split(/\n+/).find(l => /opening hand/i.test(l));
+            if (!s) return null;
+            if (/begin the game with (?:it|this card|[^.]+?) on the battlefield/i.test(s)) {
+                const counter = (s.match(/with an? ([a-z]+) counter on it/i) || [])[1] || null;
+                return { type: 'battlefield', counter, exileFromHand: /exile a card from your hand/i.test(s), sentence: s.trim() };
+            }
+            if (/\breveal\b/i.test(s)) return { type: 'reveal', sentence: s.trim(), mana: /first main phase/i.test(s) };
+            return { type: 'other', sentence: s.trim() };
+        };
 
         // Phasenleiste („Leiste 3“): fünf Blöcke in einer Reihe, der aktive klappt seine Schritte auf.
         const PhaseBar = ({ step, ownerName, canControl, lockTitle, onJump, onNext, nextDisabled, nextTitle, extra, flash }) => {
@@ -2646,6 +2835,16 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 if (kind) entry.kind = kind;
                 addDoc(collection(db, 'arena_rooms', roomId, 'log'), entry).catch(() => {});
             };
+            // Aufgedeckte Karten (z. B. vor Spielbeginn) der Mitspieler kurz als Hinweis zeigen
+            const revealSeenRef = useRef({ at: Date.now(), ids: new Set() });
+            useEffect(() => {
+                const r = revealSeenRef.current;
+                logEntries.forEach(e => {
+                    if (e.kind !== 'reveal' || e.uid === user.uid || r.ids.has(e.id) || (e.at || 0) < r.at - 60000) return;
+                    r.ids.add(e.id);
+                    addToast(`👁 ${e.name}: ${e.text}`, 'purple');
+                });
+            }, [logEntries]);
             // Gezogene Karten zusammenfassen (nie Namen): „zieht 3 Karten“
             const drawLogRef = useRef({ n: 0, t: null });
             const noteDraw = (n = 1, suffix = '') => {
@@ -2710,6 +2909,32 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     });
             };
 
+            // Anfragen an Spieler, die den Tisch verlassen haben, würde niemand mehr abarbeiten: der erste noch anwesende
+            // Spieler (Sitzreihenfolge) entfernt sie per Transaktion aus allen Warteschlangen. Karten, die an einen
+            // gegangenen Besitzer zurück sollten, verlassen das Spiel (Protokollnotiz).
+            const REQUEST_FIELDS = ['attachRequests', 'tokenRequests', 'auraFallRequests', 'returnRequests', 'reanimateRequests', 'deathRequests', 'damageRequests', 'loyaltyRequests'];
+            const presentNow = lobbyState?.players || [];
+            const staleReqSig = lobbyState?.seatOrder ? REQUEST_FIELDS.map(f => (lobbyState?.[f] || []).filter(r => r?.targetPlayerId && !presentNow.includes(r.targetPlayerId)).map(r => r.id).join(',')).join('') : '';
+            const queueCleaner = (lobbyState?.seatOrder || []).find(id => presentNow.includes(id)) || presentNow[0];
+            useEffect(() => {
+                if (!staleReqSig || queueCleaner !== user.uid) return;
+                runTx(async (tx) => {
+                    const snap = await tx.get(roomRef);
+                    if (!snap.exists()) return [];
+                    const r = snap.data(), pl = r.players || [];
+                    const patch = {}, dropped = [];
+                    REQUEST_FIELDS.forEach(f => {
+                        const arr = r[f] || [];
+                        const gone = arr.filter(x => x?.targetPlayerId && !pl.includes(x.targetPlayerId));
+                        if (gone.length) { patch[f] = arr.filter(x => !gone.includes(x)); gone.forEach(x => dropped.push({ f, x })); }
+                    });
+                    if (Object.keys(patch).length) tx.update(roomRef, patch);
+                    return dropped;
+                }).then(dropped => (dropped || []).forEach(({ f, x }) => {
+                    if (f === 'returnRequests' && x.card) logEvent(`${cardName(x.card)} verlässt das Spiel – Besitzer ist nicht mehr am Tisch`, [x.card]);
+                })).catch(() => {});
+            }, [staleReqSig, queueCleaner]);
+
             // Karte verlässt das Spielfeld: Vorderseite, keine Marker außer Loyalität, Anhänge lösen.
             // Auren gehen in den Friedhof IHRES Besitzers, Ausrüstung bleibt lose auf meinem Feld liegen.
             const cleanLeaving = (card) => {
@@ -2736,6 +2961,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             };
             const returnToOwner = (card, zone) => {
                 const req = returnRequestFor(card, zone), c = req.card;
+                // Besitzer hat den Tisch verlassen: die Karte verlässt das Spiel (Regel 800.4a) – nur Protokoll
+                if (!(lobbyState?.players || []).includes(card.ownerId)) {
+                    addToast(`🚪 ${cardName(c)} verlässt das Spiel (Besitzer ist nicht mehr am Tisch)`, 'blue');
+                    logEvent(`${cardName(c)} verlässt das Spiel – Besitzer ${getPlayerName(card.ownerId)} ist nicht mehr am Tisch`, [c]);
+                    return;
+                }
                 pushRoomRequest('returnRequests', req);
                 addToast(`↩ ${cardName(c)} geht an ${getPlayerName(card.ownerId)} zurück`, 'blue');
             };
@@ -2785,7 +3016,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
 
             // Builds a placeholder-image token the same way createTokens does, for use inside hooks that run
             // before createTokens itself is defined further down (see the token-request listener below).
-            const buildPlaceholderTokens = ({ name, stats, quantity, colors, ability }) => {
+            const buildPlaceholderTokens = ({ name, stats, quantity, colors, ability }, idPrefix = null) => {
                 const bfWidth = playerLowerBattlefieldRef.current?.clientWidth || window.innerWidth;
                 const bfHeight = playerLowerBattlefieldRef.current?.clientHeight || 300;
                 const tokens = [];
@@ -2797,7 +3028,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     const labelLine2 = stats ? stats : (ability || '');
                     const placeholderUrl = `https://placehold.co/200x280/444/FFF?text=${encodeURIComponent(name)}\n${encodeURIComponent(labelLine2)}`;
                     tokens.push({
-                        instanceId: generateId(), name, p_t: stats || null, colors, ability: ability || null,
+                        // feste IDs je Anfrage: dieselbe Anfrage kann nie zwei Token-Sätze erzeugen
+                        instanceId: idPrefix ? `${idPrefix}-${i}` : generateId(), name, p_t: stats || null, colors, ability: ability || null,
                         image_url: placeholderUrl, isTokenPlaceholder: true, isTapped: false, isToken: true,
                         counters: [], x, y
                     });
@@ -2808,24 +3040,39 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // Watches for incoming token requests addressed to ME. Plain tokens get created immediately on
             // my battlefield. Aura tokens (Role tokens etc.) instead pop up a "choose a creature to enchant"
             // prompt - they can't just be dropped loose, they need a target the moment they're created.
+            // Doppelt angewendete Anfragen (dieselbe Anfrage zweimal in der Warteschlange, zwei Fenster/Geräte desselben
+            // Spielers, alte Clients ohne Transaktion) erkennt reqDone (zuletzt erledigte Anfrage-IDs im eigenen Zustand)
+            // – zusätzlich bekommen die Token feste IDs aus der Anfrage-ID.
             useEffect(() => {
                 processRequests('tokenRequests', (mine, d) => {
-                    const auraSpecs = [], tokens = [];
-                    mine.forEach(r => { if (r.tokenSpec?.isAura) auraSpecs.push(r.tokenSpec); else if (r.tokenSpec) tokens.push(...buildPlaceholderTokens(r.tokenSpec)); });
-                    return {
-                        state: tokens.length ? { battlefieldLower: [...(d.battlefieldLower || []), ...tokens] } : {},
-                        after: () => auraSpecs.forEach(s => setAuraAttachPrompt(s)),
-                    };
+                    const done = new Set(d.reqDone || []);
+                    const onBf = new Set([...(d.battlefieldLower || []), ...(d.battlefieldUpper || [])].map(c => c.instanceId));
+                    const auraSpecs = [], tokens = [], ids = [];
+                    mine.forEach(r => {
+                        if (!r.tokenSpec || (r.id && (done.has(r.id) || onBf.has(`tk${r.id}-0`)))) return;
+                        if (r.id) { done.add(r.id); ids.push(r.id); }
+                        if (r.tokenSpec.isAura) auraSpecs.push(r.tokenSpec);
+                        else tokens.push(...buildPlaceholderTokens(r.tokenSpec, r.id ? `tk${r.id}` : null));
+                    });
+                    const state = {};
+                    if (tokens.length) state.battlefieldLower = [...(d.battlefieldLower || []), ...tokens];
+                    if (ids.length) state.reqDone = [...(d.reqDone || []), ...ids].slice(-60);
+                    return { state, after: () => auraSpecs.forEach(s => setAuraAttachPrompt(s)) };
                 });
             }, [lobbyState?.tokenRequests, user.uid, !!myState]);
 
             // Watches for incoming "your Aura fell off a creature" notices (the host left someone ELSE's
             // battlefield) and puts the Aura into MY OWN graveyard, since I'm its owner.
             useEffect(() => {
-                processRequests('auraFallRequests', (mine, d) => ({
-                    state: { graveyard: [...mine.filter(r => r.card).map(r => resetFace(r.card)), ...(d.graveyard || [])] },
-                    after: () => addToast(`💀 ${mine.map(r => cardName(r.card)).join(', ')} → dein Friedhof`, 'red'),
-                }));
+                processRequests('auraFallRequests', (mine, d) => {
+                    const inGy = new Set((d.graveyard || []).map(c => c.instanceId));
+                    const cards = mine.filter(r => r.card && !inGy.has(r.card.instanceId)).map(r => resetFace(r.card));
+                    if (!cards.length) return {};
+                    return {
+                        state: { graveyard: [...cards, ...(d.graveyard || [])] },
+                        after: () => addToast(`💀 ${cards.map(cardName).join(', ')} → dein Friedhof`, 'red'),
+                    };
+                });
             }, [lobbyState?.auraFallRequests, user.uid, !!myState]);
 
             // Karten, die mir gehören und bei einem Mitspieler das Spielfeld verlassen (reanimiert, dann gestorben
@@ -2834,12 +3081,19 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 processRequests('returnRequests', (mine, d) => {
                     const upd = { graveyard: [...(d.graveyard || [])], exile: [...(d.exile || [])], hand: [...(d.hand || [])], library: [...(d.library || [])], commandZone: [...(d.commandZone || [])] };
                     const ZL = { graveyard: 'Friedhof', exile: 'Exil', hand: 'Hand', library_top: 'Bibliothek', library_bottom: 'Bibliothek', command: 'Commander-Zone' };
-                    const msgs = [];
+                    const msgs = [], pend = [], done = new Set(d.reqDone || []), ids = [];
+                    const have = new Set(['graveyard', 'exile', 'hand', 'library', 'commandZone', 'battlefieldLower', 'battlefieldUpper'].flatMap(z => (d[z] || []).map(c => c.instanceId)));
                     mine.forEach(r => {
                         if (!r.card) return;
+                        // schon angewendet (doppelt zugestellt) oder die Karte liegt schon bei mir → nicht verdoppeln
+                        if ((r.id && done.has(r.id)) || have.has(r.card.instanceId)) return;
+                        if (r.id) { done.add(r.id); ids.push(r.id); }
                         const c = { ...resetFace(r.card), isTapped: false };
                         delete c.ownerId; delete c.x; delete c.y;
-                        if (c.isCommander && (r.zone === 'graveyard' || r.zone === 'exile' || r.zone === 'command')) upd.commandZone.unshift({ ...c, counters: [] });
+                        if (c.isCommander && r.zone === 'command') upd.commandZone.unshift({ ...c, counters: [] });
+                        // Commander in Friedhof/Exil/Hand/Bibliothek: erst dorthin, dann entscheide ich (Regel 903.9)
+                        if (c.isCommander && r.zone !== 'command') pend.push({ instanceId: c.instanceId, name: cardName(c), zone: String(r.zone || 'graveyard').startsWith('library') ? 'library' : (r.zone || 'graveyard') });
+                        if (c.isCommander && r.zone === 'command') { /* schon erledigt */ }
                         else if (r.zone === 'exile') upd.exile.unshift(c);
                         else if (r.zone === 'hand') upd.hand.push(c);
                         else if (r.zone === 'library_top') upd.library.unshift(c);
@@ -2847,6 +3101,9 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         else upd.graveyard.unshift(c);
                         msgs.push(`↩ ${cardName(c)} kommt zu dir zurück (${ZL[r.zone] || 'Friedhof'})`);
                     });
+                    if (!ids.length && !msgs.length) return {};
+                    if (ids.length) upd.reqDone = [...(d.reqDone || []), ...ids].slice(-60);
+                    if (pend.length) upd.cmdPending = [...(d.cmdPending || []), ...pend];
                     return { state: upd, after: () => msgs.forEach(m => addToast(m, 'blue')) };
                 });
             }, [lobbyState?.returnRequests, user.uid, !!myState]);
@@ -2891,13 +3148,14 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         state: {
                             battlefieldLower: [...bfLower.filter(c => !deadIds.has(c.instanceId)), ...returned, ...shedEquip],
                             battlefieldUpper: bfUpper.filter(c => !deadIds.has(c.instanceId)),
-                            graveyard: [...normalDead.map(cleanLeaving), ...shedGy, ...(d.graveyard || [])],
-                            ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...cleanLeaving(c), counters: [] })), ...(d.commandZone || [])] } : {})
+                            // Commander erst in den Friedhof – der Besitzer (ich) entscheidet gleich im Fenster (Regel 903.9a)
+                            graveyard: [...normalDead.map(cleanLeaving), ...cmdDead.map(cleanLeaving), ...shedGy, ...(d.graveyard || [])],
+                            ...(cmdDead.length ? { cmdPending: [...(d.cmdPending || []), ...cmdDead.map(c => ({ instanceId: c.instanceId, name: cardName(c), zone: 'graveyard' }))] } : {})
                         },
                         push: { auraFallRequests: falls, returnRequests: returns },
                         after: () => {
                             foreignDead.forEach(c => addToast(`↩ ${cardName(c)} geht an ${getPlayerName(c.ownerId)} zurück`, 'blue'));
-                            if (cmdDead.length) addToast(`👑 ${cmdDead.map(c => c.name).join(', ')} zurück in die Commander-Zone`, 'blue');
+                            if (cmdDead.length) logEvent(`${cmdDead.map(cardName).join(', ')} stirbt (Commander)`, cmdDead);
                             if (normalDead.length) addToast(`💀 ${normalDead.map(c => c.name).join(', ')} → Friedhof`, 'red');
                             if (enduringCards.length) addToast(`♾️ ${enduringCards.map(c => c.name).join(', ')} kehrt als Verzauberung zurück`, 'purple');
                             normalDead.forEach(dead => { fireTriggers('dies', dead); fireTriggers('creature_dies', dead); });
@@ -2985,7 +3243,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 const key = turnKey;
                 if (myState.lastDrawKey === key || drawDoneRef.current === key) return;
                 drawDoneRef.current = key;
-                const skip = !!phase.first && (lobbyState?.players || []).length === 2;
+                // Regel 103.8a: nur im Zwei-Spieler-Spiel überspringt der Startspieler das Ziehen. Maßgeblich ist die
+                // Sitzordnung beim Spielstart (seatOrder), nicht wer gerade noch am Tisch sitzt; ohne Sitzordnung nie überspringen.
+                const seats = (lobbyState?.seatOrder || []).length;
+                const skip = !!phase.first && phase.turn === 1 && seats === 2;
                 runTx(async (tx) => {
                     const snap = await tx.get(myStateRef);
                     if (!snap.exists()) return 'retry';
@@ -3039,13 +3300,72 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 });
             };
             const myPermanents = () => [...(myState?.battlefieldLower || []), ...(myState?.battlefieldUpper || [])];
+            // Blocker-Schritt fertig (alle anwesenden Verteidiger haben gepasst / sind gegangen) → der Client des Angreifers
+            // schaltet automatisch in den Schadensschritt (siehe goToStep; Transaktion, nur vorwärts → nie doppelt).
+            const autoDamageRef = useRef(null);
+            const autoDamageFnRef = useRef(null);
+            const autoDamageKey = (() => {
+                const cbt = lobbyState?.combat;
+                if (!phase || curStep !== 'combat_block' || !cbt || cbt.attackerId !== user.uid || phase.player !== user.uid) return null;
+                const pl = lobbyState?.players || [];
+                // ohne Verteidiger (Solo-Tisch) bleibt es beim „Weiter“ von Hand
+                if (!Object.keys(cbt.priorities || {}).length) return null;
+                const pending = Object.entries(cbt.priorities || {}).filter(([id, v]) => v !== 'passed' && pl.includes(id));
+                if (cbt.phase !== 'resolving' && pending.length) return null;
+                return `${turnKey}:${(cbt.attackers || []).map(a => a.instanceId).join(',')}`;
+            })();
+            useEffect(() => {
+                if (!autoDamageKey || autoDamageRef.current === autoDamageKey) return;
+                autoDamageRef.current = autoDamageKey;
+                autoDamageFnRef.current?.();
+            }, [autoDamageKey]);
+            // Lebensverlust je Spieler in diesem Zug (für „if a player lost N or more life this turn“). Jeder Client
+            // beobachtet alle Lebenspunkte; den eigenen Verlust merkt er zusätzlich im Spielstand (lifeLost, übersteht Neuladen).
+            const lifeTrackRef = useRef({ key: null, last: {}, lost: {} });
+            const trackIds = [user.uid, ...opponentIds];
+            const lifeOf = (id) => id === user.uid ? myState?.life : opponentStates[id]?.life;
+            const lifeSig = trackIds.map(id => `${id}:${lifeOf(id)}`).join('|');
+            useEffect(() => {
+                const r = lifeTrackRef.current;
+                if (r.key !== turnKey) { r.key = turnKey; r.lost = {}; }
+                trackIds.forEach(id => {
+                    const v = lifeOf(id);
+                    if (typeof v !== 'number') return;
+                    const prev = r.last[id];
+                    if (typeof prev === 'number' && v < prev) r.lost[id] = (r.lost[id] || 0) + (prev - v);
+                    r.last[id] = v;
+                });
+                const mine = r.lost[user.uid] || 0;
+                const saved = myState?.lifeLost?.key === turnKey ? (myState.lifeLost.n || 0) : 0;
+                if (hasMyState && phase && mine > saved) updateDoc(myStateRef, { lifeLost: { key: turnKey, n: mine } }).catch(() => {});
+            }, [lifeSig, turnKey]);
+            const lifeLostThisTurn = (id) => {
+                const st = id === user.uid ? myState : opponentStates[id];
+                const saved = st?.lifeLost?.key === turnKey ? (st.lifeLost.n || 0) : 0;
+                return Math.max(saved, lifeTrackRef.current.key === turnKey ? (lifeTrackRef.current.lost[id] || 0) : 0);
+            };
             // Schrittbeginn: Versorgung, Ziehphase, Kampfbeginn, Endschritt
             useEffect(() => {
-                if (!phase || !hasMyState || !STEP_HINT_RULES[curStep]) return;
-                if (hintSeen('step:' + stepKey)) return;
+                if (!phase || !hasMyState) return;
                 const isMyTurn = phase.player === user.uid;
-                const found = [];
-                myPermanents().forEach(card => stepHintsFor(card, curStep, isMyTurn).forEach(h => found.push({ ...h, key: `${stepKey}:${card.instanceId}:${h.sentence}`, cardName: card.name, canDraw: hintCanDraw(h.sentence) })));
+                // vor Spielbeginn aufgedeckte Karten (Chancellor …): Erinnerung in meiner ersten Hauptphase bzw. ersten Versorgung
+                const preDue = (myState?.pregameReveals || []).filter(r => !r.done && ((r.when === 'main1' && curStep === 'main1' && isMyTurn) || (r.when === 'upkeep' && curStep === 'upkeep')));
+                if (!STEP_HINT_RULES[curStep] && !preDue.length) return;
+                if (hintSeen('step:' + stepKey)) return;
+                const found = preDue.map(r => ({ key: `pre:${r.instanceId}`, cardName: r.name, reason: 'Vor Spielbeginn aufgedeckt', sentence: r.sentence, canDraw: false }));
+                if (preDue.length) updateDoc(myStateRef, { pregameReveals: (myState.pregameReveals || []).map(r => preDue.some(p => p.instanceId === r.instanceId) ? { ...r, done: true } : r) }).catch(() => {});
+                myPermanents().forEach(card => stepHintsFor(card, curStep, isMyTurn).forEach(h => {
+                    // Bedingung „if a player lost N or more life this turn“: nur zeigen, wenn erfüllt
+                    const cond = lifeLostCondition(h.sentence);
+                    let reason = h.reason;
+                    if (cond) {
+                        const ids = cond.who === 'you' ? [user.uid] : cond.who === 'an opponent' ? opponentIds : trackIds;
+                        const who = ids.find(id => lifeLostThisTurn(id) >= cond.n);
+                        if (!who) return;
+                        reason = `${getPlayerName(who)} hat ${lifeLostThisTurn(who)} Leben verloren${hintCanDraw(h.sentence) ? ' – Karte ziehen' : ''}`;
+                    }
+                    found.push({ ...h, reason, key: `${stepKey}:${card.instanceId}:${h.sentence}`, cardName: card.name, canDraw: hintCanDraw(h.sentence) });
+                }));
                 pushHints(found);
             }, [stepKey, hasMyState]);
             // Angreifer erklärt (Kampf wechselt zu „blocking“): „Whenever … attacks“ meiner Angreifer
@@ -3357,6 +3677,41 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const submitPregameAction = (hasAction) => {
                 updateDoc(roomRef, { [`pregameAction.${user.uid}`]: hasAction });
             };
+            // Erkannte Aktionen vor Spielbeginn in meiner Starthand
+            const pregameCandidates = (myState.hand || []).map(card => ({ card, action: pregameActionOf(card) })).filter(x => x.action);
+            const performPregameAction = (card, action) => {
+                const fresh = (myState.hand || []).find(c => c.instanceId === card.instanceId);
+                if (!fresh) return;
+                if (action.type === 'battlefield') {
+                    const { x, y } = getDefaultSpawnPosition(frontFace(fresh));
+                    const counters = action.counter ? [{ type: COUNTER_DE[action.counter] || action.counter, count: 1 }] : [];
+                    const placed = { ...frontFace(fresh), isTapped: false, x, y, counters };
+                    runTx(async (tx) => {
+                        const snap = await tx.get(myStateRef);
+                        if (!snap.exists()) return;
+                        const d = snap.data();
+                        if (!(d.hand || []).some(c => c.instanceId === fresh.instanceId)) return;
+                        tx.update(myStateRef, { hand: d.hand.filter(c => c.instanceId !== fresh.instanceId), battlefieldLower: [...(d.battlefieldLower || []), placed] });
+                    }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+                    logEvent(`beginnt das Spiel mit ${cardName(placed)} auf dem Spielfeld${counters.length ? ` (${counters[0].type}-Marker)` : ''}`, [placed]);
+                    addToast(`✨ ${cardName(placed)} liegt zu Spielbeginn auf dem Spielfeld`, 'purple');
+                } else if (action.type === 'reveal') {
+                    logEvent(`deckt ${cardName(fresh)} auf (vor Spielbeginn)`, [fresh], 'reveal');
+                    addToast(`👁 Du deckst ${cardName(fresh)} auf`, 'purple');
+                    const when = /first main phase/i.test(action.sentence) ? 'main1' : /first upkeep/i.test(action.sentence) ? 'upkeep' : null;
+                    if (when) updateMyState({ pregameReveals: [...(myState.pregameReveals || []), { instanceId: fresh.instanceId, name: cardName(fresh), sentence: action.sentence, when }] });
+                }
+            };
+            const pregameExileFromHand = (card) => {
+                runTx(async (tx) => {
+                    const snap = await tx.get(myStateRef);
+                    if (!snap.exists()) return;
+                    const d = snap.data();
+                    if (!(d.hand || []).some(c => c.instanceId === card.instanceId)) return;
+                    tx.update(myStateRef, { hand: d.hand.filter(c => c.instanceId !== card.instanceId), exile: [card, ...(d.exile || [])] });
+                }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+                logEvent(`${cardName(card)}: Hand → Exil (vor Spielbeginn)`, [card]);
+            };
 
             // Whether every seated player has finished the mulligan phase / answered the pregame question.
             const allPlayersSeated = lobbyState?.seatOrder || [];
@@ -3426,7 +3781,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             };
             const getDefaultSpawnPosition = (card) => slotPercent(card);
 
-            const ZONE_LABEL = { battlefield: 'Spielfeld', battlefieldLower: 'Spielfeld', battlefieldUpper: 'Spielfeld', graveyard: 'Friedhof', exile: 'Exil', hand: 'Hand', library: 'Bibliothek', library_top: 'Bibliothek (oben)', library_bottom: 'Bibliothek (unten)', command: 'Commander-Zone', stack: 'Stack' };
+            const ZONE_LABEL = { none: 'Zone eines Mitspielers', battlefield: 'Spielfeld', battlefieldLower: 'Spielfeld', battlefieldUpper: 'Spielfeld', graveyard: 'Friedhof', exile: 'Exil', hand: 'Hand', library: 'Bibliothek', library_top: 'Bibliothek (oben)', library_bottom: 'Bibliothek (unten)', command: 'Commander-Zone', stack: 'Stack' };
             const ZONE_KEY = { hand: 'hand', graveyard: 'graveyard', exile: 'exile', library: 'library', library_top: 'library', library_bottom: 'library', command: 'commandZone', battlefieldLower: 'battlefieldLower', battlefieldUpper: 'battlefieldUpper' };
             // Entfernt die Karte aus ihrer Herkunftszone (in `updates`, damit mehrere Änderungen in EIN Schreiben gehen)
             const removeFrom = (updates, fromZone, id) => {
@@ -3470,6 +3825,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 
                 if (fromZone === 'hand') updates.hand = myState.hand.filter(c => c.instanceId !== card.instanceId);
                 else if (fromZone === 'command') {
+                    setTimeout(() => pushCastTriggers(card), 0); // Commander wirken = Zauber wirken
                     updates.commandZone = myState.commandZone.filter(c => c.instanceId !== card.instanceId);
                     // Each commander (e.g. each half of a Partner pair) taxes independently - only the one
                     // actually being cast gets its own counter bumped, the other Partner's stays untouched.
@@ -3502,15 +3858,42 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 // The stack is LIFO: whatever goes on last resolves first. New entries go at the FRONT of the
                 // array (index 0). Uses a transaction because two players can plausibly cast in quick succession.
                 const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: user.displayName || getDeckCommanderDisplayName(deck) || 'Spieler', timestamp: Date.now(), ...extra };
+                // „Whenever you cast …“-Auslöser meiner Permanents kommen in DERSELBEN Transaktion über den Zauber
+                const trig = castTriggerEntries(card);
                 runTx(async (tx) => {
                     const snap = await tx.get(roomRef);
                     const currentStack = snap.exists() ? (snap.data().stack || []) : [];
-                    tx.update(roomRef, { stack: [stackEntry, ...currentStack] });
+                    tx.update(roomRef, { stack: [...trig, stackEntry, ...currentStack] });
                 }).catch(err => addToast(`❌ ${err.message}`, 'red'));
                 updateMyState(removeFrom({}, fromZone, card.instanceId));
                 logEvent(`spielt ${cardName(card)}${fromZone !== 'hand' ? ` (aus ${fromZone === 'graveyard' ? 'dem Friedhof' : fromZone === 'exile' ? 'dem Exil' : fromZone === 'command' ? 'der Commander-Zone' : 'der Bibliothek'})` : ''}`, [card]);
-                // Fire "whenever you cast" triggers for instant/sorcery spells
-                setTimeout(() => fireCastTriggers(card), 50);
+                if (trig.length) { logEvent(`löst aus: ${trig.map(t => t.card.name).join(', ')}`); addToast(`⚡ ${trig.map(t => t.card.name).join(', ')} löst aus`, 'yellow'); }
+            };
+            // Zauberauslöser („Whenever you cast …“) meiner Permanents für `spell` als Stack-Einträge
+            const castTriggerEntries = (spell) => {
+                const entries = [];
+                myPermanents().forEach(perm => castTriggersFor(perm, spell).forEach(tr => {
+                    const eff = tr.effects || [];
+                    entries.push({
+                        instanceId: generateId(), isTrigger: true,
+                        triggerEffect: eff[0]?.effect || 'notify', triggerAmount: eff[0]?.amount || 0, triggerEffects: eff,
+                        triggerText: `${cardName(perm)}: ${tr.sentence}`, triggerClause: tr.clause, castOf: spell.instanceId,
+                        card: { name: cardName(perm), image_url: perm.image_url || '', instanceId: perm.instanceId, type_line: 'Triggered Ability' },
+                        ownerId: user.uid, ownerName: user.displayName || getDeckCommanderDisplayName(deck) || 'Spieler', timestamp: Date.now(),
+                    });
+                }));
+                return entries;
+            };
+            // Zauber, der nicht über castToStack läuft (Commander direkt aus der Commander-Zone): Auslöser trotzdem auf den Stack
+            const pushCastTriggers = (spell) => {
+                const trig = castTriggerEntries(spell);
+                if (!trig.length) return;
+                runTx(async (tx) => {
+                    const snap = await tx.get(roomRef);
+                    const currentStack = snap.exists() ? (snap.data().stack || []) : [];
+                    tx.update(roomRef, { stack: [...trig, ...currentStack] });
+                }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+                logEvent(`löst aus: ${trig.map(t => t.card.name).join(', ')}`);
             };
 
             // Entry point for the "Spielen" button on hand cards: lands go straight to the battlefield
@@ -3699,34 +4082,57 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             };
 
             // Resolves a triggered ability from the stack — applies its effect.
+            // Mehrere einfache Effekte (triggerEffects) nacheinander; unbekannte Effekte nur als Erinnerung.
             const resolveStackTrigger = (stackEntry) => {
                 removeFromStack(stackEntry.instanceId);
                 // Only the owner's client executes the effect
                 if (stackEntry.ownerId !== user.uid) return;
-                const { triggerEffect, triggerAmount } = stackEntry;
-                switch (triggerEffect) {
-                    case 'draw':
-                        if (myState.library.length >= triggerAmount) {
-                            updateMyState({ hand: [...myState.hand, ...myState.library.slice(0, triggerAmount)], library: myState.library.slice(triggerAmount) });
-                            noteDraw(triggerAmount);
-                        }
-                        addToast(`📖 ${triggerAmount} Karte${triggerAmount > 1 ? 'n' : ''} gezogen`, 'blue');
-                        break;
-                    case 'gain_life':
-                        updateMyState({ life: myState.life + triggerAmount });
-                        addToast(`💚 ${triggerAmount} Leben erhalten`, 'green');
-                        break;
-                    case 'damage_each_opp':
-                    case 'opp_lose_life':
-                        opponentIds.forEach(id => {
-                            const oppRef = doc(db, 'arena_rooms', roomId, 'game_state', id);
-                            updateDoc(oppRef, { life: increment(-triggerAmount) }).catch(() => {});
-                        });
-                        addToast(`⚡ ${triggerAmount} Schaden an jeden Gegner`, 'red');
-                        break;
-                    default:
-                        addToast(`✅ ${stackEntry.triggerText || 'Trigger aufgelöst'}`, 'blue');
+                const src = stackEntry.card?.name || 'Auslöser';
+                const effects = Array.isArray(stackEntry.triggerEffects) ? stackEntry.triggerEffects
+                    : (stackEntry.triggerEffect && stackEntry.triggerEffect !== 'notify' ? [{ effect: stackEntry.triggerEffect, amount: stackEntry.triggerAmount }] : []);
+                if (!effects.length) {
+                    addToast(`✅ ${stackEntry.triggerText || 'Trigger aufgelöst'} – bitte von Hand ausführen`, 'blue');
+                    logEvent(`Auslöser aufgelöst (von Hand): ${stackEntry.triggerText || src}`);
+                    return;
                 }
+                const parts = [];
+                let lifeDelta = 0;
+                const opps = opponentIds.filter(id => (lobbyState?.players || []).includes(id));
+                effects.forEach(({ effect, amount }) => {
+                    const n = Number(amount) || 0;
+                    switch (effect) {
+                        case 'draw': {
+                            const k = Math.min(n, myState.library.length);
+                            if (k > 0) { updateMyState({ hand: [...myState.hand, ...myState.library.slice(0, k)], library: myState.library.slice(k) }); noteDraw(k); }
+                            addToast(`📖 ${k} Karte${k !== 1 ? 'n' : ''} gezogen`, 'blue');
+                            parts.push(EFFECT_LABEL.draw(n));
+                            break;
+                        }
+                        case 'gain_life':
+                            lifeDelta += n;
+                            addToast(`💚 ${n} Leben erhalten`, 'green');
+                            parts.push(EFFECT_LABEL.gain_life(n));
+                            break;
+                        case 'damage_each_opp':
+                        case 'opp_lose_life':
+                            // Fremde Spielstände: nur „life“ darf geändert werden (Regeln), increment vermeidet veraltete Werte
+                            opps.forEach(id => updateDoc(doc(db, 'arena_rooms', roomId, 'game_state', id), { life: increment(-n) }).catch(() => {}));
+                            addToast(effect === 'damage_each_opp' ? `⚡ ${n} Schaden an jeden Gegner` : `🩸 Jeder Gegner verliert ${n} Leben`, 'red');
+                            parts.push(EFFECT_LABEL[effect](n));
+                            break;
+                        case 'token': {
+                            const specs = parseTokensFromOracleText({ oracle_text: stackEntry.triggerClause || '' });
+                            if (specs.length) specs.forEach(sp => (sp.isAura ? setAuraAttachPrompt(sp) : createTokens(sp)));
+                            else { addToast(`🪙 ${src}: Token bitte über „Token“ erstellen`, 'yellow'); setTokenModalOpen(true); }
+                            parts.push('Token');
+                            break;
+                        }
+                        default:
+                            addToast(`✅ ${stackEntry.triggerText || 'Trigger aufgelöst'}`, 'blue');
+                    }
+                });
+                if (lifeDelta) updateMyState({ life: increment(lifeDelta) });
+                logEvent(`Auslöser ${src}: ${parts.length ? parts.join(', ') : (stackEntry.triggerText || 'aufgelöst')}`);
             };
 
             // --- ATTACHMENTS (Aura/Equipment cards, not tokens) ---
@@ -3774,6 +4180,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 const updates = {};
                 if (zone === 'graveyard') updates.graveyard = [stackEntry.card, ...myState.graveyard];
                 else if (zone === 'exile') updates.exile = [stackEntry.card, ...myState.exile];
+                const c = stackEntry.card;
+                if (c?.isCommander && !foreignOwner(c)) updates.cmdPending = [...(myState.cmdPending || []).filter(p => p.instanceId !== c.instanceId), { instanceId: c.instanceId, name: cardName(c), zone }];
                 updateMyState(updates);
                 removeFromStack(stackEntry.instanceId);
             };
@@ -4199,10 +4607,6 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }
             };
 
-            const fireCastTriggers = (card) => {
-                const t = card.type_line?.toLowerCase() || '';
-                if (t.includes('instant') || t.includes('sorcery')) fireTriggers('cast_instant_or_sorcery', card);
-            };
 
             // ── MANA TAP ─────────────────────────────────────────────────────────
             const tapLandForMana = (card, clickEvent) => {
@@ -4293,11 +4697,12 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 });
                 updateMyState({ battlefieldLower: newBF });
                 const serialized = attackers.map(a => {
-                    const [p, t] = getPT(a.card);
+                    // effektive Werte inkl. +1/+1-/-1/-1-Marker (beim Schaden wird zusätzlich der aktuelle Stand gelesen)
+                    const [p, t] = effectivePT(a.card);
                     return sanitize({
                         instanceId: a.card.instanceId,
                         name: a.card.name || '',
-                        p_t: a.card.p_t || (p || t ? `${p}/${t}` : null),
+                        p_t: p || t || a.card.p_t ? `${p}/${t}` : null,
                         power: String(p),
                         toughness: String(t),
                         image_url: a.card.image_url || '',
@@ -4330,18 +4735,28 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 setPendingAttackers([]);
             };
 
+            // Verteidiger bestätigt seine Blocker. Als Transaktion auf dem frischen Raum (gleichzeitiges Passen mehrerer
+            // Verteidiger überschreibt sich nicht). Hat damit jeder anwesende Verteidiger gepasst, geht es im selben
+            // Schreibvorgang direkt in den Schadensschritt – der Angreifer muss nicht mehr „Weiter“ klicken.
             const passPriority = () => {
-                const current = lobbyState?.combat;
-                if (!current) { addToast('Kein Kampf aktiv', 'yellow'); return; }
-                const priorities = sanitize({ ...(current.priorities || {}), [user.uid]: 'passed' });
-                // Check if ALL holders of priority have now passed
-                const holders = Object.keys(priorities);
-                // Wer den Tisch verlassen hat, gilt als „gepasst“
-                const allPassed = holders.length > 0 && holders.every(id => priorities[id] === 'passed' || !(lobbyState?.players || []).includes(id));
-                console.log('[Combat] priority passed by', user.uid, '| allPassed:', allPassed);
-                const newCombat = sanitize({ ...current, priorities, phase: allPassed ? 'resolving' : 'blocking' });
-                updateDoc(roomRef, { combat: newCombat })
-                    .then(() => { if (allPassed) addToast('⚔️ Alle haben gepasst – Angreifer verteilt den Schaden', 'yellow'); else addToast('Priorität abgegeben ✓', 'blue'); })
+                if (!lobbyState?.combat) { addToast('Kein Kampf aktiv', 'yellow'); return; }
+                runTx(async (tx) => {
+                    const snap = await tx.get(roomRef);
+                    if (!snap.exists()) return null;
+                    const r = snap.data();
+                    const current = r.combat;
+                    if (!current || current.phase !== 'blocking') return null;
+                    const priorities = sanitize({ ...(current.priorities || {}), [user.uid]: 'passed' });
+                    // Wer den Tisch verlassen hat, gilt als „gepasst“
+                    const holders = Object.keys(priorities);
+                    const allPassed = holders.length > 0 && holders.every(id => priorities[id] === 'passed' || !(r.players || []).includes(id));
+                    const upd = { combat: sanitize({ ...current, priorities, phase: allPassed ? 'resolving' : 'blocking' }) };
+                    const ph = r.phase;
+                    if (allPassed && ph && ph.player === r.activePlayer && ph.step === 'combat_block') { upd.phase = { ...ph, step: 'combat_damage', at: Date.now() }; upd.hold = null; }
+                    tx.update(roomRef, upd);
+                    return allPassed ? 'all' : 'one';
+                })
+                    .then((res) => { if (res === 'all') addToast('⚔️ Alle haben gepasst – Angreifer verteilt den Schaden', 'yellow'); else if (res === 'one') addToast('Priorität abgegeben ✓', 'blue'); })
                     .catch(err => addToast(`❌ Priorität fehlgeschlagen: ${err.message}`, 'red'));
             };
 
@@ -4367,6 +4782,13 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 // Erstschlag (Regel 510.4): Gibt es Erst-/Doppelschlag im Kampf, teilen im Erstschlag-Schritt nur
                 // Kreaturen mit Erst-/Doppelschlag Schaden aus, im normalen Schritt nur die ohne Erstschlag plus
                 // Doppelschlag. Im Erstschlag-Schritt gestorbene Kreaturen teilen danach keinen Schaden mehr aus.
+                // Stärke/Widerstand zum Zeitpunkt des Schadens: Karte auf dem Spielfeld ihres Beherrschers (mit Markern),
+                // sonst die beim Erklären gespeicherten Werte
+                const livePT = (c, ownerId) => {
+                    const st = ownerId === user.uid ? myState : opponentStates[ownerId];
+                    const live = [...(st?.battlefieldLower || []), ...(st?.battlefieldUpper || [])].find(x => x.instanceId === c.instanceId);
+                    return live && hasPTData(live) ? effectivePT(live) : getPT(c);
+                };
                 const anyFS = (combat.attackers||[]).some(a => hasFirstStrike(a)) || Object.values(combat.blockerMap||{}).some(b => hasFirstStrike(b));
                 const dealsNow = (c) => !anyFS || (firstStrikeOnly ? hasFirstStrike(c) : (!hasFirstStrike(c) || hasDoubleStrike(c)));
                 const myFieldIds = new Set([...(myState.battlefieldLower||[]), ...(myState.battlefieldUpper||[])].map(c => c.instanceId));
@@ -4384,7 +4806,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     return hasFirstStrike(atk) || (blocker && hasFirstStrike(blocker));
                 });
                 attackersThisStep.forEach(atk => {
-                    const [atkP, atkT] = getPT(atk);
+                    const [atkP, atkT] = livePT(atk, combat.attackerId);
                     const blocker = combat.blockerMap?.[atk.instanceId];
                     const deathtouch = kw(atk, 'deathtouch');
                     const trample = kw(atk, 'trample');
@@ -4411,7 +4833,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                     };
 
                     if (blocker) {
-                        const [blkP, blkT] = getPT(blocker);
+                        const [blkP, blkT] = livePT(blocker, blocker.blockerOwnerId);
                         const blkIndestructible = blocker.oracle_text?.toLowerCase().includes('indestructible');
                         const assignedToBlocker = !atkDeals || !blockerAlive ? 0 : ((damageAssign[atk.instanceId]?.[blocker.instanceId]) ?? atkP);
 
@@ -4558,8 +4980,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         tx.update(myStateRef, {
                             battlefieldLower: [...bfLower.filter(c => !myDeadIds.has(c.instanceId)), ...returned, ...shedEquip],
                             battlefieldUpper: bfUpper.filter(c => !myDeadIds.has(c.instanceId)),
-                            graveyard: [...normalDead.map(cleanLeaving), ...shedGy, ...(data.graveyard || [])],
-                            ...(cmdDead.length ? { commandZone: [...cmdDead.map(c => ({ ...cleanLeaving(c), counters: [] })), ...(data.commandZone || [])] } : {}),
+                            graveyard: [...normalDead.map(cleanLeaving), ...cmdDead.map(cleanLeaving), ...shedGy, ...(data.graveyard || [])],
+                            ...(cmdDead.length ? { cmdPending: [...(data.cmdPending || []), ...cmdDead.map(c => ({ instanceId: c.instanceId, name: cardName(c), zone: 'graveyard' }))] } : {}),
                             ...myUpdates
                         });
                         return { normalDead, enduringCards, undyingCards, persistCards, foreignDead, shedFalls };
@@ -4632,10 +5054,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             const assignBlock = (blockerCard, attackerCard) => {
                 const current = lobbyState?.combat;
                 if (!current) return;
-                const [bp, bt] = getPT(blockerCard);
+                const [bp, bt] = effectivePT(blockerCard);
                 const entry = sanitize({
                     instanceId: blockerCard.instanceId, name: blockerCard.name,
-                    p_t: blockerCard.p_t || (bp || bt ? `${bp}/${bt}` : null),
+                    p_t: bp || bt || blockerCard.p_t ? `${bp}/${bt}` : null,
                     power: String(bp),
                     toughness: String(bt),
                     oracle_text: blockerCard.oracle_text || null,
@@ -4818,10 +5240,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 const nBf = cardName(original); // Name der Seite, die auf dem Spielfeld lag
                 const tokenGone = card.isToken && leavingBattlefield;
                 const toForeign = foreignOwner(card) && ['graveyard', 'exile', 'hand', 'library_top', 'library_bottom', 'command'].includes(toZone);
-                const toCmd = card.isCommander && (toZone === 'graveyard' || toZone === 'exile');
+                // Commander (Regel 903.9): erst in die Zielzone, dann fragt das Fenster „Commander-Zone oder …?“
+                const cmdAsk = card.isCommander && !toForeign && CMD_ASK_ZONES[toZone] && fromZone !== toZone && !(fromZone === 'library' && toZone.startsWith('library'));
+                if (cmdAsk) updates.cmdPending = [...(myState.cmdPending || []).filter(p => p.instanceId !== card.instanceId), { instanceId: card.instanceId, name: cardName(card), zone: CMD_ASK_ZONES[toZone] }];
                 if (tokenGone) { addToast(`✨ Token ${card.name} verschwindet`, 'blue'); }
                 else if (toForeign) { returnToOwner(card, toZone); }
-                else if (toCmd) { updates.commandZone = [{ ...card, isTapped: false, counters: [] }, ...updates.commandZone]; addToast(`👑 ${card.name} zurück in die Commander-Zone`, 'blue'); }
                 else if (toZone === 'graveyard') updates.graveyard = [card, ...updates.graveyard];
                 else if (toZone === 'exile') updates.exile = [card, ...updates.exile];
                 else if (toZone === 'hand') updates.hand = [...updates.hand, card];
@@ -4832,7 +5255,7 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 updateMyState(updates);
 
                 // Protokoll (öffentliche Zonen mit Namen; Hand/Bibliothek ohne Namen)
-                const dest = toCmd ? 'command' : toZone;
+                const dest = toZone;
                 const destLabel = ZONE_LABEL[dest] || dest;
                 const ownerNote = toForeign ? ` (an ${getPlayerName(original.ownerId)})` : '';
                 if (fromZone === 'battlefield') {
@@ -4862,6 +5285,29 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 }
             };
 
+            // ── COMMANDER: Commander-Zone oder Zielzone? (Regel 903.9a/b) ─────────────
+            // Jeder Weg (Kampf, Anfragen, Kontextmenü, Ziehen, Stack) legt den Commander zuerst in die Zielzone und
+            // vermerkt ihn in myState.cmdPending; das Fenster fragt den Besitzer. Übersteht Neuladen.
+            const cmdPendingShown = (myState.cmdPending || []).filter(p => (myState[p.zone] || []).some(c => c.instanceId === p.instanceId));
+            const resolveCmdChoice = (entry, toCommand) => runTx(async (tx) => {
+                const snap = await tx.get(myStateRef);
+                if (!snap.exists()) return null;
+                const d = snap.data();
+                const arr = d[entry.zone] || [];
+                const card = arr.find(c => c.instanceId === entry.instanceId);
+                // erledigte und veraltete Einträge (Karte nicht mehr in der Zone) entfernen
+                const upd = { cmdPending: (d.cmdPending || []).filter(p => p.instanceId !== entry.instanceId && (d[p.zone] || []).some(c => c.instanceId === p.instanceId)) };
+                if (toCommand && card) {
+                    upd[entry.zone] = arr.filter(c => c.instanceId !== entry.instanceId);
+                    upd.commandZone = [{ ...cleanLeaving(card), counters: [] }, ...(d.commandZone || []).filter(c => c.instanceId !== card.instanceId)];
+                }
+                tx.update(myStateRef, upd);
+                return card ? (toCommand ? 'cmd' : 'stay') : null;
+            }).then(r => {
+                if (r === 'cmd') { logEvent(`${entry.name}: ${CMD_ZONE_LABEL[entry.zone]} → Commander-Zone (Commander-Regel)`); addToast(`👑 ${entry.name} → Commander-Zone`, 'blue'); }
+                if (r === 'stay') logEvent(`${entry.name} bleibt ${CMD_ZONE_IN[entry.zone]} (statt Commander-Zone)`);
+            }).catch(err => addToast(`❌ ${err.message}`, 'red'));
+
             // Direkt aufs Spielfeld (ohne Stack) aus Friedhof/Exil/Bibliothek – Reihe nach Kartentyp, Länder mit ETB-Logik,
             // Auren mit Zielwahl
             const putOntoBattlefield = (card, fromZone) => playCard(card, fromZone, 'lower');
@@ -4871,11 +5317,17 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
             // Reanimieren aus dem Friedhof/Exil eines Mitspielers: Karte kommt unter MEINE Kontrolle (ownerId = Besitzer),
             // der Besitzer entfernt sie per reanimateRequests aus seiner Zone. Verlässt sie mein Feld, geht sie zurück zu ihm.
             const reanimateFrom = (card, ownerUid, fromZone) => {
+                // schon auf meinem Feld (Doppelklick, veraltete Ansicht) → nicht verdoppeln
+                if (myPermanents().some(c => c.instanceId === card.instanceId)) { addToast(`${cardName(card)} liegt schon auf deinem Spielfeld`, 'yellow'); return; }
+                const ownerPresent = (lobbyState?.players || []).includes(ownerUid);
                 const c = { ...prepEnter(card), instanceId: card.instanceId, ownerId: ownerUid };
-                pushRoomRequest('reanimateRequests', { id: generateId(), targetPlayerId: ownerUid, instanceId: card.instanceId, fromZone, fromPlayerId: user.uid });
+                // Besitzer noch am Tisch: er entfernt die Karte selbst aus seiner Zone. Hat er den Tisch verlassen, gibt es
+                // niemanden, der seinen Spielstand ändern darf – keine Anfrage (sie bliebe sonst ewig in der Warteschlange).
+                if (ownerPresent) pushRoomRequest('reanimateRequests', { id: generateId(), targetPlayerId: ownerUid, instanceId: card.instanceId, fromZone, fromPlayerId: user.uid });
                 const n = cardName(c);
-                logEvent(`holt ${n} aus dem ${fromZone === 'exile' ? 'Exil' : 'Friedhof'} von ${getPlayerName(ownerUid)} auf das eigene Spielfeld`, [c]);
-                if (isLand(c)) { const { x, y } = getDefaultSpawnPosition(c); updateMyState({ battlefieldLower: [...(myState.battlefieldLower || []), { ...c, isTapped: detectLandETB(c) === 'tapped' || detectLandETB(c) === 'triome', x, y }] }); return; }
+                logEvent(`holt ${n} aus dem ${fromZone === 'exile' ? 'Exil' : 'Friedhof'} von ${getPlayerName(ownerUid)} auf das eigene Spielfeld${ownerPresent ? '' : ' (Besitzer hat den Tisch verlassen)'}`, [c]);
+                // Länder: volle Land-Logik (Shock-Fenster, getappt, Landfall …)
+                if (isLand(c)) { enterLand(c, 'none'); return; }
                 if (isAuraCard(c)) { startAuraTargeting({ aura: c, source: 'zone', fromZone: 'none' }); return; }
                 const { x, y } = getDefaultSpawnPosition(c);
                 const placed = { ...c, x, y };
@@ -5016,6 +5468,10 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                 if (stepIdx(target) >= stepIdx('combat_end')) { setPendingAttackers([]); setPendingBlocker(null); }
                 goToStep(target);
             };
+            // Blocker-Schritt: haben alle anwesenden Verteidiger gepasst (oder den Tisch verlassen), schaltet der Client des
+            // Angreifers selbst in den Schadensschritt. goToStep ist eine Transaktion und schaltet nur vorwärts – passiert
+            // das gleichzeitig beim letzten Verteidiger (passPriority), bleibt es bei einem Schritt.
+            autoDamageFnRef.current = () => goToStep('combat_damage');
             const activeName = getPlayerName(activePlayerId);
             const nextInfo = (() => {
                 if (!mayControlTurn) return { label: 'Weiter ▸', disabled: true, title: `Nur ${activeName} kann weiterschalten` };
@@ -5651,7 +6107,8 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                         />
                     )}
                     {myMulliganCompleted && everyoneMulliganDone && typeof lobbyState?.pregameAction?.[user.uid] !== 'boolean' && (
-                        <PregameActionModal onAnswer={submitPregameAction} />
+                        <PregameActionModal onAnswer={submitPregameAction} candidates={pregameCandidates} hand={myState.hand || []}
+                            onPerform={performPregameAction} onExileFromHand={pregameExileFromHand} isStartingPlayer={lobbyState?.activePlayer === user.uid} />
                     )}
                     {amIFirstPlayer && everyoneMulliganDone && everyonePregameDone && !startGameModalDismissed && (
                         <StartGameModal 
@@ -5660,6 +6117,11 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                             onDismiss={() => setStartGameModalDismissed(true)}
                         />
                     )}
+                    {cmdPendingShown.length > 0 && (() => {
+                        const entry = cmdPendingShown[0];
+                        const card = (myState[entry.zone] || []).find(c => c.instanceId === entry.instanceId);
+                        return <CommanderChoiceModal key={entry.instanceId} entry={entry} card={card} onChoose={(toCmd) => resolveCmdChoice(entry, toCmd)} />;
+                    })()}
                     {(() => {
                         const myCreatures = [
                             ...(myState.battlefieldLower || []).filter(c => /\bCreature\b/i.test(c.type_line || '') || (c.isToken && c.p_t)).map(card => ({ card, zone: 'battlefieldLower' })),
@@ -5826,6 +6288,9 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                 />
                                                 <div className="flex flex-col gap-1">
                                                     <span className="text-[10px] text-gray-400">{entry.ownerName}</span>
+                                                    {entry.isTrigger && entry.triggerText && (
+                                                        <p data-testid="stack-trigger-text" className="text-[10px] text-yellow-200 max-w-[260px] leading-snug">⚡ {entry.triggerText}</p>
+                                                    )}
                                                     {!isTopOfStack && (
                                                         <span className="text-[9px] text-yellow-500 font-bold uppercase">Warte …</span>
                                                     )}
@@ -6318,11 +6783,14 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                                     // Commanders go to the stack like any non-land card, but leave
                                                     // the command zone (not the hand) - use playCard directly.
                                                     const stackEntry = { instanceId: card.instanceId, card, ownerId: user.uid, ownerName: user.displayName || getDeckCommanderDisplayName(deck) || 'Spieler', timestamp: Date.now() };
+                                                    // „Whenever you cast …“-Auslöser auch beim Wirken aus der Commander-Zone (über dem Zauber)
+                                                    const trig = castTriggerEntries(card);
                                                     runTx(async (tx) => {
                                                         const snap = await tx.get(roomRef);
                                                         const currentStack = snap.exists() ? (snap.data().stack || []) : [];
-                                                        tx.update(roomRef, { stack: [stackEntry, ...currentStack] });
+                                                        tx.update(roomRef, { stack: [...trig, stackEntry, ...currentStack] });
                                                     }).catch(err => addToast(`❌ Commander konnte nicht gewirkt werden: ${err.message}`, 'red'));
+                                                    if (trig.length) { logEvent(`löst aus: ${trig.map(t => t.card.name).join(', ')}`); addToast(`⚡ ${trig.map(t => t.card.name).join(', ')} löst aus`, 'yellow'); }
                                                     updateMyState({
                                                         commandZone: myState.commandZone.filter(c => c.instanceId !== card.instanceId),
                                                         cmdTax: { ...(myState.cmdTax || {}), [card.instanceId]: ((myState.cmdTax || {})[card.instanceId] || 0) + 2 }
@@ -6569,6 +7037,14 @@ const runTx = (fn) => runTransaction(db, (tx) => fn({
                                             onClick={() => setExpandedOpponentId(isThisExpanded ? null : oppId)}
                                             onHoverCard={setHoveredCard}
                                             myCommanders={getCommandersOf(myState)}
+                                            auraValidFor={auraTarget ? (card) => auraTargetOk(auraTarget, card, false) : null}
+                                            onAuraPick={(card, zone, valid) => {
+                                                if (!auraTarget) return false;
+                                                if (!valid) { addToast(`Kein gültiges Ziel für ${cardName(auraTarget.aura)}`, 'yellow'); return true; }
+                                                chooseAuraTarget(card, zone, oppId);
+                                                return true;
+                                            }}
+                                            onReanimate={(card, zone) => reanimateFrom(card, oppId, zone)}
                                         />
                                     </div>
                                 );
