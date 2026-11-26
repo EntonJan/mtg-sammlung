@@ -24,6 +24,7 @@ import BinderView from './components/BinderView'
 import WishlistView from './components/WishlistView'
 import SellView from './components/SellView'
 import ScanView from './components/ScanView'
+import { activeModuleOf, combinedDeck, heldEntries, isCore, isModule, modulesOf, physicalDecks, reservedMap, settle } from './konsole'
 
 // Menüpunkte, die am Handy unter „Weiteres“ liegen
 // Hauptmenü: „Listen“ fasst Was fehlt mir? / Raussuchen / Import zusammen
@@ -128,7 +129,7 @@ function Main({ user }) {
         await savePriceSnapshot()
         const val = (map) => Object.values(map).reduce((t, e) => t + (unitPrice(fresh[e.id], e.finish) ?? 0) * e.qty, 0)
         const free = val(S.current.entries)
-        const inDecks = Object.values(S.current.decks).reduce((t, d) => t + val(d.entries), 0)
+        const inDecks = val(heldEntries(S.current.decks))
         if (free + inDecks > 0) {
           await saveHistoryPoint(user.uid, today(), { total: Math.round((free + inDecks) * 100) / 100, free: Math.round(free * 100) / 100, decks: Math.round(inDecks * 100) / 100 })
         }
@@ -266,76 +267,139 @@ function Main({ user }) {
     // Letztes Exemplar entfernt → auch Commander-/Pool-/Sideboard-Markierung aufräumen
     const clean = (list) => (ents[k] || !list ? list : list.filter((x) => x !== k))
     const nd = { ...d, entries: ents, commanders: clean(d.commanders), pool: clean(d.pool), side: clean(d.side || []) }
-    commit({ decks: { ...S.current.decks, [target]: nd }, changedDecks: [target], label: delta > 0 ? `${card.name} +1 (${d.name})` : `${card.name} aus ${d.name} und Sammlung entfernt` })
+    const all = { ...S.current.decks, [target]: nd }
+    // Modul: Neues Exemplar zählt nur, soweit kein Geschwister-Modul die Karte schon hält – der Rest landet frei in der Sammlung
+    let ne
+    if (isModule(d)) {
+      const r = settle(S.current.entries, S.current.decks, all, [k], { [k]: delta }, true)
+      ne = r.short.length ? settle(S.current.entries, S.current.decks, all, [k]).entries : r.entries
+    }
+    commit({ entries: ne, decks: all, collectionChanged: !!ne && ne !== S.current.entries, changedDecks: [target], label: delta > 0 ? `${card.name} +1 (${d.name})` : `${card.name} aus ${d.name} und Sammlung entfernt` })
   }, [changeQty, rememberCard, commit])
 
   // Schrank-Prinzip: 1 Exemplar von „from“ nach „to“ verschieben (collection oder Deck-ID)
+  // Konsolen: Geschwister-Module teilen sich Exemplare (Core + max(Module)) – die freien Exemplare
+  // ergeben sich deshalb immer aus „Besitz bleibt gleich“ (settle), für normale Decks wie bisher ±qty.
   const moveCard = useCallback(({ id, finish, from }, to, qty = 1) => {
     if (from === to) return
     const s = S.current
-    const srcMap = from === 'collection' ? s.entries : s.decks[from]?.entries
-    const have = srcMap?.[entryKey(id, finish)]?.qty || 0
+    const k = entryKey(id, finish)
     const name = cards[id]?.name || 'Karte'
-    if (have < qty) {
+    const noCopy = () => {
       const oid = cards[id]?.oracleId
-      const where = Object.values(s.decks).filter((d) => d.id !== to && Object.values(d.entries).some((e) => cards[e.id]?.oracleId === oid)).map((d) => d.name)
+      const where = Object.values(s.decks).filter((d) => d.id !== to && Object.values(d.entries).some((e) => cards[e.id]?.oracleId === oid)).map((d) => (isModule(d) && s.decks[d.coreId] ? `${s.decks[d.coreId].name} › ${d.name}` : d.name))
       notify(where.length
         ? `${name}: kein freies Exemplar – steckt in ${where.join(', ')}. Im Deck über „Karte holen“ umlegen.`
         : `${name}: kein freies Exemplar mehr`)
-      return
     }
+    if (from !== 'collection' && (s.decks[from]?.entries[k]?.qty || 0) < qty) return noCopy()
+    if (to !== 'collection' && !s.decks[to]) return
 
-    let ne = s.entries
     const nd = { ...s.decks }
     const changedDecks = []
-    if (from === 'collection') ne = bump(ne, id, finish, -qty)
-    else {
+    if (from !== 'collection') {
       const d = nd[from]
       const entriesNext = bump(d.entries, id, finish, -qty)
-      const k = entryKey(id, finish)
       nd[from] = { ...d, entries: entriesNext, commanders: entriesNext[k] ? d.commanders : d.commanders.filter((c) => c !== k), pool: entriesNext[k] ? d.pool : (d.pool || []).filter((c) => c !== k), side: entriesNext[k] ? d.side : (d.side || []).filter((c) => c !== k) }
       changedDecks.push(from)
     }
-    if (to === 'collection') ne = bump(ne, id, finish, qty)
-    else {
+    if (to !== 'collection') {
       const d = nd[to]
       nd[to] = { ...d, entries: bump(d.entries, id, finish, qty) }
       changedDecks.push(to)
     }
-    commit({ entries: ne, decks: nd, collectionChanged: from === 'collection' || to === 'collection', changedDecks, label: `${name} → ${to === 'collection' ? 'Sammlung' : nd[to].name}` })
-    notify(`${name} → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
+    const { entries: ne, short } = settle(s.entries, s.decks, nd, [k])
+    if (short.length) return noCopy()
+    const label = to === 'collection' ? 'Sammlung' : isModule(nd[to]) && nd[nd[to].coreId] ? `${nd[nd[to].coreId].name} › ${nd[to].name}` : nd[to].name
+    commit({ entries: ne, decks: nd, collectionChanged: ne !== s.entries, changedDecks, label: `${name} → ${label}` })
+    notify(`${name} → ${label}`)
   }, [cards, commit])
 
   // Mehrere Karten in einem Schritt verschieben (z. B. Überschüsse in den Tauschordner)
   const moveMany = useCallback((list, to) => {
     const s = S.current
     let ne = s.entries
-    const nd = { ...s.decks }
+    let nd = { ...s.decks }
     const changed = new Set()
     let moved = 0
+    if (to !== 'collection' && !nd[to]) return
     for (const { id, finish, qty, from } of list) {
-      const src = from === 'collection' ? ne : nd[from]?.entries
-      const q = Math.min(qty, src?.[entryKey(id, finish)]?.qty || 0)
+      const k = entryKey(id, finish)
+      // Höchstens so viele, wie die Quelle hat; aus der Sammlung entscheidet settle (freie bzw. geteilte Modul-Exemplare)
+      let q = from === 'collection' ? qty : Math.min(qty, nd[from]?.entries[k]?.qty || 0)
       if (!q || from === to) continue
-      if (from === 'collection') ne = bump(ne, id, finish, -q)
-      else { nd[from] = { ...nd[from], entries: bump(nd[from].entries, id, finish, -q) }; changed.add(from) }
-      if (to === 'collection') ne = bump(ne, id, finish, q)
-      else { nd[to] = { ...nd[to], entries: bump(nd[to].entries, id, finish, q) }; changed.add(to) }
+      for (; q > 0; q--) {
+        const t = { ...nd }
+        if (from !== 'collection') t[from] = { ...t[from], entries: bump(t[from].entries, id, finish, -q) }
+        if (to !== 'collection') t[to] = { ...t[to], entries: bump(t[to].entries, id, finish, q) }
+        const r = settle(ne, nd, t, [k])
+        if (r.short.length) continue
+        ne = r.entries; nd = t
+        if (from !== 'collection') changed.add(from)
+        if (to !== 'collection') changed.add(to)
+        break
+      }
       moved += q
     }
     if (!moved) return
-    commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [...changed], label: `${moved} Karten verschoben` })
+    commit({ entries: ne, decks: nd, collectionChanged: ne !== s.entries, changedDecks: [...changed], label: `${moved} Karten verschoben` })
     notify(`${moved} ${moved === 1 ? 'Karte' : 'Karten'} → ${to === 'collection' ? 'Sammlung' : nd[to].name}`)
   }, [commit])
 
   // Ziel für Drag & Drop: einzelne Karte oder Mehrfachauswahl
   const dropCard = useCallback((d, to) => (d.multi ? moveMany(d.multi, to) : moveCard(d, to)), [moveMany, moveCard])
 
-  const createDeck = useCallback((name, kind) => {
+  const createDeck = useCallback((name, kind, extra = {}) => {
     const id = newDeckId()
     const order = Object.keys(S.current.decks).length
-    commit({ decks: { ...S.current.decks, [id]: { id, name, order, commanders: [], entries: {}, ...(kind ? { kind } : {}) } }, changedDecks: [id], label: `„${name}“ angelegt` })
+    const more = kind === 'core' ? { activeModule: null } : {}
+    commit({ decks: { ...S.current.decks, [id]: { id, name, order, commanders: [], entries: {}, ...(kind ? { kind } : {}), ...more, ...extra } }, changedDecks: [id], label: `„${name}“ angelegt` })
     return id
+  }, [commit])
+
+  // ---- Konsolen und Module ----
+  const createModule = useCallback((coreId, name) => createDeck(name, 'module', { coreId }), [createDeck])
+  const convertToCore = useCallback((id) => {
+    const d = S.current.decks[id]
+    if (!d || d.kind === 'binder' || isModule(d)) return
+    commit({ decks: { ...S.current.decks, [id]: { ...d, kind: 'core', activeModule: null } }, changedDecks: [id], label: `„${d.name}“ in Konsole umgewandelt` })
+    notify(`„${d.name}“ ist jetzt eine Konsole 🎮`)
+  }, [commit])
+  // Normales Deck als Modul einer Konsole zuordnen. cmdMode: 'core' = Commander in den Core verschieben, 'drop' = Markierung entfernen
+  const attachAsModule = useCallback((id, coreId, cmdMode = 'drop') => {
+    const s = S.current
+    const d = s.decks[id], core = s.decks[coreId]
+    if (!d || !isCore(core) || d.kind === 'binder' || isCore(d) || isModule(d)) return
+    const nd = { ...s.decks }
+    let ents = d.entries
+    let coreNext = core
+    const keys = Object.keys(d.entries)
+    if (cmdMode === 'core') {
+      let ce = core.entries
+      for (const k of d.commanders || []) {
+        const e = ents[k]; if (!e) continue
+        ents = bump(ents, e.id, e.finish, -e.qty); ce = bump(ce, e.id, e.finish, e.qty)
+      }
+      coreNext = { ...core, entries: ce, commanders: [...new Set([...(core.commanders || []), ...(d.commanders || []).filter((k) => ce[k])])] }
+      nd[coreId] = coreNext
+    }
+    nd[id] = { ...d, kind: 'module', coreId, entries: ents, commanders: [], pool: null, side: (d.side || []).filter((k) => ents[k]) }
+    const r = settle(s.entries, s.decks, nd, keys)
+    if (r.short.length) { notify('Zuordnen nicht möglich – zu wenige freie Exemplare'); return }
+    commit({ entries: r.entries, decks: nd, collectionChanged: r.entries !== s.entries, changedDecks: cmdMode === 'core' ? [id, coreId] : [id], label: `„${d.name}“ → Modul von „${core.name}“` })
+    notify(`„${d.name}“ ist jetzt ein Modul von „${core.name}“`)
+  }, [commit])
+  // Modul duplizieren: Geschwister-Module teilen sich Exemplare, die Sammlung ändert sich daher nicht
+  const duplicateModule = useCallback((id) => {
+    const s = S.current
+    const m = s.decks[id]
+    if (!isModule(m)) return null
+    const nid = newDeckId()
+    const nd = { ...s.decks, [nid]: { ...m, id: nid, name: `${m.name} (Kopie)`, order: Object.keys(s.decks).length, entries: { ...m.entries }, log: [], versions: [], tests: [], shareId: null, autoShare: false } }
+    const r = settle(s.entries, s.decks, nd, Object.keys(m.entries))
+    if (r.short.length) { notify('Duplizieren nicht möglich – zu wenige freie Exemplare'); return null }
+    commit({ entries: r.entries, decks: nd, collectionChanged: r.entries !== s.entries, changedDecks: [nid], label: `Modul „${m.name}“ dupliziert` })
+    return nid
   }, [commit])
 
   const updateDeck = useCallback((id, patch) => {
@@ -364,12 +428,16 @@ function Main({ user }) {
       : list
     const nd = { ...d, entries: ents, commanders: remap(d.commanders), pool: d.pool ? remap(d.pool) : d.pool, side: remap(d.side || []) }
     let entries = s.entries
-    if (mode === 'swap') {
+    if (mode === 'swap' && isModule(d)) {
+      const r = settle(s.entries, s.decks, { ...s.decks, [deckId]: nd }, [oldKey, newKey])
+      if (r.short.length) { notify(`${card.name}: kein freies Exemplar dieser Version`); return }
+      entries = r.entries
+    } else if (mode === 'swap') {
       entries = bump(entries, card.id, newFinish, -qty)
       entries = bump(entries, id, finish, qty)
     }
     commit({
-      entries, decks: { ...s.decks, [deckId]: nd }, changedDecks: [deckId], collectionChanged: mode === 'swap',
+      entries, decks: { ...s.decks, [deckId]: nd }, changedDecks: [deckId], collectionChanged: entries !== s.entries,
       label: `${card.name}: ${mode === 'swap' ? 'getauscht' : 'Printing geändert'} → ${card.set.toUpperCase()} #${card.num}`,
     })
   }, [commit, rememberCard])
@@ -380,6 +448,30 @@ function Main({ user }) {
     const d = s.decks[deckId]
     if (!d) return []
     const target = fromItems(version.items)
+    if (isModule(d)) {
+      // Modul: Zielstand setzen, Sammlung per settle; was nicht frei ist, fehlt
+      let decksNext = s.decks, coll = s.entries
+      const missing = []
+      const keys = new Set([...Object.keys(d.entries), ...Object.keys(target)])
+      for (const k of keys) {
+        const want = target[k]?.qty || 0
+        const have = decksNext[deckId].entries[k]?.qty || 0
+        const [id, finish] = k.split('|')
+        for (let q = want; q >= Math.min(want, have); q--) {
+          const cur = decksNext[deckId]
+          const t = { ...decksNext, [deckId]: { ...cur, entries: bump(cur.entries, id, finish, q - have) } }
+          const r = settle(coll, decksNext, t, [k])
+          if (r.short.length) continue
+          coll = r.entries; decksNext = t
+          if (q < want) missing.push({ id, finish, qty: want - q })
+          break
+        }
+      }
+      const ents = decksNext[deckId].entries
+      const ndm = { ...decksNext[deckId], side: (version.side || []).filter((k) => ents[k]) }
+      commit({ entries: coll, decks: { ...decksNext, [deckId]: ndm }, collectionChanged: coll !== s.entries, changedDecks: [deckId], label: `Version „${version.name}“ wiederhergestellt` })
+      return missing
+    }
     let ents = d.entries, coll = s.entries
     const missing = []
     for (const [k, e] of Object.entries(d.entries)) {
@@ -423,15 +515,61 @@ function Main({ user }) {
     notify(`Deck „${name}“ mit ${Object.values(de).reduce((t, e) => t + e.qty, 0)} Karten angelegt`)
   }, [commit])
 
-  // Deck auflösen: alle Karten zurück in die Sammlung
-  const deleteDeck = useCallback((id) => {
+  // Deck auflösen: alle Karten zurück in die Sammlung.
+  // Konsole: modules = 'delete' (Module mitlöschen) oder 'detach' (Module werden normale Decks).
+  // Modul: nur Exemplare, die kein Geschwister-Modul mehr braucht, werden wieder frei.
+  const deleteDeck = useCallback((id, { modules = 'detach', stay = false } = {}) => {
     const s = S.current
-    let ne = s.entries
-    for (const e of Object.values(s.decks[id].entries)) ne = bump(ne, e.id, e.finish, e.qty)
-    const nd = { ...s.decks }
+    const d = s.decks[id]
+    if (!d) return
+    if (!isCore(d) && !isModule(d)) {
+      let ne = s.entries
+      for (const e of Object.values(d.entries)) ne = bump(ne, e.id, e.finish, e.qty)
+      const nd = { ...s.decks }
+      delete nd[id]
+      commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [id], label: `„${d.name}“ aufgelöst` })
+      setView({ kind: 'collection' })
+      return
+    }
+    let nd = { ...s.decks }
     delete nd[id]
-    commit({ entries: ne, decks: nd, collectionChanged: true, changedDecks: [id], label: `„${s.decks[id].name}“ aufgelöst` })
-    setView({ kind: 'collection' })
+    const changed = [id]
+    const keys = new Set(Object.keys(d.entries))
+    let dropped = 0
+    if (isCore(d)) {
+      const mods = modulesOf(s.decks, id)
+      for (const m of mods) {
+        Object.keys(m.entries).forEach((k) => keys.add(k))
+        changed.push(m.id)
+        if (modules === 'delete') delete nd[m.id]
+        else nd[m.id] = { ...m, kind: 'deck', coreId: null }
+      }
+      // Als normale Decks halten die Module ihre Karten einzeln. Fehlen dafür freie Exemplare,
+      // werden die überzähligen Kopien aus den hinteren Modulen genommen.
+      if (modules !== 'delete') {
+        for (let guard = 0; guard < 10000; guard++) {
+          const { short } = settle(s.entries, s.decks, nd, [...keys])
+          if (!short.length) break
+          for (const k of short) {
+            const m = [...mods].reverse().find((x) => nd[x.id].entries[k])
+            if (!m) continue
+            const cur = nd[m.id]
+            const e = cur.entries[k]
+            const ents = bump(cur.entries, e.id, e.finish, -1)
+            const clean = (l) => (ents[k] || !l ? l : l.filter((y) => y !== k))
+            nd = { ...nd, [m.id]: { ...cur, entries: ents, side: clean(cur.side || []) } }
+            dropped++
+          }
+        }
+      }
+    } else if (isCore(s.decks[d.coreId]) && s.decks[d.coreId].activeModule === id) {
+      nd[d.coreId] = { ...s.decks[d.coreId], activeModule: null }
+      changed.push(d.coreId)
+    }
+    const { entries: ne } = settle(s.entries, s.decks, nd, [...keys])
+    commit({ entries: ne, decks: nd, collectionChanged: ne !== s.entries, changedDecks: changed, label: `„${d.name}“ aufgelöst` })
+    if (dropped) notify(`${dropped} doppelt belegte ${dropped === 1 ? 'Karte' : 'Karten'} aus den Modulen entfernt (nicht genug Exemplare für eigenständige Decks)`)
+    if (!stay) setView(isModule(d) && s.decks[d.coreId] ? { kind: 'deck', id: d.coreId } : { kind: 'collection' })
   }, [commit])
 
   const importEntries = useCallback(async (parsed, mode, subtractDecks, separate = []) => {
@@ -457,12 +595,11 @@ function Main({ user }) {
       next = { ...incoming }
       // Karten, die in Decks liegen, stehen in ManaBox noch in der Sammlung → abziehen
       if (subtractDecks) {
-        for (const d of Object.values(nd)) {
-          if (changedDecks.includes(d.id)) continue
-          for (const e of Object.values(d.entries)) {
-            const k = entryKey(e.id, e.finish)
-            if (next[k]) next = bump(next, e.id, e.finish, -Math.min(e.qty, next[k].qty))
-          }
+        // physisch gehaltene Exemplare (Geschwister-Module einer Konsole teilen sich Exemplare → MAX statt Summe)
+        const kept = Object.fromEntries(Object.entries(nd).filter(([id]) => !changedDecks.includes(id)))
+        for (const e of Object.values(heldEntries(kept))) {
+          const k = entryKey(e.id, e.finish)
+          if (next[k]) next = bump(next, e.id, e.finish, -Math.min(e.qty, next[k].qty))
         }
       }
     } else {
@@ -504,6 +641,7 @@ function Main({ user }) {
       const cmds = new Set(base.commanders)
       const side = new Set(base.side || [])
       let added = 0, moved = 0
+      const created = {}
       for (const l of ok) {
         let need = l.qty
         if (fromCollection) {
@@ -518,13 +656,22 @@ function Main({ user }) {
           }
         }
         if (need) {
+          const nk = entryKey(l.card.id, l.finish)
+          created[nk] = (created[nk] || 0) + need
           ents = bump(ents, l.card.id, l.finish, need)
           if (l.commander) cmds.add(entryKey(l.card.id, l.finish))
           if (l.side) side.add(entryKey(l.card.id, l.finish))
         }
         added += l.qty
       }
-      commit({ entries: ne, decks: { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds], side: [...side] } }, collectionChanged: moved > 0, changedDecks: [id], label: `Deck-Import „${base.name}“` })
+      let decksNext = { ...s.decks, [id]: { ...base, entries: ents, commanders: [...cmds], side: [...side] } }
+      if (isModule(base)) {
+        // Modul: Commander gehören in den Core; Exemplare, die ein Geschwister-Modul schon hält, bleiben frei
+        decksNext[id] = { ...decksNext[id], commanders: [] }
+        const r = settle(s.entries, s.decks, decksNext, Object.keys(ents), created)
+        if (!r.short.length) ne = r.entries
+      }
+      commit({ entries: ne, decks: decksNext, collectionChanged: ne !== s.entries, changedDecks: [id], label: `Deck-Import „${base.name}“` })
       await flush()
       return { deckId: id, name: base.name, added, moved, missing }
     } finally {
@@ -596,7 +743,7 @@ function Main({ user }) {
   const autoBusy = useRef(new Set())
   useEffect(() => {
     if (!profile?.name || !friendsCfg || !entries) return
-    const list = Object.values(decks).filter((d) => d.kind !== 'binder')
+    const list = Object.values(decks).filter((d) => d.kind !== 'binder' && !isModule(d))
     ;(async () => {
       for (const d of list) {
         if (autoBusy.current.has(d.id)) continue
@@ -616,7 +763,7 @@ function Main({ user }) {
     wishlist: fc.wishlist ? shareMeta.wishlist || null : null,
     collection: fc.collection ? shareMeta.collection || null : null,
     binders: fc.binders ? Object.values(decks).filter((d) => d.kind === 'binder' && d.shareId).map((b) => ({ id: b.shareId, name: b.name })) : [],
-    decks: decksForFriends ? Object.values(decks).filter((d) => d.kind !== 'binder' && d.shareId).sort((a, b) => a.order - b.order).map((d) => ({
+    decks: decksForFriends ? Object.values(decks).filter((d) => d.kind !== 'binder' && !isModule(d) && d.shareId).sort((a, b) => a.order - b.order).map((d) => ({
       id: d.shareId, name: d.name,
       cmd: (d.commanders || []).map((k) => cards[k.split('|')[0]]?.name).filter(Boolean).join(' + '),
     })) : [],
@@ -675,7 +822,13 @@ function Main({ user }) {
         const ents = bump(d.entries, x.id, x.finish, -q)
         const k = entryKey(x.id, x.finish)
         const clean = (l) => (ents[k] || !l ? l : l.filter((y) => y !== k))
+        const before = { ...nd }
         nd[x.from] = { ...d, entries: ents, commanders: clean(d.commanders), pool: clean(d.pool), side: clean(d.side || []) }
+        if (isModule(d)) {
+          // Hält ein Geschwister-Modul die Karte weiter, wird stattdessen ein freies Exemplar ausgetragen (falls vorhanden)
+          const r = settle(ne, before, nd, [k], { [k]: -q }, true)
+          ne = (r.short.length ? settle(ne, before, nd, [k]) : r).entries
+        }
         changed.add(x.from); x.qty = q
       }
       const c = cardsRef.current[x.id]
@@ -699,7 +852,8 @@ function Main({ user }) {
   const buildShare = useCallback((kind, deckId) => {
     const s = S.current, cs = cardsRef.current
     if (kind === 'deck' || kind === 'binder') {
-      const d = s.decks[deckId]
+      // Konsole: geteilt wird die kombinierte Liste (Core + eingelegtes Modul)
+      const d = combinedDeck(s.decks[deckId], s.decks)
       if (!d) return null
       const cmd = new Set(d.commanders || []), side = new Set(d.side || [])
       const zone = (e) => { const k = entryKey(e.id, e.finish); return cmd.has(k) ? 'cmd' : side.has(k) ? 'side' : 'main' }
@@ -709,7 +863,7 @@ function Main({ user }) {
       const m = {}
       const add = (e) => { const k = entryKey(e.id, e.finish); m[k] = { ...e, qty: (m[k]?.qty || 0) + e.qty } }
       Object.values(s.entries).forEach(add)
-      Object.values(s.decks).forEach((d) => Object.values(d.entries).forEach(add))
+      Object.values(heldEntries(s.decks)).forEach(add)
       return { kind, name: 'Sammlung', rows: shareRows(Object.values(m), cs) }
     }
     if (kind === 'wishlist') return { kind, name: 'Wunschliste', rows: shareRows(wishRef.current.map((w) => ({ id: w.id, finish: w.finish || 'normal', qty: 1 })), cs) }
@@ -752,7 +906,13 @@ function Main({ user }) {
   useEffect(() => {
     const before = prevDecks.current; prevDecks.current = decks
     if (!before || before === decks) return
-    for (const d of Object.values(decks)) if (d.shareId && before[d.id] !== d) scheduleShare(d.kind === 'binder' ? 'binder' : 'deck', d.id)
+    for (const d of Object.values(decks)) {
+      if (before[d.id] === d) continue
+      if (d.shareId) scheduleShare(d.kind === 'binder' ? 'binder' : 'deck', d.id)
+      // Modul geändert → geteilte Konsole aktualisieren
+      const core = isModule(d) ? decks[d.coreId] : null
+      if (core?.shareId && core.activeModule === d.id) scheduleShare('deck', core.id)
+    }
     if (shareMeta.collection) scheduleShare('collection', null, 20000)
   }, [decks]) // eslint-disable-line react-hooks/exhaustive-deps
   const prevEntries = useRef(entries)
@@ -769,20 +929,16 @@ function Main({ user }) {
   }, [entries, decks, cards])
 
   // Reservierungen: welche Exemplare stecken in welchen Decks/Ordnern
-  const reserved = useMemo(() => {
-    const m = {}
-    for (const d of Object.values(decks)) {
-      for (const [k, e] of Object.entries(d.entries)) (m[k] ||= []).push({ deckId: d.id, name: d.name, qty: e.qty })
-    }
-    return m
-  }, [decks])
+  // Geschwister-Module einer Konsole reservieren eine Karte nur MAX-mal (Core kommt obendrauf)
+  const reserved = useMemo(() => reservedMap(decks), [decks])
+  const held = useMemo(() => Object.values(heldEntries(decks)), [decks])
 
   // Sidebar „Sammlung“: alle Karten, die du besitzt (frei + in Decks)
-  const freeCount = useMemo(() => [...Object.values(entries || {}), ...Object.values(decks).flatMap((d) => Object.values(d.entries))].reduce((s, e) => s + e.qty, 0), [entries, decks])
+  const freeCount = useMemo(() => [...Object.values(entries || {}), ...held].reduce((s, e) => s + e.qty, 0), [entries, held])
   // Anzahl freier Karten je Kategorie und je Untertyp (für die Sidebar)
   const { catCounts, subCounts } = useMemo(() => {
     const catCounts = {}, subCounts = {}
-    const all = [...Object.values(entries || {}), ...Object.values(decks).flatMap((d) => Object.values(d.entries))]
+    const all = [...Object.values(entries || {}), ...held]
     for (const e of all) {
       const c = cards[e.id]
       if (!c) continue
@@ -792,7 +948,7 @@ function Main({ user }) {
       for (const st of subtypesOf(c.type)) m[st] = (m[st] || 0) + e.qty
     }
     return { catCounts, subCounts }
-  }, [entries, decks, cards])
+  }, [entries, held, cards])
   const deckStats = useMemo(() => {
     const out = {}
     for (const d of Object.values(decks)) {
@@ -805,8 +961,17 @@ function Main({ user }) {
       }
       out[d.id] = { count, value }
     }
+    // Konsole: Gesamtzahl mit eingelegtem Modul
+    for (const d of Object.values(decks)) {
+      if (!isCore(d)) continue
+      const m = activeModuleOf(decks, d)
+      out[d.id].core = out[d.id].count
+      out[d.id].mod = m ? out[m.id].count : 0
+      out[d.id].total = out[d.id].core + out[d.id].mod
+    }
     return out
   }, [decks, cards])
+  const physDecks = useMemo(() => physicalDecks(decks), [decks])
 
   const saveLabel = { saved: 'Gespeichert', pending: 'Änderungen …', saving: 'Speichere …', error: 'Speichern fehlgeschlagen' }[saveState]
   const deck = view.kind === 'deck' ? decks[view.id] : null
@@ -910,7 +1075,7 @@ function Main({ user }) {
               key={deck.id}
               deck={deck} decks={decks} cards={cards} entries={entries} onOpen={setOpen} onMove={dropCard} onMoveMany={moveMany} deNames={deNames} reserved={reserved}
               onRename={(name) => updateDeck(deck.id, { name })}
-              onDelete={() => deleteDeck(deck.id)}
+              onDelete={(opts) => deleteDeck(deck.id, opts)}
               onToggleCommander={(key) => toggleCommander(deck.id, key)}
               onUpdate={(patch) => updateDeck(deck.id, patch)}
               reconcilePreview={(any) => reconcilePreview(deck.id, any)}
@@ -922,7 +1087,16 @@ function Main({ user }) {
               uid={user?.uid}
               myName={profile?.name || user?.displayName || ''}
               onAddResult={(id, r) => { const d = S.current.decks[id]; if (d) updateDeck(id, { tests: [...(d.tests || []), { at: Date.now(), online: true, result: r.result, opponents: r.opponents.map((o) => `${o.name} (${o.deck})`), players: r.players, turns: null, lives: [], note: '' }].slice(-100) }) }}
-              onShare={() => setShareOpen({ kind: 'deck', deckId: deck.id, title: deck.name })}
+              onShare={() => setShareOpen({ kind: 'deck', deckId: isModule(deck) && decks[deck.coreId] ? deck.coreId : deck.id, title: isModule(deck) && decks[deck.coreId] ? decks[deck.coreId].name : deck.name })}
+              onUpdateAny={updateDeck}
+              onAddNewAny={(id, card, finish, delta = 1) => addScanned(card, finish, id, delta)}
+              onChangePrintingAny={changePrinting}
+              onOpenDeck={(id) => setView({ kind: 'deck', id })}
+              onCreateModule={(name) => createModule(isModule(deck) ? deck.coreId : deck.id, name)}
+              onDuplicateModule={duplicateModule}
+              onDeleteDeck={deleteDeck}
+              onConvertCore={() => convertToCore(deck.id)}
+              onAttachModule={(coreId, mode) => attachAsModule(deck.id, coreId, mode)}
             />
           ) : view.kind === 'add' ? (
             <AddCards entries={entries} onChange={changeQty} />
@@ -934,7 +1108,7 @@ function Main({ user }) {
           ) : view.kind === 'wish' ? (
             <WishlistView wishlist={wishlist} setWishlist={setWishlist} cards={cards} ownedOracles={ownedOracles} onOpen={setOpen} onShare={() => setShareOpen({ kind: 'wishlist', title: 'Wunschliste' })} />
           ) : view.kind === 'value' ? (
-            <ValueView uid={user.uid} entries={entries} decks={decks} cards={cards} onOpen={setOpen} />
+            <ValueView uid={user.uid} entries={entries} decks={physDecks} cards={cards} onOpen={setOpen} />
           ) : view.kind === 'pull' ? (
             <>{listTabs}<PullView entries={entries} decks={decks} cards={cards} deNames={deNames} onRemove={removeCopies} onOpen={setOpen} /></>
           ) : view.kind === 'friends' ? (

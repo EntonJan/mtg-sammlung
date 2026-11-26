@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { deckLabel, isCore, isModule } from '../konsole'
 
 // Schnellsuche (Strg+K): Seiten, Decks/Ordner und Karten aus Sammlung und Decks direkt anspringen
 const PAGES = [
@@ -19,7 +20,7 @@ export default function CommandPalette({ onClose, decks, cards, entries, deNames
     const m = new Map()
     const add = (e, where) => { const c = cards[e.id]; if (!c) return; const k = c.name; const v = m.get(k) || { card: c, where: new Set() }; v.where.add(where); m.set(k, v) }
     Object.values(entries || {}).forEach((e) => add(e, 'Sammlung'))
-    Object.values(decks || {}).forEach((d) => Object.values(d.entries || {}).forEach((e) => add(e, d.name)))
+    Object.values(decks || {}).forEach((d) => Object.values(d.entries || {}).forEach((e) => add(e, deckLabel(d, decks))))
     return [...m.values()].map((v) => ({ ...v, de: deNames?.[v.card.oracleId] || '', key: norm(v.card.name + ' ' + (deNames?.[v.card.oracleId] || '')) }))
   }, [cards, entries, decks, deNames])
 
@@ -28,8 +29,11 @@ export default function CommandPalette({ onClose, decks, cards, entries, deNames
     const out = []
     const pages = [...PAGES, ['settings', 'Einstellungen']].filter(([, l]) => !t || norm(l).includes(t))
     out.push(...pages.slice(0, t ? 5 : 10).map(([k, l]) => ({ type: 'Seite', label: l, run: () => (k === 'settings' ? onSettings() : onGo({ kind: k })) })))
-    const ds = Object.values(decks || {}).filter((d) => !t || norm(d.name).includes(t)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    out.push(...ds.slice(0, t ? 8 : 6).map((d) => ({ type: d.kind === 'binder' ? 'Ordner' : 'Deck', label: d.name, run: () => onGo({ kind: 'deck', id: d.id }) })))
+    const ds = Object.values(decks || {}).filter((d) => !t || norm(deckLabel(d, decks)).includes(t)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    out.push(...ds.slice(0, t ? 8 : 6).map((d) => ({
+      type: d.kind === 'binder' ? 'Ordner' : isCore(d) ? 'Konsole' : isModule(d) ? 'Modul' : 'Deck',
+      label: `${isCore(d) ? '🎮 ' : isModule(d) ? '💾 ' : ''}${deckLabel(d, decks)}`, run: () => onGo({ kind: 'deck', id: d.id }),
+    })))
     if (t.length >= 2) {
       const hits = allCards.filter((c) => c.key.includes(t)).sort((a, b) => (norm(a.card.name).startsWith(t) ? 0 : 1) - (norm(b.card.name).startsWith(t) ? 0 : 1) || a.card.name.localeCompare(b.card.name))
       out.push(...hits.slice(0, 25).map((c) => ({ type: 'Karte', label: c.card.name, sub: [c.de, [...c.where].slice(0, 3).join(', ')].filter(Boolean).join(' · '), img: c.card.thumb, run: () => onOpenCard(c.card) })))

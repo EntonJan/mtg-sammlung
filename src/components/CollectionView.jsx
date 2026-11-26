@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { COLORS, COLOR_NAMES, TYPES, RARITIES, FINISH_LABEL, GROUPS, groupOf, subtypesOf, unitPrice, euro } from '../util'
 import Mana from './Mana'
 import { dragProps } from '../drag'
+import { creatureTypes, targetGroups } from '../konsole'
 
 const DEFAULT_FILTER = {
   name: '', text: '', type: '', rarity: '', set: '',
@@ -15,7 +16,9 @@ function loadPref(key, fallback) {
 }
 function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* egal */ } }
 
-export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany, deNames = {}, reserved = {}, onShare }) {
+// bonus: Exemplare, die das Ziel-Modul ohne freies Exemplar nehmen kann (Geschwister-Modul hält sie schon) – Schlüssel → Anzahl
+// ctype: nur Karten mit diesem Kreaturentyp
+export default function CollectionView({ entries, cards, onOpen, cat, sub, identity, onQuickAdd, decks, onMoveMany, deNames = {}, reserved = {}, onShare, bonus, ctype }) {
   const [selected, setSelected] = useState(() => new Set())
   const lastIdx = useRef(-1)
   const [f, setF] = useState(() => loadPref('filter', DEFAULT_FILTER))
@@ -43,10 +46,11 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
       const res = reserved[k] || []
       const used = res.reduce((t, x) => t + x.qty, 0)
       if (free + used <= 0) continue
-      list.push({ id, finish, qty: free + used, free, used, usedIn: res, card: c, price: unitPrice(c, finish) })
+      const extra = Math.min(bonus?.[k] || 0, used)
+      list.push({ id, finish, qty: free + used, free, used, usedIn: res, card: c, price: unitPrice(c, finish), avail: free + extra, shared: extra })
     }
     return list
-  }, [entries, cards, reserved])
+  }, [entries, cards, reserved, bonus])
 
   const sets = useMemo(() => {
     const m = new Map()
@@ -68,6 +72,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
       if (df.onlyFree && !r.free) return false
       if (identity && !c.ci.every((x) => identity.includes(x))) return false
       if (sub && !subtypesOf(c.type).includes(sub)) return false
+      if (ctype && !creatureTypes(c.type).includes(ctype)) return false
       if (name && !c.name.toLowerCase().includes(name) && !(deNames[c.oracleId] || '').toLowerCase().includes(name)) return false
       if (text && !(c.text || '').toLowerCase().includes(text) && !c.type.toLowerCase().includes(text)) return false
       if (df.type && !c.type.includes(df.type)) return false
@@ -100,16 +105,18 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
         const g = m.get(k)
         if (g) {
           g.free += r.free
+          g.avail += r.avail
+          g.shared += r.shared
           g.used += r.used
           g.usedIn = [...g.usedIn, ...r.usedIn]
           // Zum Ziehen eine Version nehmen, von der noch etwas frei ist
-          if (!g.repFree && r.free) { g.id = r.id; g.finish = r.finish; g.repFree = true }
+          if (!g.repFree && r.avail) { g.id = r.id; g.finish = r.finish; g.repFree = true }
           g.qty += r.qty
           g.value += (r.price ?? 0) * r.qty
           g.printings += 1
           if ((r.price ?? 0) > (g.price ?? 0)) { g.price = r.price }
         } else {
-          m.set(k, { ...r, key: k, value: (r.price ?? 0) * r.qty, printings: 1, repFree: r.free > 0 })
+          m.set(k, { ...r, key: k, value: (r.price ?? 0) * r.qty, printings: 1, repFree: r.avail > 0 })
         }
       }
       out = [...m.values()]
@@ -128,7 +135,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
     }[df.sort]
     out.sort((a, b) => dir * cmp(a, b))
     return out
-  }, [rows, df, cat, sub, identity, deNames])
+  }, [rows, df, cat, sub, identity, deNames, ctype])
 
   const totals = useMemo(() => {
     let qty = 0, value = 0, used = 0
@@ -152,8 +159,8 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
       onOpen(r.card)
     }
   }
-  const selectedRows = filtered.filter((r) => selected.has(r.key) && r.free > 0)
-  const payloadFor = (r) => (!r.free ? null : selected.has(r.key) && selectedRows.length > 1
+  const selectedRows = filtered.filter((r) => selected.has(r.key) && r.avail > 0)
+  const payloadFor = (r) => (!r.avail ? null : selected.has(r.key) && selectedRows.length > 1
     ? { multi: selectedRows.map((x) => ({ id: x.id, finish: x.finish, qty: 1, from: 'collection' })) }
     : { id: r.id, finish: r.finish, from: 'collection' })
   const moveSelected = (to) => {
@@ -161,7 +168,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
     setSelected(new Set())
   }
   const moveOne = (r, to) => onMoveMany([{ id: r.id, finish: r.finish, qty: 1, from: 'collection' }], to)
-  const targets = Object.values(decks || {}).sort((a, b) => (a.kind === 'binder') - (b.kind === 'binder') || a.name.localeCompare(b.name))
+  const targets = targetGroups(decks, { sort: 'name' })
 
   const activeFilters = ['text', 'type', 'rarity', 'set', 'cmcMin', 'cmcMax', 'minPrice', 'finish']
     .filter((k) => f[k] !== '').length + (f.colors.length ? 1 : 0)
@@ -285,8 +292,7 @@ export default function CollectionView({ entries, cards, onOpen, cat, sub, ident
           {onMoveMany && targets.length > 0 && (
             <select value="" onChange={(e) => e.target.value && moveSelected(e.target.value)}>
               <option value="">→ je 1 Exemplar verschieben nach …</option>
-              {targets.some((d) => d.kind !== 'binder') && <optgroup label="Decks">{targets.filter((d) => d.kind !== 'binder').map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>}
-              {targets.some((d) => d.kind === 'binder') && <optgroup label="Ordner">{targets.filter((d) => d.kind === 'binder').map((d) => <option key={d.id} value={d.id}>📁 {d.name}</option>)}</optgroup>}
+              {targets.map((g) => <optgroup key={g.label} label={g.label}>{g.items.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}</optgroup>)}
             </select>
           )}
           <span className="muted small">oder die Auswahl links auf ein Deck oder einen Ordner ziehen</span>
@@ -339,9 +345,9 @@ function VirtualList({ items, onRowClick, payloadFor, selected, onQuickAdd, deNa
               <Mana cost={c.cost} />
               <span className={`rar rar-${c.rarity}`} title={c.rarity}>●</span>
               <span className="price">{euro(r.price)}</span>
-              {moveTo && r.free > 0 && <MoveMini r={r} moveTo={moveTo} targets={targets} />}
+              {moveTo && r.avail > 0 && <MoveMini r={r} moveTo={moveTo} targets={targets} />}
               {onQuickAdd && (
-                <button className="mini add-mini" title="1 Exemplar ins Deck" disabled={!r.free}
+                <button className="mini add-mini" title={r.free ? '1 Exemplar ins Deck' : r.avail ? '1 Exemplar ins Modul – teilt sich das Exemplar mit einem anderen Modul derselben Konsole' : '1 Exemplar ins Deck'} disabled={!r.avail}
                   onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
               )}
             </div>
@@ -391,9 +397,9 @@ function VirtualGrid({ items, onRowClick, payloadFor, selected, onQuickAdd, move
                 <span className="tile-badge">{r.qty}×</span>
                 {r.finish === 'foil' && r.printings === 1 && <span className="tile-foil">Foil</span>}
                 <span className="tile-price">{euro(r.price)}{r.used > 0 && <span className={`tile-avail ${r.free ? '' : 'none'}`}> · {r.free}/{r.qty} frei</span>}</span>
-                {moveTo && r.free > 0 && <MoveMini r={r} moveTo={moveTo} targets={targets} />}
+                {moveTo && r.avail > 0 && <MoveMini r={r} moveTo={moveTo} targets={targets} />}
                 {onQuickAdd && (
-                  <button className="mini tile-add" title="1 Exemplar ins Deck" disabled={!r.free}
+                  <button className="mini tile-add" title="1 Exemplar ins Deck" disabled={!r.avail}
                     onClick={(e) => { e.stopPropagation(); onQuickAdd(r) }}>+</button>
                 )}
               </div>
@@ -415,15 +421,12 @@ function availText(r) {
 
 // Ein Exemplar direkt in ein Deck oder einen Ordner verschieben (natives Auswahlmenü hinter einem kleinen Knopf)
 function MoveMini({ r, moveTo, targets }) {
-  const ds = targets.filter((d) => d.kind !== 'binder')
-  const bs = targets.filter((d) => d.kind === 'binder')
   return (
     <label className="mini move-mini" title="1 Exemplar in ein Deck oder einen Ordner verschieben" onClick={(e) => e.stopPropagation()}>
       ⇢
       <select value="" onChange={(e) => { const v = e.target.value; if (v) moveTo(r, v) }} onClick={(e) => e.stopPropagation()}>
         <option value="">1 Exemplar verschieben nach …</option>
-        {ds.length > 0 && <optgroup label="Decks">{ds.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>}
-        {bs.length > 0 && <optgroup label="Ordner">{bs.map((d) => <option key={d.id} value={d.id}>📁 {d.name}</option>)}</optgroup>}
+        {targets.map((g) => <optgroup key={g.label} label={g.label}>{g.items.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}</optgroup>)}
       </select>
     </label>
   )
@@ -432,6 +435,7 @@ function MoveMini({ r, moveTo, targets }) {
 function Avail({ r }) {
   if (!r.used) return null
   const where = [...new Set(r.usedIn.map((x) => x.name))]
+  if (!r.free && r.shared) return <span className="avail part" title={`${availText(r)} – das Ziel-Modul kann sich das Exemplar mit dem anderen Modul teilen`}>teilbar · in {where.length > 1 ? `${where.length} Decks/Ordnern` : where[0]}</span>
   return (
     <span className={`avail ${r.free ? 'part' : 'none'}`} title={availText(r)}>
       {r.free ? `noch ${r.free} von ${r.qty} verfügbar` : `in ${where.length > 1 ? `${where.length} Decks/Ordnern` : where[0]}`}

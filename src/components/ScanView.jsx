@@ -1,3 +1,4 @@
+import { deckIcon, deckLabel } from '../konsole'
 import { CameraIcon } from './Icons'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { lookup, preloadOcr, printingsOf, recognize } from '../scan'
@@ -135,7 +136,7 @@ export default function ScanView({ decks, onAdd, onUndoAdd }) {
         </div>
         <select value={target} onChange={(e) => setTarget(e.target.value)} title="Wohin sollen gescannte Karten?">
           <option value="collection">→ Sammlung</option>
-          {targets.map((d) => <option key={d.id} value={d.id}>→ {d.kind === 'binder' ? '📁 ' : ''}{d.name}</option>)}
+          {targets.map((d) => <option key={d.id} value={d.id}>→ {deckIcon(d)}{deckLabel(d, decks)}</option>)}
         </select>
         <label className="check-line small"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Automatisch hinzufügen</label>
       </div>

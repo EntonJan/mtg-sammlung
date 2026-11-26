@@ -1,3 +1,4 @@
+import { deckIcon, deckLabel } from '../konsole'
 import { useMemo, useState } from 'react'
 import { parseDecklist } from '../decklist'
 import { FINISH_LABEL, euro, unitPrice } from '../util'
@@ -22,7 +23,7 @@ export default function PullView({ entries, decks, cards, deNames = {}, onRemove
       for (const k of new Set([norm(c.name), norm(c.name.split(' // ')[0])])) (m[k] ||= []).push(item)
     }
     Object.values(entries).forEach((e) => add(e, 'collection', 'Sammlung'))
-    for (const d of Object.values(decks)) Object.values(d.entries).forEach((e) => add(e, d.id, `${d.kind === 'binder' ? '📁 ' : ''}${d.name}`, d.kind))
+    for (const d of Object.values(decks)) Object.values(d.entries).forEach((e) => add(e, d.id, `${deckIcon(d)}${deckLabel(d, decks)}`, d.kind))
     return m
   }, [entries, decks, cards])
 

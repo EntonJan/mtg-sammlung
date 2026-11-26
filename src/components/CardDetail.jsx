@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { FINISH_LABEL, cardmarketUrl, unitPrice, euro } from '../util'
 import Mana from './Mana'
+import { deckIcon, deckLabel, heldEntries, targetGroups } from '../konsole'
 
 // Detailansicht: großes Bild, Regeltext, freie Exemplare (Sammlung) und Exemplare in Decks.
 // Verschieben per Auswahlfeld – funktioniert auch am Handy, wo Drag & Drop nicht geht.
@@ -19,20 +20,14 @@ export default function CardDetail({ card, entries, decks, cards, onChange, onMo
     .map((d) => ({ deck: d, items: Object.values(d.entries).filter(same).sort(byVersion) }))
     .filter((x) => x.items.length)
   const deckList = Object.values(decks).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
-  // Ziel-Auswahl gruppiert: Decks und Ordner getrennt
-  const targetOptions = (exclude, prefix = '') => {
-    const ds = deckList.filter((d) => d.id !== exclude && d.kind !== 'binder')
-    const bs = deckList.filter((d) => d.id !== exclude && d.kind === 'binder')
-    return (
-      <>
-        {ds.length > 0 && <optgroup label="Decks">{ds.map((d) => <option key={d.id} value={d.id}>{prefix}{d.name}</option>)}</optgroup>}
-        {bs.length > 0 && <optgroup label="Ordner">{bs.map((d) => <option key={d.id} value={d.id}>{prefix}📁 {d.name}</option>)}</optgroup>}
-      </>
-    )
-  }
+  // Ziel-Auswahl gruppiert: Decks, Konsolen (🎮 Core, 💾 Core › Modul) und Ordner getrennt
+  const targetOptions = (exclude, prefix = '') => targetGroups(decks, { exclude }).map((g) => (
+    <optgroup key={g.label} label={g.label}>{g.items.map((d) => <option key={d.id} value={d.id}>{prefix}{d.label}</option>)}</optgroup>
+  ))
 
   const freeTotal = free.reduce((s, e) => s + e.qty, 0)
-  const deckTotal = inDecks.reduce((s, x) => s + x.items.reduce((t, e) => t + e.qty, 0), 0)
+  // Geschwister-Module einer Konsole teilen sich Exemplare → physisch gehaltene Anzahl
+  const deckTotal = Object.values(heldEntries(decks)).filter(same).reduce((s, e) => s + e.qty, 0)
 
   const version = (e) => {
     const c = cards[e.id]
@@ -93,7 +88,7 @@ export default function CardDetail({ card, entries, decks, cards, onChange, onMo
               <div className="owned">
                 {inDecks.flatMap(({ deck, items }) => items.map((e) => (
                   <div key={`${deck.id}|${e.id}|${e.finish}`} className="owned-row">
-                    <span className="ver"><b>{deck.kind === 'binder' ? '📁 ' : ''}{deck.name}</b> · {e.qty}× {version(e)}</span>
+                    <span className="ver"><b>{deckIcon(deck)}{deckLabel(deck, decks)}</b> · {e.qty}× {version(e)}</span>
                     <select
                       className="move-select" value=""
                       onChange={(ev) => ev.target.value && onMove({ id: e.id, finish: e.finish, from: deck.id }, ev.target.value)}

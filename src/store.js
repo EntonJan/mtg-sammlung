@@ -53,7 +53,9 @@ export async function loadDecks(uid) {
       cats: v.cats || null,         // [{ name, target }] – null = Standardkategorien
       pool: v.pool || null,         // Commander-Pool für Partner-Würfel
       side: v.side || [],           // Sideboard (Einträge-Schlüssel)
-      kind: v.kind || 'deck',       // 'deck' oder 'binder' (Tauschordner)
+      kind: v.kind || 'deck',       // 'deck', 'binder' (Tauschordner), 'core' (Konsole) oder 'module' (Modul einer Konsole)
+      coreId: v.coreId || null,     // Modul: ID seiner Konsole
+      activeModule: v.activeModule || null, // Konsole: eingelegtes Modul (höchstens eins)
       log: v.log || [],             // Änderungsprotokoll [{ t, ch: ['id|finish|delta'] }]
       versions: v.versions || [],   // gemerkte Versionen [{ t, name, items, commanders, side }]
       shareId: v.shareId || null,   // öffentlicher Teilen-Link
@@ -92,6 +94,8 @@ export async function saveAll(uid, { entries, prevChunks, decks, dirtyDecks, sav
       pool: d.pool || null,
       side: d.side || [],
       kind: d.kind || 'deck',
+      coreId: d.kind === 'module' ? d.coreId || null : null,
+      activeModule: d.kind === 'core' ? d.activeModule || null : null,
       log: (d.log || []).slice(-300),
       versions: (d.versions || []).slice(-20),
       shareId: d.shareId || null,

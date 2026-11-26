@@ -1,3 +1,4 @@
+import { deckIcon, deckLabel } from '../konsole'
 import { useMemo, useState } from 'react'
 import { parseDecklist } from '../decklist'
 
@@ -55,7 +56,7 @@ export default function DeckImport({ decks, onImportDeck, fixedDeck }) {
         <select value={target} onChange={(e) => setTarget(e.target.value)}>
           <option value="">Neues Deck anlegen</option>
           {Object.values(decks).sort((a, b) => a.name.localeCompare(b.name)).map((d) => (
-            <option key={d.id} value={d.id}>Zu „{d.name}“ hinzufügen</option>
+            <option key={d.id} value={d.id}>Zu „{deckIcon(d)}{deckLabel(d, decks)}“ hinzufügen</option>
           ))}
         </select>
         {!target && <input placeholder="Deckname (sonst Name des Commanders)" value={name} onChange={(e) => setName(e.target.value)} />}
